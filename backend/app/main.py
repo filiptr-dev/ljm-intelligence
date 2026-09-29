@@ -84,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(router)
 
+    from app.api.call_list import router as call_list_router
     from app.api.capacity import router as capacity_router
     from app.api.crawl import router as crawl_router
     from app.api.email import router as email_router
@@ -95,4 +96,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(email_router)
     app.include_router(settings_router)
     app.include_router(capacity_router)
+    app.include_router(call_list_router)
     return app

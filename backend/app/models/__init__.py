@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -217,7 +218,13 @@ class CallOutcome(Base):
 
     __tablename__ = "call_outcomes"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # BigInteger on Postgres (matches migration 0003); Integer on SQLite so the
+    # rowid-alias autoincrement works in tests. Zero effect on Neon.
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     lead_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False
     )
@@ -235,7 +242,10 @@ class CallOutcome(Base):
             "outcome IN ('booked','callback','not_interested','no_answer')",
             name="call_outcomes_outcome_check",
         ),
-        Index("call_outcomes_lead_id_logged_at", "lead_id", "logged_at"),
+        # Mirror migration 0003 exactly: (lead_id, logged_at DESC) — the hot lookup for
+        # "latest outcome per lead" wants the newest first. Without DESC the ORM would drift
+        # from the migration, and Alembic autogenerate would want to "correct" the DB.
+        Index("call_outcomes_lead_id_logged_at", "lead_id", text("logged_at DESC")),
         Index(
             "call_outcomes_callback_at",
             "callback_at",
