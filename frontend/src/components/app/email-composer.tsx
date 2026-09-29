@@ -14,6 +14,7 @@ import type { EmailPurpose, OutreachDraft, OutreachTone } from "@/lib/ai/types"
 import type { Segment } from "@/lib/analytics"
 import { PURPOSE_LABEL, type Recipient } from "@/lib/campaigns/types"
 import { LEAD_KIND_LABEL } from "@/lib/data/types"
+import { nowMs } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { BriefBox, streamInto, StylePicker, type WriteStyle } from "./ai-writer"
 import { renderTemplate } from "./email-preview"
@@ -144,7 +145,7 @@ export function EmailComposer({
 
   const send = () => {
     if (!to) return
-    const at = sendAt ?? Date.now()
+    const at = sendAt ?? nowMs()
     const id = sendEmail({
       recipient: to, purpose, tone, brief: custom ? brief : undefined, subject, body, at,
       followUpDays: followUp ? Number(followUpDays) : undefined,

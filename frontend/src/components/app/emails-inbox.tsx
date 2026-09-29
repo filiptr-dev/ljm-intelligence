@@ -9,6 +9,7 @@ import type { EmailPurpose } from "@/lib/ai/types"
 import { POSITIVE, PURPOSE_LABEL, TONE_LABEL, type Campaign, type CampaignRecipient, type ReplyCategory } from "@/lib/campaigns/types"
 import { LEAD_KIND_LABEL } from "@/lib/data/types"
 import { num, timeAgo } from "@/lib/format"
+import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { pctText, ReplyChip } from "./campaign-bits"
 import { EmailComposer, type ComposerInit, type ContactOption } from "./email-composer"
@@ -70,7 +71,7 @@ export function EmailsInbox({ history, contacts, campaignReplyRate, speedLift, i
   const [composer, setComposer] = React.useState<{ open: boolean; init: ComposerInit; key: number }>({ open: !!initial.to, init: initial, key: 0 })
   const compose = (init: ComposerInit = {}) => setComposer((c) => ({ open: true, init, key: c.key + 1 }))
 
-  const now = Date.now()
+  const now = useNow()
   const shown = emails.filter((c) => {
     const st = stateOf(c, now)
     return filter === "all" || (filter === "replied" ? st === "Replied" : filter === "scheduled" ? st === "Scheduled" : isWaiting(c, st, now))
