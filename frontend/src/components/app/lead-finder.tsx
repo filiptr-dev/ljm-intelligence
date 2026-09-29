@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import { BadgeCheck, Mail, MapPin, RefreshCw, Search, Send, Sparkles, Zap } from "lucide-react"
 import { useBackendLeads } from "@/lib/backend-leads"
 import { useLatestRun } from "@/lib/use-backend"
-import { LeadAIDraftDialog } from "./lead-ai-draft"
 import { Plate } from "@/components/brand/marks"
 import { Tire } from "@/components/brand/tire"
 import { Button } from "@/components/ui/button"
@@ -57,7 +56,6 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   const [limit, setLimit] = React.useState(60)
   const [open, setOpen] = React.useState<Lead | null>(null)
   const [confirm, setConfirm] = React.useState(false)
-  const [aiFor, setAiFor] = React.useState<Lead | null>(null)
   const liveIds = React.useMemo(() => new Set(liveLeads.map((l) => l.id)), [liveLeads])
   const { real: realLeads, live: backendLive, reload: reloadRealLeads } = useBackendLeads(200)
   const { run: latestRun, running: triggering, trigger: triggerCrawl } = useLatestRun()
@@ -318,17 +316,11 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
               profile={profile}
               contacted={contacted.has(open.id)}
               onSend={() => sendQuick([open], `Quick send · ${open.name}`)}
-              onDraftAI={() => setAiFor(open)}
+              onDraftAI={() => router.push(`/emails/compose?lead=${open.id}`)}
             />
           ) : null}
         </SheetContent>
       </Sheet>
-
-      <LeadAIDraftDialog
-        lead={aiFor}
-        open={!!aiFor}
-        onOpenChange={(v) => !v && setAiFor(null)}
-      />
     </div>
   )
 }
@@ -398,7 +390,7 @@ function LeadDetail({ lead, profile, contacted, onSend, onDraftAI }: { lead: Lea
           <Button variant="outline" className="min-h-11" disabled={contacted} onClick={onSend}>
             <Send /> {contacted ? "Already contacted" : "Quick send"}
           </Button>
-          <Link href={`/outreach?audience=new&ids=${lead.id}&campaign=${lead.kind === "Shipper" ? "shipper_direct" : "new_leads"}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-sm hover:bg-muted">Customise</Link>
+          <Link href={`/emails/compose?lead=${lead.id}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-sm hover:bg-muted">Customise</Link>
         </div>
       </div>
     </>

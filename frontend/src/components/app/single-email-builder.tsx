@@ -18,8 +18,6 @@ import { CalendarClock, Search, Send, Wand2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import type { EmailPurpose, OutreachDraft, OutreachTone } from "@/lib/ai/types"
 import type { Segment } from "@/lib/analytics"
 import { PURPOSE_LABEL, type Recipient } from "@/lib/campaigns/types"
@@ -30,6 +28,7 @@ import { streamInto, type WriteStyle } from "./ai-writer"
 import type { ContactOption } from "./email-composer"
 import { DesignFields, MessageFields, PreviewPanel, Step } from "./email-builder-parts"
 import { renderTemplate } from "./email-preview"
+import { useBackendLeads } from "@/lib/backend-leads"
 import { DEFAULT_DESIGN, toRecipient, useEngine, type EmailDesign } from "./engine"
 import { Segmented } from "./segmented"
 import { RegionTag, SegmentBadge } from "./ui"
@@ -86,13 +85,15 @@ export type SingleEmailBuilderProps = {
 export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, backHref, backLabel }: SingleEmailBuilderProps) {
   const router = useRouter()
   const { liveLeads, sendEmail } = useEngine()
+  const { real: realLeads } = useBackendLeads(200)
 
   const all = React.useMemo<ContactOption[]>(
     () => [
+      ...realLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
       ...liveLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
       ...contacts,
     ],
-    [liveLeads, contacts],
+    [realLeads, liveLeads, contacts],
   )
 
   const [toId, setToId] = React.useState(initialToId)
@@ -112,8 +113,6 @@ export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, back
   const [previewIdx, setPreviewIdx] = React.useState(0)
   const [mobile, setMobile] = React.useState(false)
 
-  const [followUp, setFollowUp] = React.useState(true)
-  const [followUpDays, setFollowUpDays] = React.useState("3")
   const [when, setWhen] = React.useState<"now" | "tomorrow" | "scheduled">("now")
   const [scheduleAt, setScheduleAt] = React.useState("")
 
@@ -171,10 +170,9 @@ export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, back
     sendEmail({
       recipient: to, purpose, tone, brief: custom ? brief : undefined,
       subject, body, at, design,
-      followUpDays: followUp ? Number(followUpDays) : undefined,
     })
     toast.success(when === "now" ? `Email sent to ${to.contactName}` : `Email scheduled for ${formatWhen(at)}`, {
-      description: followUp ? `If ${to.contactName.split(" ")[0]} doesn't reply in ${followUpDays} days, a short follow-up goes out automatically.` : "You'll see when it's opened and what they reply.",
+      description: "You'll see when it's opened and what they reply.",
     })
     router.push(backHref)
   }
@@ -295,31 +293,18 @@ export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, back
           </Step>
 
           <Step n={5} title="Sending">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>When</Label>
-                <Segmented
-                  value={when}
-                  onChange={(v) => {
-                    setWhen(v)
-                    if (v === "scheduled" && !scheduleAt) setScheduleAt(toLocalInput(atNine(1)))
-                  }}
-                  className="flex w-full [&>button]:flex-1"
-                  options={[{ value: "now", label: "Now" }, { value: "tomorrow", label: "Tomorrow 9:00" }, { value: "scheduled", label: "Pick date" }]}
-                />
-                {when === "scheduled" ? <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} /> : null}
-              </div>
-              <div className="space-y-1.5">
-                <Label>If they don&apos;t reply</Label>
-                <label className="flex h-8 items-center gap-2.5 text-sm">
-                  <Switch checked={followUp} onCheckedChange={setFollowUp} /> Follow up after
-                  <Select value={followUpDays} onValueChange={(v) => v && setFollowUpDays(v)} disabled={!followUp}>
-                    <SelectTrigger size="sm" className="w-24"><SelectValue>{followUpDays} days</SelectValue></SelectTrigger>
-                    <SelectContent>{["2", "3", "5", "7"].map((d) => <SelectItem key={d} value={d}>{d} days</SelectItem>)}</SelectContent>
-                  </Select>
-                </label>
-                <p className="text-xs text-muted-foreground">Stops automatically when they reply.</p>
-              </div>
+            <div className="space-y-1.5">
+              <Label>When</Label>
+              <Segmented
+                value={when}
+                onChange={(v) => {
+                  setWhen(v)
+                  if (v === "scheduled" && !scheduleAt) setScheduleAt(toLocalInput(atNine(1)))
+                }}
+                className="flex w-full [&>button]:flex-1"
+                options={[{ value: "now", label: "Now" }, { value: "tomorrow", label: "Tomorrow 9:00" }, { value: "scheduled", label: "Pick date" }]}
+              />
+              {when === "scheduled" ? <Input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} /> : null}
             </div>
           </Step>
         </div>

@@ -6,8 +6,8 @@
  * Two post kinds: empty TRUCK and freight LOAD, both persisted server-side.
  * Below the form, a live list of the posts + a "Suggested recipients" panel that
  * ranks crawled brokers/shippers for whichever post the operator picks. Send is
- * simulated for the demo — the "Draft email" button points at /outreach for now
- * (the shared inline builder is the follow-up).
+ * simulated for the demo — the "Draft email" button opens /emails/compose,
+ * the single-recipient composer (campaign builder is only for many recipients).
  */
 
 import * as React from "react"
@@ -302,7 +302,7 @@ export default function CapacityPage() {
                           {s.email ? <span className="font-mono">{s.email}</span> : <span className="text-warn">no email</span>}
                           {s.phone ? <span className="text-muted-foreground">{s.phone}</span> : null}
                           <Link
-                            href={`/outreach?audience=new&ids=${encodeURIComponent(s.lead_id)}&campaign=new_leads`}
+                            href={`/emails/compose?lead=${encodeURIComponent(s.lead_id)}`}
                             className="ml-auto rounded-sm border border-border px-2 py-0.5 text-[0.7rem] font-semibold hover:bg-muted"
                           >
                             Draft email

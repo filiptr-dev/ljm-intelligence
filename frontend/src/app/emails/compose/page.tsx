@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation"
 import type { ContactOption } from "@/components/app/email-composer"
 import { SingleEmailBuilder } from "@/components/app/single-email-builder"
 import { PageHeader } from "@/components/app/ui"
@@ -17,6 +16,7 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
 
   const s = await getStore()
   const brokerId = str("broker")
+  const leadId = str("lead")
   const purpose = str("purpose") as EmailPurpose | undefined
 
   // Same shape /emails builds — broker + lead contacts as ContactOption[]
@@ -52,11 +52,12 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
     })),
   ]
 
-  // If someone deep-links a broker id, be strict — 404 rather than silently ignore.
-  if (brokerId && !contacts.some((c) => c.id === brokerId)) notFound()
-
-  const to = brokerId ? contacts.find((c) => c.id === brokerId) : undefined
-  const backHref = to ? `/brokers/${to.id}` : "/messages"
+  // Accept either ?broker=<id> or ?lead=<id>. If the id isn't in the store
+  // (e.g. a live crawled lead), the client-side SingleEmailBuilder resolves
+  // it against `liveLeads` — and falls back to the picker if it can't.
+  const initialToId = brokerId ?? leadId
+  const to = initialToId ? contacts.find((c) => c.id === initialToId) : undefined
+  const backHref = to && to.kind === "broker" ? `/brokers/${to.id}` : "/messages"
   const backLabel = to ? `Back to ${to.name}` : "Back to Emails"
 
   return (
@@ -72,7 +73,7 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
       />
       <SingleEmailBuilder
         contacts={contacts}
-        initialToId={brokerId}
+        initialToId={initialToId}
         initialPurpose={purpose}
         backHref={backHref}
         backLabel={backLabel}

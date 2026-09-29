@@ -41,8 +41,7 @@ export default async function BrokerPage({ params }: PageProps<"/brokers/[id]">)
     rejected: threads.filter((t) => t.start.startsWith(m) && t.outcome === "rejected").length,
   }))
   const emails = s.emails.filter((e) => e.brokerId === id).reverse()
-  const campaign = summary.nextAction.campaign === "none" ? "dedicated_lane" : summary.nextAction.campaign
-  const outreachHref = `/outreach?audience=existing&ids=${id}&campaign=${campaign}`
+  const outreachHref = `/emails/compose?broker=${id}`
 
   return (
     <>
