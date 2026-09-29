@@ -4,7 +4,10 @@ import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { BadgeCheck, Mail, MapPin, Search, Send, Sparkles, Zap } from "lucide-react"
+import { BadgeCheck, Mail, MapPin, RefreshCw, Search, Send, Sparkles, Zap } from "lucide-react"
+import { useBackendLeads } from "@/lib/backend-leads"
+import { useLatestRun } from "@/lib/use-backend"
+import { LeadAIDraftDialog } from "./lead-ai-draft"
 import { Plate } from "@/components/brand/marks"
 import { Tire } from "@/components/brand/tire"
 import { Button } from "@/components/ui/button"
@@ -54,9 +57,15 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   const [limit, setLimit] = React.useState(60)
   const [open, setOpen] = React.useState<Lead | null>(null)
   const [confirm, setConfirm] = React.useState(false)
+  const [aiFor, setAiFor] = React.useState<Lead | null>(null)
   const liveIds = React.useMemo(() => new Set(liveLeads.map((l) => l.id)), [liveLeads])
+  const { real: realLeads, live: backendLive, reload: reloadRealLeads } = useBackendLeads(200)
+  const { run: latestRun, running: triggering, trigger: triggerCrawl } = useLatestRun()
 
-  const all = React.useMemo(() => [...liveLeads, ...pool], [liveLeads, pool])
+  const all = React.useMemo(
+    () => [...realLeads, ...liveLeads, ...pool],
+    [realLeads, liveLeads, pool],
+  )
   const filtered = React.useMemo(
     () =>
       all.filter(
@@ -111,6 +120,17 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-5">
+        <BackendStatusBar
+          live={backendLive}
+          realCount={realLeads.length}
+          latest={latestRun}
+          triggering={triggering}
+          onCrawl={async () => {
+            await triggerCrawl(20)
+            // Refresh the real-leads panel after a short wait so the freshly-persisted rows show up.
+            setTimeout(reloadRealLeads, 4000)
+          }}
+        />
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-4 2xl:grid-cols-7">
           {(["US", "EU"] as Region[]).flatMap((r) => SOURCE_LIST[r].map((src) => ({ r, src }))).map(({ r, src }) => {
             const active = scanning === `${r}:${src}`
@@ -292,14 +312,28 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
 
       <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-          {open ? <LeadDetail lead={open} profile={profile} contacted={contacted.has(open.id)} onSend={() => sendQuick([open], `Quick send · ${open.name}`)} /> : null}
+          {open ? (
+            <LeadDetail
+              lead={open}
+              profile={profile}
+              contacted={contacted.has(open.id)}
+              onSend={() => sendQuick([open], `Quick send · ${open.name}`)}
+              onDraftAI={() => setAiFor(open)}
+            />
+          ) : null}
         </SheetContent>
       </Sheet>
+
+      <LeadAIDraftDialog
+        lead={aiFor}
+        open={!!aiFor}
+        onOpenChange={(v) => !v && setAiFor(null)}
+      />
     </div>
   )
 }
 
-function LeadDetail({ lead, profile, contacted, onSend }: { lead: Lead; profile: LookalikeProfile; contacted: boolean; onSend: () => void }) {
+function LeadDetail({ lead, profile, contacted, onSend, onDraftAI }: { lead: Lead; profile: LookalikeProfile; contacted: boolean; onSend: () => void; onDraftAI: () => void }) {
   const why = explainScore(lead, profile)
   return (
     <>
@@ -357,15 +391,79 @@ function LeadDetail({ lead, profile, contacted, onSend }: { lead: Lead; profile:
           <div className="mt-0.5 text-muted-foreground">{lead.contact.phone}</div>
         </div>
         <div className="text-xs text-muted-foreground">Found via {lead.source} · {timeAgo(lead.discoveredAt)}</div>
-        <div className="flex gap-2">
-          <Button className="flex-1 font-semibold" disabled={contacted} onClick={onSend}>
-            <Send /> {contacted ? "Already contacted" : lead.kind === "Shipper" ? "Send direct-carrier email" : "Send capacity email"}
+        <div className="flex flex-wrap gap-2">
+          <Button className="flex-1 min-h-11 font-semibold" onClick={onDraftAI}>
+            <Sparkles /> Draft with AI
           </Button>
-          <Link href={`/outreach?audience=new&ids=${lead.id}&campaign=${lead.kind === "Shipper" ? "shipper_direct" : "new_leads"}`} className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-sm hover:bg-muted">Customise</Link>
-          <Link href={`/messages?to=${lead.id}&purpose=intro`} className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-sm hover:bg-muted">Personal email</Link>
+          <Button variant="outline" className="min-h-11" disabled={contacted} onClick={onSend}>
+            <Send /> {contacted ? "Already contacted" : "Quick send"}
+          </Button>
+          <Link href={`/outreach?audience=new&ids=${lead.id}&campaign=${lead.kind === "Shipper" ? "shipper_direct" : "new_leads"}`} className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-sm hover:bg-muted">Customise</Link>
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * Live/Simulated status bar + Crawl-now button.
+ *
+ * Honesty rule: when the backend is unreachable we say "Simulated", not "Live".
+ * `backendLive === null` means the first health poll hasn't come back yet, so
+ * we show a neutral "Checking…" pill instead of guessing.
+ */
+function BackendStatusBar({
+  live,
+  realCount,
+  latest,
+  triggering,
+  onCrawl,
+}: {
+  live: boolean | null
+  realCount: number
+  latest: import("@/lib/use-backend").LatestRun
+  triggering: boolean
+  onCrawl: () => Promise<void>
+}) {
+  const active = latest?.status === "running" || latest?.status === "queued"
+  const badge =
+    live === null
+      ? { label: "Checking backend…", cls: "bg-muted text-muted-foreground" }
+      : live
+        ? { label: "LIVE", cls: "bg-good text-white" }
+        : { label: "SIMULATED", cls: "bg-warn text-asphalt" }
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-sm border border-border bg-card px-3 py-2.5">
+      <span className={cn("inline-flex items-center rounded-[3px] px-2 py-0.5 text-[0.68rem] font-bold tracking-wider", badge.cls)}>{badge.label}</span>
+      <span className="text-sm">
+        {live
+          ? <>Real crawler feed · <b className="num font-mono">{num(realCount)}</b> leads from the backend</>
+          : "Backend unreachable — showing the simulated feed. Real crawler data will appear once it wakes."}
+      </span>
+      {active ? (
+        <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <RefreshCw className="size-3.5 animate-spin" />
+          Crawl {latest?.status}…
+          {latest?.counts?.discovered ? ` · ${latest.counts.discovered} discovered` : ""}
+        </span>
+      ) : latest?.finished_at ? (
+        <span className="ml-2 text-xs text-muted-foreground">
+          last run: {timeAgo(latest.finished_at)} · new {latest.counts?.new ?? 0} · scored {latest.counts?.scored ?? 0}
+        </span>
+      ) : null}
+      <div className="ml-auto">
+        <Button
+          size="sm"
+          variant={live ? "default" : "outline"}
+          disabled={triggering || active || !live}
+          onClick={() => { void onCrawl() }}
+          className="font-semibold"
+        >
+          <RefreshCw className={cn("size-3.5", (triggering || active) && "animate-spin")} />
+          {active ? "Crawling…" : triggering ? "Starting…" : "Crawl now"}
+        </Button>
+      </div>
+    </div>
   )
 }
 

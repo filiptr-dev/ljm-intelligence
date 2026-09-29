@@ -2,12 +2,38 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Building2, ChartColumnBig, Gauge, Mail, Megaphone, Radar, Send, SquarePen, Truck } from "lucide-react"
+import {
+  Building2,
+  Calculator,
+  ChartColumnBig,
+  Gauge,
+  KanbanSquare,
+  Mail,
+  MapPinned,
+  Megaphone,
+  PhoneCall,
+  Radar,
+  Route as RouteIcon,
+  Send,
+  Settings as SettingsIcon,
+  Shield,
+  SquarePen,
+  Truck,
+  Wallet,
+} from "lucide-react"
 import { HazardStripe, Wordmark } from "@/components/brand/marks"
 import { Tire } from "@/components/brand/tire"
 import {
-  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarHeader,
-  SidebarMenu, SidebarMenuBadge, SidebarMenuButton, SidebarMenuItem,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { CLIENT } from "@/lib/data/types"
 import { useEngine } from "./engine"
@@ -23,8 +49,18 @@ const GROW = [
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
   { href: "/outreach", label: "New campaign", icon: SquarePen },
   { href: "/messages", label: "Emails", icon: Send },
-  { href: "/capacity", label: "Capacity Posts", icon: Truck },
 ]
+const TOOLS = [
+  { href: "/capacity", label: "Capacity Posts", icon: Truck },
+  { href: "/call-list", label: "Call List", icon: PhoneCall },
+  { href: "/shippers", label: "Shipper Finder", icon: MapPinned },
+  { href: "/rates", label: "Lane Rate Calculator", icon: Calculator },
+  { href: "/vetting", label: "Broker Check", icon: Shield },
+  { href: "/backhaul", label: "Backhaul Finder", icon: RouteIcon },
+  { href: "/profit", label: "Load Profit Calculator", icon: Wallet },
+  { href: "/pipeline", label: "Follow-ups", icon: KanbanSquare },
+]
+const CONFIG = [{ href: "/settings", label: "Settings", icon: SettingsIcon }]
 
 export function AppSidebar() {
   const pathname = usePathname()
@@ -33,7 +69,7 @@ export function AppSidebar() {
   const sending = campaigns.filter((c) => !c.single).reduce((s, c) => s + c.recipients.filter((r) => r.status === "queued").length, 0)
   const newReplies = campaigns.filter((c) => c.single && c.recipients[0]?.reply).length
 
-  const item = (i: (typeof ANALYSE)[number], badge?: React.ReactNode) => (
+  const item = (i: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }, badge?: React.ReactNode) => (
     <SidebarMenuItem key={i.href}>
       <SidebarMenuButton
         isActive={active(i.href)}
@@ -68,8 +104,15 @@ export function AppSidebar() {
             {item(GROW[1], sending ? <SidebarMenuBadge className="bg-sidebar-accent text-white">{sending}</SidebarMenuBadge> : null)}
             {item(GROW[2])}
             {item(GROW[3], newReplies ? <SidebarMenuBadge className="bg-good text-white">{newReplies}</SidebarMenuBadge> : null)}
-            {item(GROW[4])}
           </SidebarMenu>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel className="font-display tracking-[0.16em] text-[#8b9098]">Tools</SidebarGroupLabel>
+          <SidebarMenu>{TOOLS.map((i) => item(i))}</SidebarMenu>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel className="font-display tracking-[0.16em] text-[#8b9098]">Config</SidebarGroupLabel>
+          <SidebarMenu>{CONFIG.map((i) => item(i))}</SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-3 group-data-[collapsible=icon]:hidden">

@@ -1,0 +1,36 @@
+name: daily-crawl
+
+# Fires a crawl every day at 3 PM America/New_York. GitHub Actions cron is UTC-only, so
+# we run at 19:00 UTC (EST→3PM ET Nov-Mar) AND 20:00 UTC (EDT→3PM ET Mar-Nov). The backend
+# is idempotent per-day: back-to-back runs during the DST transition would only re-check
+# FMCSA, which the pipeline dedupes via MC/DOT/domain partial-unique indexes — cheap and safe.
+
+on:
+  schedule:
+    - cron: "0 19 * * *"  # 15:00 America/New_York during EST
+    - cron: "0 20 * * *"  # 15:00 America/New_York during EDT
+  workflow_dispatch:
+
+concurrency:
+  group: daily-crawl
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /crawl/run
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::BACKEND_URL and CRON_SECRET repo secrets must be set." >&2
+            exit 1
+          fi
+          # Wake Render first (free tier sleeps after inactivity). Then fire the crawl.
+          curl -fsS --retry 5 --retry-delay 4 --max-time 60 "$BACKEND_URL/health" >/dev/null || true
+          curl -fsS -X POST "$BACKEND_URL/crawl/run?trigger=cron" \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            --retry 3 --retry-delay 3 --max-time 30

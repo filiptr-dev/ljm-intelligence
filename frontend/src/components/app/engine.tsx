@@ -51,6 +51,8 @@ export type OneOffEmail = {
   body: string
   at: number
   followUpDays?: number
+  /** the builder's design; omitted = plain personal email, as before */
+  design?: EmailDesign
 }
 
 const EngineContext = React.createContext<Engine | null>(null)
@@ -345,7 +347,7 @@ export function EngineProvider({
         createdAt,
         subject: e.subject,
         body: e.body,
-        design: PLAIN_DESIGN,
+        design: e.design ?? PLAIN_DESIGN,
         schedule: { mode: e.at > createdAt + 60_000 ? "scheduled" : "now", at: e.at },
         followUps: e.followUpDays ? [{ afterDays: e.followUpDays, subject: `Re: ${e.subject}`, body: "Hi {{first_name}},\n\nJust bringing this back to the top of your inbox. Let me know either way.\n\nBest regards,\n{{sender}}" }] : [],
         followUpsSent: 0,

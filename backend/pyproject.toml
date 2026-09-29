@@ -1,0 +1,39 @@
+[project]
+name = "ljm-intelligence-api"
+version = "0.1.0"
+description = "LJM Intelligence backend: real lead crawler, Gemini scoring, outreach"
+authors = [
+    { name = "Filip Trajanovikj", email = "filiptrajanovik@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "psycopg[binary]>=3.2",
+    "pydantic-settings>=2.5",
+    "python-dotenv>=1.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = ["-ra", "--strict-markers"]
+markers = ["live: requires DATABASE_URL to a real Postgres (Neon)"]

@@ -4,7 +4,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { CalendarClock, ChevronLeft, ChevronRight, Copy, Monitor, Plus, Rocket, Search, Smartphone, Sparkles, Wand2 } from "lucide-react"
+import { CalendarClock, Copy, Plus, Rocket, Search, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -17,9 +17,8 @@ import { SEGMENTS, type Segment } from "@/lib/analytics"
 import { GOAL_LABEL, type Campaign, type FollowUp, type GoalType } from "@/lib/campaigns/types"
 import type { Region } from "@/lib/data/geo"
 import type { Lead, LeadKind } from "@/lib/data/types"
-import { cn } from "@/lib/utils"
-import { BriefBox, streamInto, StylePicker, type WriteStyle } from "./ai-writer"
-import { EmailPreview, renderTemplate } from "./email-preview"
+import { streamInto, type WriteStyle } from "./ai-writer"
+import { DesignFields, MessageFields, PreviewPanel, Step } from "./email-builder-parts"
 import { DEFAULT_DESIGN, toRecipient, useEngine, type EmailDesign, type Recipient } from "./engine"
 import { KindBadge, leadHaystack } from "./lead-finder"
 import { ScoreChip } from "./live-feed"
@@ -90,39 +89,10 @@ function tomorrowAtNine() {
 const formatWhen = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
 
-/** Personal fields, in plain words: each one is swapped for the recipient's own details on send. */
-const FIELDS = [
-  { tag: "{{first_name}}", label: "First name", hint: "The contact person's first name" },
-  { tag: "{{company}}", label: "Company name", hint: "The name of the company you are emailing" },
-  { tag: "{{lane}}", label: "Their lane", hint: "The route they ship most, e.g. Chicago → Dallas" },
-  { tag: "{{equipment}}", label: "Trailer type", hint: "The trailer they need, e.g. Reefer or Flatbed" },
-  { tag: "{{sender}}", label: "Your name", hint: "Your dispatcher's name, used in the sign-off" },
-]
-const ACCENTS = [
-  { name: "LJM red", hex: "#BC2444" },
-  { name: "Fleet blue", hex: "#2f63a8" },
-  { name: "Highway green", hex: "#3d8f5a" },
-  { name: "Steel", hex: "#8b9098" },
-  { name: "Charcoal", hex: "#2B2B2B" },
-]
-
 const existingToRecipient = (b: ExistingRow): Recipient => ({
   id: b.id, kind: "broker", name: b.name, contactName: b.contactName, email: b.email,
   region: b.region, lane: b.lane, equipment: b.equipment, verified: true,
 })
-
-function Step({ n, title, children, action }: { n: number; title: string; children: React.ReactNode; action?: React.ReactNode }) {
-  return (
-    <section className="rounded-sm border border-border bg-card">
-      <header className="flex items-center gap-3 border-b border-border px-4 py-3">
-        <span className="flex size-7 items-center justify-center rounded-sm bg-asphalt font-display text-sm font-bold text-safety">{n}</span>
-        <h2 className="flex-1 font-display text-lg font-semibold">{title}</h2>
-        {action}
-      </header>
-      <div className="p-4">{children}</div>
-    </section>
-  )
-}
 
 export function OutreachBuilder({
   leads, existing, initial,
@@ -184,15 +154,6 @@ export function OutreachBuilder({
   const [reused, setReused] = React.useState<string | undefined>(tpl?.name)
   /** a reused campaign brings its own text, so skip the automatic AI draft for it */
   const skipDraft = React.useRef<{ campaign: string; tone: string } | null>(tpl ? { campaign: tpl.type, tone: tpl.tone ?? "professional" } : null)
-  const bodyRef = React.useRef<HTMLTextAreaElement>(null)
-  const subjectRef = React.useRef<HTMLInputElement>(null)
-  // personal-field buttons insert into whichever field was used last
-  const [target, setTargetState] = React.useState<"subject" | "body">("body")
-  const targetRef = React.useRef<"subject" | "body">("body")
-  const setTarget = (t: "subject" | "body") => {
-    targetRef.current = t
-    setTargetState(t)
-  }
 
   const showLeads = audience !== "existing"
   const showExisting = audience !== "new"
@@ -300,19 +261,6 @@ export function OutreachBuilder({
     setReused(c.name)
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [liveCampaigns, initial.templateId, tpl])
-
-  const insertTag = (tag: string) => {
-    const el = targetRef.current === "subject" ? subjectRef.current : bodyRef.current
-    const set = targetRef.current === "subject" ? setSubject : setBody
-    if (!el) return set((b) => b + tag)
-    const a = el.selectionStart ?? el.value.length
-    const z = el.selectionEnd ?? a
-    set((b) => b.slice(0, a) + tag + b.slice(z))
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(a + tag.length, a + tag.length)
-    })
-  }
 
   /** start time for peak / picked schedules; "now" is resolved at launch */
   const plannedStart = () => (when === "peak" ? nextPeak() : when === "scheduled" && scheduleAt ? new Date(scheduleAt).getTime() : undefined)
@@ -560,72 +508,29 @@ export function OutreachBuilder({
               </Button>
             }
           >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Campaign type</Label>
-                <Select value={campaign} onValueChange={(v) => v && setCampaign(v as CampaignType)}>
-                  <SelectTrigger className="w-full"><SelectValue>{CAMPAIGNS.find((c) => c.value === campaign)?.label}</SelectValue></SelectTrigger>
-                  <SelectContent>
-                    {CAMPAIGNS.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        <div>
-                          <div>{c.label}</div>
-                          <div className="text-xs text-muted-foreground">{c.hint}</div>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <StylePicker value={style} onChange={setStyle} />
-            </div>
-            {custom ? (
-              <div className="mt-3">
-                <BriefBox brief={brief} setBrief={setBrief} onWrite={write} writing={writing} understood={understood} />
-              </div>
-            ) : null}
-            <div className="mt-3 space-y-1.5">
-              <Label htmlFor="subject">Subject</Label>
-              <Input id="subject" ref={subjectRef} value={subject} onFocus={() => setTarget("subject")} onChange={(e) => setSubject(e.target.value)} />
-            </div>
-
-            <div className="mt-3 rounded-sm border border-border bg-background p-3">
-              <div className="flex items-start gap-2">
-                <Sparkles className="mt-0.5 size-4 shrink-0 text-chart-2" />
-                <div className="text-sm">
-                  <div className="font-semibold">Personal fields</div>
-                  <p className="text-muted-foreground">
-                    Click a button to add it to the {target === "subject" ? "subject" : "email"} where your cursor is. When the email is sent, it is replaced with each company&apos;s own details, so every company gets a message written just for them. In the text it looks like <code className="rounded-[2px] bg-muted px-1 font-mono text-[0.75rem]">{"{{company}}"}</code>.
-                  </p>
+            <MessageFields
+              typeSlot={
+                <div className="space-y-1.5">
+                  <Label>Campaign type</Label>
+                  <Select value={campaign} onValueChange={(v) => v && setCampaign(v as CampaignType)}>
+                    <SelectTrigger className="w-full"><SelectValue>{CAMPAIGNS.find((c) => c.value === campaign)?.label}</SelectValue></SelectTrigger>
+                    <SelectContent>
+                      {CAMPAIGNS.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          <div>
+                            <div>{c.label}</div>
+                            <div className="text-xs text-muted-foreground">{c.hint}</div>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                {FIELDS.map((f) => {
-                  const example = renderTemplate(f.tag, preview)
-                  return (
-                    <button
-                      key={f.tag}
-                      type="button"
-                      title={f.hint}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => insertTag(f.tag)}
-                      className="flex min-w-0 flex-col items-start rounded-sm border border-border bg-card px-2.5 py-1.5 text-left transition-colors hover:border-asphalt hover:bg-accent"
-                    >
-                      <span className="text-sm font-semibold">+ {f.label}</span>
-                      <span className="w-full truncate text-[0.7rem] text-muted-foreground">e.g. {example}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="mt-3 space-y-1.5">
-              <Label htmlFor="body">Email body</Label>
-              <Textarea id="body" ref={bodyRef} value={body} onFocus={() => setTarget("body")} onChange={(e) => setBody(e.target.value)} rows={12} className="text-[0.9rem] leading-relaxed" />
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                Use the arrows in the preview on the right to see the finished email for each company.
-              </p>
-            </div>
+              }
+              style={style} setStyle={setStyle} custom={custom} brief={brief} setBrief={setBrief}
+              onWrite={write} writing={writing} understood={understood}
+              subject={subject} setSubject={setSubject} body={body} setBody={setBody} preview={preview}
+            />
           </Step>
 
           <Step
@@ -664,55 +569,7 @@ export function OutreachBuilder({
           </Step>
 
           <Step n={5} title="Design">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>Layout</Label>
-                <Segmented
-                  value={design.layout}
-                  onChange={(layout) => setDesign((d) => ({ ...d, layout }))}
-                  className="flex w-full [&>button]:flex-1"
-                  options={[{ value: "plain", label: "Plain text" }, { value: "branded", label: "Branded" }, { value: "card", label: "Card" }]}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Accent colour</Label>
-                <div className="flex gap-2">
-                  {ACCENTS.map((a) => (
-                    <button
-                      key={a.hex}
-                      type="button"
-                      title={a.name}
-                      aria-label={a.name}
-                      onClick={() => setDesign((d) => ({ ...d, accent: a.hex }))}
-                      className={cn("size-8 rounded-sm border-2 transition-transform", design.accent === a.hex ? "scale-110 border-asphalt" : "border-transparent ring-1 ring-border")}
-                      style={{ background: a.hex }}
-                    />
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2.5">
-                {([
-                  ["showLogo", "Company logo header"],
-                  ["showTruck", "Truck banner (matches recipient's region)"],
-                  ["signature", "Dispatcher signature"],
-                ] as const).map(([k, label]) => (
-                  <label key={k} className="flex items-center gap-2.5 text-sm">
-                    <Switch checked={design[k]} onCheckedChange={(v) => setDesign((d) => ({ ...d, [k]: v }))} disabled={design.layout === "plain" && k !== "signature"} />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="cta">Button text</Label>
-                  <Input id="cta" value={design.ctaLabel} onChange={(e) => setDesign((d) => ({ ...d, ctaLabel: e.target.value }))} placeholder="No button" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cta-url">Button link</Label>
-                  <Input id="cta-url" value={design.ctaUrl} onChange={(e) => setDesign((d) => ({ ...d, ctaUrl: e.target.value }))} />
-                </div>
-              </div>
-            </div>
+            <DesignFields design={design} setDesign={setDesign} />
           </Step>
         </div>
 
@@ -732,18 +589,7 @@ export function OutreachBuilder({
               </Button>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <h2 className="font-display text-lg font-semibold">Preview</h2>
-            <div className="ml-auto flex items-center gap-1 text-sm">
-              <Button variant="ghost" size="icon-sm" disabled={previewIdx <= 0} onClick={() => setPreviewIdx((i) => Math.max(0, i - 1))} aria-label="Previous recipient"><ChevronLeft /></Button>
-              <span className="num min-w-16 text-center font-mono text-xs">{recipients.length ? `${Math.min(previewIdx, recipients.length - 1) + 1} / ${recipients.length}` : "0 / 0"}</span>
-              <Button variant="ghost" size="icon-sm" disabled={previewIdx >= recipients.length - 1} onClick={() => setPreviewIdx((i) => i + 1)} aria-label="Next recipient"><ChevronRight /></Button>
-            </div>
-            <Segmented value={mobile ? "m" : "d"} onChange={(v) => setMobile(v === "m")} options={[{ value: "d", label: <Monitor className="size-3.5" /> }, { value: "m", label: <Smartphone className="size-3.5" /> }]} />
-          </div>
-          <div className="max-h-[calc(100vh-15rem)] overflow-y-auto">
-            <EmailPreview subject={subject} body={body} design={design} recipient={preview} mobile={mobile} />
-          </div>
+          <PreviewPanel subject={subject} body={body} design={design} recipients={recipients} previewIdx={previewIdx} setPreviewIdx={setPreviewIdx} mobile={mobile} setMobile={setMobile} />
         </div>
       </div>
 
