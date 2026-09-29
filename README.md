@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FreightRadar: broker intelligence demo
 
-## Getting Started
+Client demo for a US + EU trucking company (Ironline Transport, 48 trucks). It shows three things:
 
-First, run the development server:
+1. **Broker Intelligence**: semantic analysis of ~2,700 broker emails. Shows who they work with most, who rejects them and why, reply-speed impact, best send times, lanes, rates and k-means broker segments.
+2. **Lead Finder**: a crawler that is "always on", streams new broker leads and scores each one against the client's best brokers (lookalike score). Includes one-click outreach.
+3. **New campaign** (`/outreach`): name and goal (replies, interested replies, new customers, loads), audience (new leads, existing brokers or both, with search), an AI-written message with plain-English personal fields, automatic follow-ups to non-responders, design, and send now / at the best time / at a picked date. **Reuse** copies any past campaign.
+4. **Campaigns** (`/campaigns`): every campaign with goal progress, funnel, follow-up step results and each reply tagged by AI sentiment (interested, asked for rates, not now, out of office, not interested, unsubscribe). The "what works" analysis ranks campaign types, audiences, tones, launch days and subject lines. It includes 6 months of dummy history (`src/lib/campaigns/history.ts`).
+
+All data is dummy data, generated with a fixed seed.
+
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev          # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Tip for the meeting: move between pages with the sidebar (client-side navigation). A full browser reload restarts the live crawler session. Campaigns survive reloads (localStorage).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How it works
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Layer | File | Notes |
+|---|---|---|
+| Dummy data | `src/lib/data/generate.ts` | 150 brokers (90 US / 60 EU), 18 months of load threads: offers, quotes, bookings, rejections, invoices, complaints. Hidden "persona" drives behaviour. |
+| AI (mock) | `src/lib/ai/mock.ts` | Reads the email **text** (patterns and a sentiment lexicon) and extracts intent, sentiment, rate, lane, equipment and rejection reason. The analysis never sees the hidden labels. |
+| AI (Gemini) | `src/lib/ai/gemini.ts` | Same interface. Set `AI_PROVIDER=gemini GEMINI_API_KEY=…` to switch. Not tested yet. |
+| Data science | `src/lib/analytics/` | Thread reconstruction, per-broker stats, health score, k-means (k-means++ init, z-scored features), cosine-similarity lookalike scoring, reply-time and send-time analysis. |
+| Live engine | `src/components/app/engine.tsx` | Client-side crawler stream, auto-outreach, scheduled sends, follow-ups, delivery/open/reply/won simulation. |
+| Reply AI (mock) | `src/lib/ai/replies.ts` | Reads each reply and returns category + sentiment. |
+| Campaign analysis | `src/lib/campaigns/metrics.ts` | Per-campaign summary, goal progress, and the cross-campaign "what works" insights. |
 
-## Learn More
+## Branding
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The client is `CLIENT` in `src/lib/data/types.ts`. Change the name, dispatcher, phone and fleet there. The product name "FreightRadar" is in `src/components/brand/marks.tsx`.
