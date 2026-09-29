@@ -206,12 +206,12 @@ export function draftTemplate(input: OutreachInput): OutreachDraft {
     case "shipper_direct":
       return {
         subject: "Direct {{equipment}} trucks for {{company}}, no broker in between",
-        body: `${open}\n\nI'm reaching out from ${CLIENT.company}. We are an asset-based carrier with 48 of our own trucks in the US and Europe, and we run {{equipment}} on ${lanes} every week.\n\nWorking with us directly means one point of contact, our own drivers, live tracking on every load and no broker margin on top of the rate. We can start with a single trial load.\n\n${close}${sig}`,
+        body: `${open}\n\nI'm reaching out from ${CLIENT.company}. We are an asset-based carrier with 48 of our own trucks across the eastern US, and we run {{equipment}} on ${lanes} every week.\n\nWorking with us directly means one point of contact, our own drivers, live tracking on every load and no broker margin on top of the rate. We can start with a single trial load.\n\n${close}${sig}`,
       }
     default:
       return {
         subject: "{{equipment}} capacity for {{company}}",
-        body: `${open}\n\nI'm reaching out from ${CLIENT.company}, an asset-based carrier running 48 trucks across the US and Europe. We see that {{company}} works ${lanes}, which is exactly where our ${eq} trucks run every day.\n\nWe are fully compliant, answer quotes in minutes, and track every load live. ${close}${sig}`,
+        body: `${open}\n\nI'm reaching out from ${CLIENT.company}, an asset-based carrier running 48 trucks across the eastern US. We see that {{company}} works ${lanes}, which is exactly where our ${eq} trucks run every day.\n\nWe are fully compliant, answer quotes in minutes, and track every load live. ${close}${sig}`,
       }
   }
 }

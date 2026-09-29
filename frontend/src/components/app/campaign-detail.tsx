@@ -166,7 +166,7 @@ export function CampaignDetail({ id, history }: { id: string; history: Campaign 
           </p>
         </Panel>
         <Panel title="Who replied" description="Reply rate by region and company type">
-          <BarList rows={breakdown((r) => (r.region === "US" ? "United States" : "Europe"))} format={(v) => `${v}%`} />
+          <BarList rows={breakdown((r) => (r.region === "US" ? "United States" : "Other"))} format={(v) => `${v}%`} />
           <div className="mt-4">
             <BarList
               color="var(--chart-4)"

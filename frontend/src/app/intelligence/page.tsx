@@ -114,11 +114,8 @@ export default async function IntelligencePage() {
           <WinRateLine data={s.monthly} />
         </Panel>
 
-        <Panel title="Booked rate · US" description="Average rate per mile on booked loads">
+        <Panel title="Booked rate" description="Average rate per mile on booked loads">
           <RateLine data={s.monthly} dataKey="usdPerMile" label="$/mi" unit="$" />
-        </Panel>
-        <Panel title="Booked rate · Europe" description="Average rate per km on booked loads">
-          <RateLine data={s.monthly} dataKey="eurPerKm" label="€/km" unit="€" />
         </Panel>
       </div>
 

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Search, Send } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Search, Send } from "lucide-react"
 import { Plate } from "@/components/brand/marks"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -15,6 +15,7 @@ import type { Region } from "@/lib/data/geo"
 import { money, pct } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { HealthPill, SEGMENT_COLOR, SegmentBadge, Sparkline } from "./ui"
+import { Segmented } from "./segmented"
 
 export type BrokerRow = {
   id: string
@@ -44,21 +45,59 @@ const SORTS: Record<string, { label: string; fn: (a: BrokerRow, b: BrokerRow) =>
   payment: { label: "Overdue invoices", fn: (a, b) => b.paymentIssues - a.paymentIssues || b.booked - a.booked },
 }
 
+type HeaderKey = "name" | "health" | "loads" | "winRate" | "revenue" | "recent"
+type HeaderSort = { key: HeaderKey; dir: "desc" | "asc" }
+
+/** 1st click "desc" = the most useful direction (A→Z for names, most-recent for last contact, highest→lowest for numerics). */
+const HEADER_SORTS: Record<HeaderKey, { desc: (a: BrokerRow, b: BrokerRow) => number; asc: (a: BrokerRow, b: BrokerRow) => number }> = {
+  name: {
+    desc: (a, b) => a.name.localeCompare(b.name),
+    asc: (a, b) => b.name.localeCompare(a.name),
+  },
+  health: { desc: (a, b) => b.health - a.health, asc: (a, b) => a.health - b.health },
+  loads: { desc: (a, b) => b.booked - a.booked, asc: (a, b) => a.booked - b.booked },
+  winRate: { desc: (a, b) => b.winRate - a.winRate, asc: (a, b) => a.winRate - b.winRate },
+  revenue: { desc: (a, b) => b.revenue - a.revenue, asc: (a, b) => a.revenue - b.revenue },
+  // "most recent first" = smallest daysSinceLast first
+  recent: { desc: (a, b) => a.daysSinceLast - b.daysSinceLast, asc: (a, b) => b.daysSinceLast - a.daysSinceLast },
+}
+
+const ACTIVITY_MONTHS = [12, 7, 3] as const
+type ActivityMonths = (typeof ACTIVITY_MONTHS)[number]
+
 export function BrokersTable({ rows, initialSegment, initialSort }: { rows: BrokerRow[]; initialSegment: string; initialSort: string }) {
   const router = useRouter()
   const [segment, setSegment] = React.useState<string>(initialSegment)
   const [q, setQ] = React.useState("")
   const [sort, setSort] = React.useState(SORTS[initialSort] ? initialSort : "health")
+  const [headerSort, setHeaderSort] = React.useState<HeaderSort | null>(null)
+  const [activityMonths, setActivityMonths] = React.useState<ActivityMonths>(12)
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
 
   const filtered = React.useMemo(
-    () =>
-      rows
+    () => {
+      const base = rows
         .filter((r) => segment === "All" || r.segment === segment)
         .filter((r) => !q || `${r.name} ${r.hq} ${r.contact} ${r.registration}`.toLowerCase().includes(q.toLowerCase()))
-        .sort(SORTS[sort].fn),
-    [rows, segment, q, sort],
+      const fn = headerSort ? HEADER_SORTS[headerSort.key][headerSort.dir] : SORTS[sort].fn
+      return base.sort(fn)
+    },
+    [rows, segment, q, sort, headerSort],
   )
+
+  // 1st click: desc. 2nd: asc. 3rd: clear (back to default Select sort).
+  const cycleHeader = (key: HeaderKey) => {
+    setHeaderSort((cur) => {
+      if (!cur || cur.key !== key) return { key, dir: "desc" }
+      if (cur.dir === "desc") return { key, dir: "asc" }
+      return null
+    })
+  }
+
+  const onSelectSort = (v: string | null) => {
+    setSort(v ?? "health")
+    setHeaderSort(null) // Select takes over; clear the header override.
+  }
 
   const counts = React.useMemo(() => {
     const c: Record<string, number> = { All: rows.length }
@@ -99,8 +138,11 @@ export function BrokersTable({ rows, initialSegment, initialSort }: { rows: Brok
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search broker, city, MC / VAT…" className="pl-8" />
         </div>
-        <Select value={sort} onValueChange={(v) => setSort(v ?? "health")}>
-          <SelectTrigger className="w-48"><span className="text-muted-foreground">Sort:</span> <SelectValue>{SORTS[sort].label}</SelectValue></SelectTrigger>
+        <Select value={sort} onValueChange={onSelectSort}>
+          <SelectTrigger className="w-48">
+            <span className="text-muted-foreground">Sort:</span>{" "}
+            <SelectValue>{headerSort ? "Custom" : SORTS[sort].label}</SelectValue>
+          </SelectTrigger>
           <SelectContent>
             {Object.entries(SORTS).map(([k, v]) => (
               <SelectItem key={k} value={k}>{v.label}</SelectItem>
@@ -129,14 +171,24 @@ export function BrokersTable({ rows, initialSegment, initialSort }: { rows: Brok
                 aria-label="Select all"
               />
             </TableHead>
-            <TableHead>Broker</TableHead>
+            <TableHead><SortHeader label="Broker" k="name" headerSort={headerSort} onClick={cycleHeader} /></TableHead>
             <TableHead>Segment</TableHead>
-            <TableHead>Health</TableHead>
-            <TableHead className="text-right">Loads</TableHead>
-            <TableHead className="text-right">Win rate</TableHead>
-            <TableHead className="text-right">Revenue</TableHead>
-            <TableHead className="text-right">Last contact</TableHead>
-            <TableHead className="pr-4">12-month activity</TableHead>
+            <TableHead><SortHeader label="Health" k="health" headerSort={headerSort} onClick={cycleHeader} /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Loads" k="loads" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Win rate" k="winRate" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Revenue" k="revenue" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
+            <TableHead className="text-right"><SortHeader label="Last contact" k="recent" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
+            <TableHead className="pr-4">
+              <div className="flex items-center justify-between gap-2">
+                <span>{activityMonths}-month activity</span>
+                <Segmented
+                  value={String(activityMonths) as "12" | "7" | "3"}
+                  onChange={(v) => setActivityMonths(Number(v) as ActivityMonths)}
+                  options={ACTIVITY_MONTHS.map((m) => ({ value: String(m) as "12" | "7" | "3", label: String(m) }))}
+                  className="h-6 p-0.5"
+                />
+              </div>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -158,11 +210,46 @@ export function BrokersTable({ rows, initialSegment, initialSort }: { rows: Brok
               <TableCell className="num text-right font-mono">{r.booked + r.rejected ? pct(r.winRate) : "–"}</TableCell>
               <TableCell className="num text-right font-mono">{money(r.revenue, r.region, true)}</TableCell>
               <TableCell className={cn("num text-right font-mono", r.daysSinceLast > 90 && "text-bad")}>{r.daysSinceLast}d</TableCell>
-              <TableCell className="pr-4"><Sparkline values={r.monthly} color={SEGMENT_COLOR[r.segment]} /></TableCell>
+              <TableCell className="pr-4"><Sparkline values={r.monthly.slice(-activityMonths)} color={SEGMENT_COLOR[r.segment]} /></TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
     </div>
+  )
+}
+
+/** Clickable / keyboardable sort header. Renders a real <button> so tab + enter/space work. */
+function SortHeader({
+  label,
+  k,
+  headerSort,
+  onClick,
+  align = "left",
+}: {
+  label: string
+  k: HeaderKey
+  headerSort: HeaderSort | null
+  onClick: (k: HeaderKey) => void
+  align?: "left" | "right"
+}) {
+  const active = headerSort?.key === k
+  const dir = active ? headerSort!.dir : null
+  const Icon = dir === "desc" ? ArrowDown : dir === "asc" ? ArrowUp : ArrowUpDown
+  const ariaLabel = dir ? `${label}, sorted ${dir === "desc" ? "descending" : "ascending"}` : `${label}, click to sort`
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(k)}
+      aria-label={ariaLabel}
+      className={cn(
+        "-mx-1 inline-flex w-full items-center gap-1 rounded-sm px-1 py-0.5 text-left transition-colors hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+        align === "right" && "justify-end text-right",
+      )}
+    >
+      <span>{label}</span>
+      <Icon className={cn("size-3.5 shrink-0", active ? "opacity-100" : "opacity-40")} aria-hidden />
+    </button>
   )
 }
