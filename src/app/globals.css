@@ -57,48 +57,50 @@
 }
 
 :root {
-  /* concrete / asphalt / safety-yellow — truck-yard palette, no gradients */
+  /* LJM palette — brand red + charcoal + white on a soft concrete ground.
+     Tokens keep their old names (`--safety`, etc.) so downstream classes don't
+     churn; only the values move. No gradients. */
   --background: #efede8;
-  --foreground: #16171a;
+  --foreground: #2B2B2B;
   --card: #ffffff;
-  --card-foreground: #16171a;
+  --card-foreground: #2B2B2B;
   --popover: #ffffff;
-  --popover-foreground: #16171a;
-  --primary: #f5b800;
-  --primary-foreground: #16171a;
+  --popover-foreground: #2B2B2B;
+  --primary: #BC2444;              /* LJM brand red — CTAs, active states */
+  --primary-foreground: #ffffff;
   --secondary: #e4e1da;
-  --secondary-foreground: #16171a;
+  --secondary-foreground: #2B2B2B;
   --muted: #e9e6e0;
   --muted-foreground: #5c5f66;
-  --accent: #fff1bf;
-  --accent-foreground: #16171a;
-  --destructive: #c62828;
+  --accent: #fbe1e6;               /* soft red tint for accent surfaces */
+  --accent-foreground: #2B2B2B;
+  --destructive: #8a1a30;          /* darker red so it still reads distinct */
   --border: #d8d4cb;
   --input: #cfcac0;
-  --ring: #16171a;
+  --ring: #BC2444;
   --good: #2e7d32;
   --warn: #b77900;
   --bad: #c62828;
-  --asphalt: #16171a;
-  --asphalt-2: #24262b;
+  --asphalt: #2B2B2B;
+  --asphalt-2: #333333;
   --steel: #8b9098;
   --chrome: #c9ccd1;
-  --safety: #f5b800;
-  --chart-1: #2f63a8;
-  --chart-2: #e0a100;
-  --chart-3: #c4432b;
+  --safety: #BC2444;               /* the "activity" accent — now LJM red */
+  --chart-1: #BC2444;              /* primary chart series: brand red */
+  --chart-2: #2B2B2B;              /* charcoal */
+  --chart-3: #8b9098;              /* steel */
   --chart-4: #6b5ca5;
   --chart-5: #3d8f5a;
   --grid: #e7e4dd;
   --radius: 0.3rem;
-  --sidebar: #141518;
+  --sidebar: #2B2B2B;              /* LJM charcoal sidebar */
   --sidebar-foreground: #d9d7d2;
-  --sidebar-primary: #f5b800;
-  --sidebar-primary-foreground: #141518;
-  --sidebar-accent: #24262b;
+  --sidebar-primary: #BC2444;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #3a3a3a;
   --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #2c2e33;
-  --sidebar-ring: #f5b800;
+  --sidebar-border: #3a3a3a;
+  --sidebar-ring: #BC2444;
 }
 
 @layer base {

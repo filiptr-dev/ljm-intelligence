@@ -59,7 +59,7 @@ const REPLY_MIX = (type: string, positiveShare: number): [ReplyCategory, number]
 function followUpFor(i: number): FollowUp {
   return i === 0
     ? { afterDays: 3, subject: "Re: {{company}} capacity", body: "Hi {{first_name}},\n\nJust following up on my email below. We still have {{equipment}} trucks on {{lane}} this week. Would a quick rate help?\n\nBest regards,\n{{sender}}" }
-    : { afterDays: 7, subject: "Last note from Ironline Transport", body: "Hi {{first_name}},\n\nI don't want to fill your inbox, so this is my last note. If {{lane}} ever needs a reliable truck, just reply to this email.\n\nBest regards,\n{{sender}}" }
+    : { afterDays: 7, subject: "Last note from LJM International", body: "Hi {{first_name}},\n\nI don't want to fill your inbox, so this is my last note. If {{lane}} ever needs a reliable truck, just reply to this email.\n\nBest regards,\n{{sender}}" }
 }
 
 function toBrokerRecipient(b: Broker, st: BrokerStats): Recipient {
@@ -145,7 +145,7 @@ export function buildCampaignHistory(brokers: Broker[], stats: Map<string, Broke
       createdAt: sentAt,
       subject: def.subject,
       body: tpl.body,
-      design: { layout: "branded", accent: def.type === "shipper_direct" ? "#16171a" : "#f5b800", showLogo: true, showTruck: true, ctaLabel: def.type === "shipper_direct" ? "Book a trial load" : "Request a quote", ctaUrl: "https://ironline-transport.com/quote", signature: true },
+      design: { layout: "branded", accent: def.type === "shipper_direct" ? "#2B2B2B" : "#BC2444", showLogo: true, showTruck: true, ctaLabel: def.type === "shipper_direct" ? "Book a trial load" : "Request a quote", ctaUrl: "https://ljminternational.com/quote", signature: true },
       goal: def.goal,
       schedule: { mode: "scheduled", at: sentAt },
       followUps,

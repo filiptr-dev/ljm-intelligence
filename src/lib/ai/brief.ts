@@ -76,15 +76,15 @@ export function draftFromBrief(input: OutreachInput): OutreachDraft {
   const subject = trucks
     ? `${trucks[1]} new ${eqs[0] ?? ""} trucks ${lane === "{{lane}}" ? "for {{company}}" : where}`.replace(/\s+/g, " ")
     : discount
-      ? `${discount[1]}% off your first load with Ironline Transport`
+      ? `${discount[1]}% off your first load with LJM International`
       : season
         ? `${season[0].toUpperCase()}${season.slice(1)} capacity for {{company}}`
         : trial
-          ? "Try Ironline Transport with one trial load"
+          ? "Try LJM International with one trial load"
           : `${eq} capacity ${lane === "{{lane}}" ? "for {{company}}" : where}`
 
   const lines: string[] = []
-  if (!short) lines.push("I'm {{sender}} from Ironline Transport, an asset-based carrier with 48 of our own trucks in the US and Europe.")
+  if (!short) lines.push("I'm {{sender}} from LJM International, a dry-van carrier based in Lincoln Park, NJ, running the eastern US.")
   lines.push(
     trucks
       ? `We just added ${trucks[1]} ${eqs[0] ?? ""} trucks and they run ${where} every week.`.replace(/\s+/g, " ")

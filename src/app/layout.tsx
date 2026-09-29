@@ -18,8 +18,8 @@ const mono = IBM_Plex_Mono({ variable: "--font-plex-mono", subsets: ["latin"], w
 export const dynamic = "force-dynamic"
 
 export const metadata: Metadata = {
-  title: "FreightRadar · Broker Intelligence",
-  description: "Find, analyse and win freight brokers for your trucks.",
+  title: "LJM Intelligence · Broker Intelligence",
+  description: "Find, analyse and win freight brokers for LJM International's dry-van fleet across the eastern US.",
 }
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

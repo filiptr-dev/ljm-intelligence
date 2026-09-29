@@ -158,7 +158,7 @@ export function draftTemplate(input: OutreachInput): OutreachDraft {
   switch (input.campaign) {
     case "check_in":
       return {
-        subject: "Checking in from Ironline Transport",
+        subject: "Checking in from LJM International",
         body: `${open}\n\nIt's been a little while, so I wanted to check in. How is freight looking on {{lane}} this month? We still run {{equipment}} trucks there every week and would be glad to cover anything you're short on.\n\n${close}${sig}`,
       }
     case "truck_available":

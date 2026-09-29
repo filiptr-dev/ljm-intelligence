@@ -63,11 +63,11 @@ export function useEngine() {
 
 export const DEFAULT_DESIGN: EmailDesign = {
   layout: "branded",
-  accent: "#f5b800",
+  accent: "#BC2444",
   showLogo: true,
   showTruck: true,
   ctaLabel: "Request a quote",
-  ctaUrl: "https://ironline-transport.com/quote",
+  ctaUrl: "https://ljminternational.com/quote",
   signature: true,
 }
 
@@ -76,7 +76,9 @@ const AUTO_BODY =
   "Hi {{first_name}},\n\nWe run {{equipment}} trucks daily on {{lane}} and have capacity this week. We answer quotes within 15 minutes.\n\nBest regards,\n{{sender}}"
 
 const PAGES: Record<string, number> = {}
-const STORAGE_KEY = "freightradar.campaigns.v3"
+// Bump on brand change so a stale pre-rebrand localStorage on Filip's box
+// doesn't confuse a first-meeting reload.
+const STORAGE_KEY = "ljm.campaigns.v1"
 
 export const PLAIN_DESIGN: EmailDesign = { ...DEFAULT_DESIGN, layout: "plain", showLogo: false, showTruck: false, ctaLabel: "" }
 

@@ -33,7 +33,7 @@ const REPLY_BY_PURPOSE: Record<EmailPurpose, [ReplyCategory, number][]> = {
   thank_you: [["interested", 6], ["rates", 2], ["not_now", 1]],
 }
 
-const PLAIN = { layout: "plain", accent: "#f5b800", showLogo: false, showTruck: false, ctaLabel: "", ctaUrl: "", signature: true } as const
+const PLAIN = { layout: "plain", accent: "#BC2444", showLogo: false, showTruck: false, ctaLabel: "", ctaUrl: "", signature: true } as const
 
 export function buildEmailHistory(brokers: Broker[], stats: Map<string, BrokerStats>, leads: Lead[]): Campaign[] {
   const rng = createRng(31337)

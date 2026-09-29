@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 640" fill="currentColor" role="img" aria-label="LJM Intelligence">
+  <!-- Three tapered speed lines on the left -->
+  <g>
+    <polygon points="0,110 250,130 0,150" />
+    <polygon points="0,200 250,220 0,240" />
+    <polygon points="0,290 250,310 0,330" />
+  </g>
+
+  <!-- Tapered roofline: thin bar above the LJM wordmark, feeding into the exhaust stack -->
+  <polygon points="380,22 1170,44 1170,58 380,56" />
+
+  <!-- Exhaust stack (thin pipe + cap) rises from the cab roof -->
+  <rect x="1160" y="8" width="18" height="80" />
+  <rect x="1152" y="0" width="34" height="14" />
+
+  <!-- LJM italic wordmark, hand-authored polygon paths, skewed for italic slant -->
+  <g transform="translate(430 0) skewX(-14)">
+    <!-- L -->
+    <path d="M 0 70 L 100 70 L 100 340 L 230 340 L 230 415 L 0 415 Z" />
+    <!-- J -->
+    <path d="M 270 70 L 435 70 L 435 335 C 435 385, 400 415, 345 415 C 285 415, 250 380, 250 335 L 320 335 C 320 365, 335 385, 355 385 C 375 385, 375 370, 375 335 L 375 135 L 270 135 Z" />
+    <!-- M -->
+    <path d="M 475 70 L 565 70 L 625 230 L 685 70 L 775 70 L 775 415 L 705 415 L 705 220 L 660 345 L 590 345 L 545 220 L 545 415 L 475 415 Z" />
+  </g>
+
+  <!-- Truck cab silhouette on the right: back wall, roof (with aero fairing dip), steep windshield wedge, long hood, bumper -->
+  <path d="M 1170 58
+           L 1170 110
+           L 1195 110
+           L 1205 86
+           L 1245 86
+           L 1258 100
+           L 1268 96
+           L 1282 110
+           L 1400 300
+           L 1400 415
+           L 1305 415
+           L 1305 335
+           L 1285 335
+           L 1285 155
+           L 1200 155
+           L 1200 415
+           L 1170 415
+           Z" />
+
+  <!-- INTELLIGENCE — tall condensed uppercase, spans full width -->
+  <text x="700" y="590" text-anchor="middle"
+        font-family="'Barlow Condensed','Arial Narrow',Impact,'Helvetica Condensed',sans-serif"
+        font-weight="700" font-size="185" letter-spacing="6"
+        style="font-stretch:condensed">INTELLIGENCE</text>
+</svg>

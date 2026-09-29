@@ -1,7 +1,7 @@
 "use client"
 
 import { EUTruck, USTruck } from "@/components/brand/trucks"
-import { TireGlyph } from "@/components/brand/tire"
+import { LogoMarkCompact } from "@/components/brand/marks"
 import { CLIENT } from "@/lib/data/types"
 import { cn } from "@/lib/utils"
 import type { EmailDesign, Recipient } from "./engine"
@@ -28,13 +28,11 @@ export const readableTags = (s: string) => s.replace(/\{\{\w+\}\}/g, (t) => READ
 
 function ClientLogo({ light }: { light: boolean }) {
   return (
-    <div className="flex items-center gap-2">
-      <svg viewBox="0 0 100 100" className="size-7" aria-hidden>
-        <TireGlyph />
-      </svg>
-      <div className={cn("leading-none", light ? "text-white" : "text-[#16171a]")}>
-        <div className="font-display text-lg font-bold tracking-wide">Ironline</div>
-        <div className="text-[0.55rem] font-semibold tracking-[0.24em] uppercase opacity-80">Transport</div>
+    <div className={cn("flex items-center gap-2", light ? "text-white" : "text-[#2B2B2B]")}>
+      <LogoMarkCompact className="h-6 w-auto" />
+      <div className="leading-none">
+        <div className="font-display text-lg font-bold tracking-wide">LJM</div>
+        <div className="text-[0.55rem] font-semibold tracking-[0.24em] uppercase opacity-80">International</div>
       </div>
     </div>
   )
@@ -67,7 +65,7 @@ export function EmailPreview({
 
   const signature = design.signature ? (
     <div className="mt-5 flex items-center gap-3 border-t border-[#e4e1da] pt-4 text-xs text-[#5c5f66]">
-      <div className="flex size-9 items-center justify-center rounded-full bg-[#16171a] font-display text-sm font-bold text-white">MD</div>
+      <div className="flex size-9 items-center justify-center rounded-full bg-[#BC2444] font-display text-sm font-bold text-white">{CLIENT.dispatcher.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}</div>
       <div>
         <div className="font-semibold text-[#16171a]">{CLIENT.dispatcher} · Dispatch</div>
         <div>{CLIENT.company} · {CLIENT.fleet}</div>
@@ -115,8 +113,8 @@ export function EmailPreview({
               </div>
             ) : null}
             <div className="p-6">{content}</div>
-            <div className="bg-[#16171a] px-6 py-3 text-[0.65rem] text-[#8b9098]">
-              {CLIENT.company} · Asset-based carrier · US DOT & EU licensed · Unsubscribe
+            <div className="bg-[#2B2B2B] px-6 py-3 text-[0.65rem] text-[#8b9098]">
+              {CLIENT.company} · {CLIENT.address} · {CLIENT.phone} · Unsubscribe
             </div>
           </div>
         ) : (

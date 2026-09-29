@@ -6,7 +6,7 @@ const CHROME = "#c9ccd1"
 const GLASS = "#2b2d31"
 
 /** American long-nose conventional tractor + 53' dry van. */
-export function USTruck({ className, cab = "#f5b800", spinning = false }: { className?: string; cab?: string; spinning?: boolean }) {
+export function USTruck({ className, cab = "#BC2444", spinning = false }: { className?: string; cab?: string; spinning?: boolean }) {
   return (
     <svg viewBox="0 0 330 112" className={cn("w-full", className)} aria-hidden>
       {/* trailer */}

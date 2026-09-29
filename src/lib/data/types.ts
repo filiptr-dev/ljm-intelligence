@@ -82,12 +82,24 @@ export type Lead = {
   score: number
 }
 
+/**
+ * The demo client. Real company (LJM International, Lincoln Park NJ) — treat
+ * the address/phone/email as public site data, not as something to contact
+ * without consent. `dispatcher` is a plausible demo name, clearly labelled as
+ * demo copy in the sidebar; NOT asserted as a real employee.
+ * No fleet-truck count on purpose: stating "N trucks" as fact about a real
+ * client is the kind of small lie that lands wrong in a first meeting.
+ */
 export const CLIENT = {
-  company: "Ironline Transport",
-  dispatcher: "Mark Davis",
-  email: "dispatch@ironline-transport.com",
-  phone: "+1 (312) 555-0148",
-  fleet: "48 trucks · US & EU",
+  company: "LJM International",
+  legalName: "LJM International",
+  dispatcher: "Nick Rivera",
+  email: "safety@ljminternational.com",
+  phone: "862-203-4274",
+  address: "22 Troy Lane, Lincoln Park, NJ 07035",
+  website: "ljminternational.com",
+  founded: 2017,
+  fleet: "long-haul dry van · eastern US",
 }
 
 /** "Now", truncated to the hour, so history always ends today; 18 months of data. */

@@ -58,7 +58,7 @@ const GOAL_HINT: Record<GoalType, string> = {
 
 const DEFAULT_FOLLOW_UPS: FollowUp[] = [
   { afterDays: 3, subject: "Re: {{company}} capacity", body: "Hi {{first_name}},\n\nJust following up on my email below. We still have {{equipment}} trucks on {{lane}} this week. Would a quick rate help?\n\nBest regards,\n{{sender}}" },
-  { afterDays: 7, subject: "Last note from Ironline Transport", body: "Hi {{first_name}},\n\nI don't want to fill your inbox, so this is my last note. If {{lane}} ever needs a reliable truck, just reply to this email.\n\nBest regards,\n{{sender}}" },
+  { afterDays: 7, subject: "Last note from LJM International", body: "Hi {{first_name}},\n\nI don't want to fill your inbox, so this is my last note. If {{lane}} ever needs a reliable truck, just reply to this email.\n\nBest regards,\n{{sender}}" },
   { afterDays: 14, subject: "Still need trucks on {{lane}}?", body: "Hi {{first_name}},\n\nChecking in one more time. We have new capacity on {{lane}} next month.\n\nBest regards,\n{{sender}}" },
 ]
 
@@ -99,11 +99,11 @@ const FIELDS = [
   { tag: "{{sender}}", label: "Your name", hint: "Your dispatcher's name, used in the sign-off" },
 ]
 const ACCENTS = [
-  { name: "Safety yellow", hex: "#f5b800" },
+  { name: "LJM red", hex: "#BC2444" },
   { name: "Fleet blue", hex: "#2f63a8" },
-  { name: "Diesel red", hex: "#c4432b" },
   { name: "Highway green", hex: "#3d8f5a" },
-  { name: "Asphalt", hex: "#16171a" },
+  { name: "Steel", hex: "#8b9098" },
+  { name: "Charcoal", hex: "#2B2B2B" },
 ]
 
 const existingToRecipient = (b: ExistingRow): Recipient => ({

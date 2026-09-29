@@ -32,12 +32,12 @@ const QUICK: Record<"capacity" | "shipper", { type: string; subject: string; bod
   capacity: {
     type: "new_leads",
     subject: "{{equipment}} capacity for {{company}}",
-    body: "Hi {{first_name}},\n\nI'm reaching out from Ironline Transport, an asset-based carrier with 48 trucks in the US and Europe. We run {{equipment}} daily on {{lane}}, which is right in your network.\n\nWe answer quotes within 15 minutes and track every load live. Anything we can cover this week?\n\nBest regards,\n{{sender}}",
+    body: "Hi {{first_name}},\n\nI'm reaching out from LJM International, a dry-van carrier based in Lincoln Park, NJ, running the eastern US. We run {{equipment}} daily on {{lane}}, which is right in your network.\n\nWe answer quotes within 15 minutes and track every load live. Anything we can cover this week?\n\nBest regards,\n{{sender}}",
   },
   shipper: {
     type: "shipper_direct",
     subject: "Direct {{equipment}} trucks for {{company}}, no broker in between",
-    body: "Hi {{first_name}},\n\nI'm reaching out from Ironline Transport. We are an asset-based carrier with 48 of our own trucks in the US and Europe, running {{equipment}} on {{lane}} every week.\n\nWorking with us directly means our own drivers, live tracking on every load and no broker margin on top of the rate. Happy to start with one trial load.\n\nBest regards,\n{{sender}}",
+    body: "Hi {{first_name}},\n\nI'm reaching out from LJM International, a dry-van carrier based in Lincoln Park, NJ. We run {{equipment}} on {{lane}} every week across the eastern US.\n\nWorking with us directly means our own drivers, live tracking on every load and no broker margin on top of the rate. Happy to start with one trial load.\n\nBest regards,\n{{sender}}",
   },
 }
 
