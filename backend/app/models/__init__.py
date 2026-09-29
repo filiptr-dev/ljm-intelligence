@@ -6,26 +6,26 @@ Later slices only add columns / indexes, never restructure.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
-    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-
 
 # Prefer JSONB on Postgres; JSON fallback keeps the models importable elsewhere (docs, tools).
 JSONType = JSONB().with_variant(JSON(), "sqlite")
@@ -204,3 +204,41 @@ class CapacityPost(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("capacity_posts_kind_status", "kind", "status"),)
+
+
+class CallOutcome(Base):
+    """One row per phone-call decision on a Lead.
+
+    Outcomes are events, not state, so we get a full timeline per lead:
+        booked · callback · not_interested · no_answer
+
+    Additive to the baseline schema — never restructures shipped tables. Migration 0003.
+    """
+
+    __tablename__ = "call_outcomes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    lead_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False
+    )
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Only meaningful when outcome='callback'; Date (no time) — we schedule by day.
+    callback_at: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    logged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    logged_by: Mapped[str | None] = mapped_column(String(128))
+
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('booked','callback','not_interested','no_answer')",
+            name="call_outcomes_outcome_check",
+        ),
+        Index("call_outcomes_lead_id_logged_at", "lead_id", "logged_at"),
+        Index(
+            "call_outcomes_callback_at",
+            "callback_at",
+            postgresql_where=(outcome == "callback"),
+        ),
+    )
