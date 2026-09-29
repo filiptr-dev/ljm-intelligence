@@ -4,7 +4,7 @@ import * as React from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Check, Clock, Forward, Plus, Reply, Sparkles, Trophy } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import type { EmailPurpose } from "@/lib/ai/types"
 import { POSITIVE, PURPOSE_LABEL, TONE_LABEL, type Campaign, type CampaignRecipient, type ReplyCategory } from "@/lib/campaigns/types"
 import { LEAD_KIND_LABEL } from "@/lib/data/types"
@@ -12,7 +12,7 @@ import { num, timeAgo } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { pctText, ReplyChip } from "./campaign-bits"
-import { EmailComposer, type ComposerInit, type ContactOption } from "./email-composer"
+import { type ComposerInit, type ContactOption } from "./email-composer"
 import { renderTemplate } from "./email-preview"
 import { useEngine } from "./engine"
 import { SentimentDot } from "./intent"
@@ -59,7 +59,7 @@ function nextStep(r: CampaignRecipient, speedLift: number): { text: string; init
   }
 }
 
-export function EmailsInbox({ history, contacts, campaignReplyRate, speedLift, initial }: { history: Campaign[]; contacts: ContactOption[]; campaignReplyRate: number; speedLift: number; initial: ComposerInit }) {
+export function EmailsInbox({ history, campaignReplyRate, speedLift }: { history: Campaign[]; contacts?: ContactOption[]; campaignReplyRate: number; speedLift: number; initial?: ComposerInit }) {
   const { campaigns, sendFollowUp } = useEngine()
   const emails = React.useMemo(
     () => [...campaigns.filter((c) => c.single), ...history].sort((a, b) => (b.schedule?.at ?? b.createdAt) - (a.schedule?.at ?? a.createdAt)),
@@ -68,8 +68,14 @@ export function EmailsInbox({ history, contacts, campaignReplyRate, speedLift, i
   const [filter, setFilter] = React.useState<Filter>("all")
   // open on the latest reply: that's where the AI has something to say
   const [selectedId, setSelectedId] = React.useState<string | undefined>(history.find((c) => c.recipients[0].reply)?.id)
-  const [composer, setComposer] = React.useState<{ open: boolean; init: ComposerInit; key: number }>({ open: !!initial.to, init: initial, key: 0 })
-  const compose = (init: ComposerInit = {}) => setComposer((c) => ({ open: true, init, key: c.key + 1 }))
+  // The composer is now a full page — build a link with the same init fields.
+  const composeHref = (init: ComposerInit = {}) => {
+    const p = new URLSearchParams()
+    if (init.to) p.set("broker", init.to)
+    if (init.purpose) p.set("purpose", init.purpose)
+    const qs = p.toString()
+    return qs ? `/emails/compose?${qs}` : "/emails/compose"
+  }
 
   const now = useNow()
   const shown = emails.filter((c) => {
@@ -103,9 +109,9 @@ export function EmailsInbox({ history, contacts, campaignReplyRate, speedLift, i
         title="Emails"
         description="Quick personal emails to one company, outside of campaigns: a truck that's free tomorrow, a quote to chase, a thank-you. The AI writes them, tracks opens and reads every reply."
         actions={
-          <Button size="lg" className="font-semibold" onClick={() => compose()}>
+          <Link href={composeHref()} className={cn(buttonVariants({ size: "lg" }), "font-semibold")}>
             <Plus /> New email
-          </Button>
+          </Link>
         }
       />
 
@@ -169,7 +175,7 @@ export function EmailsInbox({ history, contacts, campaignReplyRate, speedLift, i
             c={selected}
             now={now}
             speedLift={speedLift}
-            onCompose={compose}
+            composeHref={composeHref}
             onFollowUp={() => {
               sendFollowUp(selected.id)
               toast.success(`Follow-up sent to ${selected.recipients[0].contactName}`)
@@ -179,18 +185,6 @@ export function EmailsInbox({ history, contacts, campaignReplyRate, speedLift, i
           <div className="rounded-sm border border-dashed border-border p-10 text-center text-sm text-muted-foreground">Select an email to see it and the reply.</div>
         )}
       </div>
-
-      <EmailComposer
-        key={composer.key}
-        open={composer.open}
-        onOpenChange={(open) => setComposer((c) => ({ ...c, open }))}
-        contacts={contacts}
-        init={composer.init}
-        onSent={(id) => {
-          setFilter("all")
-          setSelectedId(id)
-        }}
-      />
     </>
   )
 }
@@ -206,7 +200,7 @@ function StateTag({ state }: { state: string }) {
   return <span className={cn("inline-flex h-5 items-center rounded-[3px] border px-1.5 text-[0.68rem] font-semibold whitespace-nowrap", cls[state])}>{state}</span>
 }
 
-function EmailThread({ c, now, speedLift, onCompose, onFollowUp }: { c: Campaign; now: number; speedLift: number; onCompose: (init: ComposerInit) => void; onFollowUp: () => void }) {
+function EmailThread({ c, now, speedLift, composeHref, onFollowUp }: { c: Campaign; now: number; speedLift: number; composeHref: (init?: ComposerInit) => string; onFollowUp: () => void }) {
   const r = c.recipients[0]
   const st = stateOf(c, now)
   const sentAt = c.schedule?.at ?? c.createdAt
@@ -234,7 +228,7 @@ function EmailThread({ c, now, speedLift, onCompose, onFollowUp }: { c: Campaign
           </div>
           <div className="flex shrink-0 gap-2">
             {r.kind === "broker" ? <Link href={`/brokers/${r.id}`} className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-sm hover:bg-muted">Broker profile</Link> : null}
-            <Button variant="outline" size="sm" onClick={() => onCompose({ to: r.id })}><Forward /> Email again</Button>
+            <Link href={composeHref({ to: r.id })} className={buttonVariants({ variant: "outline", size: "sm" })}><Forward /> Email again</Link>
           </div>
         </div>
         <ol className="mt-4 grid grid-cols-3 gap-1">
@@ -284,7 +278,7 @@ function EmailThread({ c, now, speedLift, onCompose, onFollowUp }: { c: Campaign
             <footer className="flex flex-wrap items-center gap-3 border-t border-border bg-muted/40 px-4 py-3">
               <Sparkles className="size-4 shrink-0 text-chart-2" />
               <p className="min-w-0 flex-1 text-sm"><span className="font-semibold">AI suggests: </span>{next.text}</p>
-              {next.init ? <Button size="sm" className="font-semibold" onClick={() => onCompose(next.init!)}>{next.label}</Button> : null}
+              {next.init ? <Link href={composeHref(next.init)} className={cn(buttonVariants({ size: "sm" }), "font-semibold")}>{next.label}</Link> : null}
             </footer>
           ) : null}
           <div className="px-4 pb-2 text-[0.7rem] text-muted-foreground">Read by the AI · {Math.round(r.reply.confidence * 100)}% confident</div>

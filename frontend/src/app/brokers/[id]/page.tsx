@@ -101,7 +101,7 @@ export default async function BrokerPage({ params }: PageProps<"/brokers/[id]">)
               <div className="font-semibold">{summary.nextAction.label}</div>
               <div className="text-sm text-muted-foreground">{summary.nextAction.detail}</div>
             </div>
-            <Link href={outreachHref} className={buttonVariants({ variant: "outline" })}>Draft email</Link>
+            <Link href={`/emails/compose?broker=${id}`} className={buttonVariants({ variant: "outline" })}>Draft email</Link>
           </div>
         </Panel>
       </div>
