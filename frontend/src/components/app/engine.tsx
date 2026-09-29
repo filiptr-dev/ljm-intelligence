@@ -221,7 +221,7 @@ export function EngineProvider({
         push({ kind: "duplicate", text: `Skipped ${pick(rng, knownNames)}`, detail: "Already in your broker database" })
         setCounters((c) => ({ ...c, scanned: c.scanned + 1 }))
       } else {
-        const region: Region = rng() < 0.6 ? "US" : "EU"
+        const region: Region = "US"
         const source = pick(rng, SOURCE_LIST[region])
         PAGES[source] = (PAGES[source] ?? Math.floor(rng() * 400) + 40) + 1
         const batch = Math.floor(rng() * 20) + 6

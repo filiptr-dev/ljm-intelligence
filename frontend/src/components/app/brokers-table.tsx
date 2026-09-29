@@ -47,7 +47,6 @@ const SORTS: Record<string, { label: string; fn: (a: BrokerRow, b: BrokerRow) =>
 export function BrokersTable({ rows, initialSegment, initialSort }: { rows: BrokerRow[]; initialSegment: string; initialSort: string }) {
   const router = useRouter()
   const [segment, setSegment] = React.useState<string>(initialSegment)
-  const [region, setRegion] = React.useState<"all" | Region>("all")
   const [q, setQ] = React.useState("")
   const [sort, setSort] = React.useState(SORTS[initialSort] ? initialSort : "health")
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
@@ -56,10 +55,9 @@ export function BrokersTable({ rows, initialSegment, initialSort }: { rows: Brok
     () =>
       rows
         .filter((r) => segment === "All" || r.segment === segment)
-        .filter((r) => region === "all" || r.region === region)
         .filter((r) => !q || `${r.name} ${r.hq} ${r.contact} ${r.registration}`.toLowerCase().includes(q.toLowerCase()))
         .sort(SORTS[sort].fn),
-    [rows, segment, region, q, sort],
+    [rows, segment, q, sort],
   )
 
   const counts = React.useMemo(() => {
@@ -101,14 +99,6 @@ export function BrokersTable({ rows, initialSegment, initialSort }: { rows: Brok
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search broker, city, MC / VAT…" className="pl-8" />
         </div>
-        <Select value={region} onValueChange={(v) => setRegion((v ?? "all") as "all" | Region)}>
-          <SelectTrigger className="w-36"><SelectValue>{region === "all" ? "US & Europe" : region === "US" ? "United States" : "Europe"}</SelectValue></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">US &amp; Europe</SelectItem>
-            <SelectItem value="US">United States</SelectItem>
-            <SelectItem value="EU">Europe</SelectItem>
-          </SelectContent>
-        </Select>
         <Select value={sort} onValueChange={(v) => setSort(v ?? "health")}>
           <SelectTrigger className="w-48"><span className="text-muted-foreground">Sort:</span> <SelectValue>{SORTS[sort].label}</SelectValue></SelectTrigger>
           <SelectContent>

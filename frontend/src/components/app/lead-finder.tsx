@@ -47,7 +47,6 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   const router = useRouter()
   const { liveLeads, contacted, sendCampaign, autoOutreach, setAutoOutreach, feed } = useEngine()
   const [q, setQ] = React.useState("")
-  const [region, setRegion] = React.useState<"all" | Region>("all")
   const [minScore, setMinScore] = React.useState(0)
   const [equipment, setEquipment] = React.useState("all")
   const [kind, setKind] = React.useState<"all" | LeadKind>("all")
@@ -68,14 +67,13 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
     () =>
       all.filter(
         (l) =>
-          (region === "all" || l.region === region) &&
           (kind === "all" || l.kind === kind) &&
           l.score >= minScore &&
           (equipment === "all" || l.equipment.includes(equipment as Lead["equipment"][number])) &&
           (!hideContacted || !contacted.has(l.id)) &&
           (!q || leadHaystack(l).includes(q.toLowerCase())),
       ),
-    [all, region, kind, minScore, equipment, hideContacted, contacted, q],
+    [all, kind, minScore, equipment, hideContacted, contacted, q],
   )
   const quick = filtered.filter((l) => l.score >= 75 && l.emailVerified && !contacted.has(l.id))
 
@@ -130,7 +128,7 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
           }}
         />
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-4 2xl:grid-cols-7">
-          {(["US", "EU"] as Region[]).flatMap((r) => SOURCE_LIST[r].map((src) => ({ r, src }))).map(({ r, src }) => {
+          {(["US"] as Region[]).flatMap((r) => SOURCE_LIST[r].map((src) => ({ r, src }))).map(({ r, src }) => {
             const active = scanning === `${r}:${src}`
             return (
               <div key={`${r}:${src}`} className={cn("flex items-center gap-2.5 bg-card px-3 py-2.5", active && "bg-accent")}>
@@ -159,7 +157,6 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
               onChange={setKind}
               options={[{ value: "all", label: "Everyone" }, { value: "Broker", label: "Brokers" }, { value: "Shipper", label: "Shippers" }, { value: "Forwarder", label: "Forwarders / 3PL" }]}
             />
-            <Segmented value={region} onChange={setRegion} options={[{ value: "all", label: "All" }, { value: "US", label: "US" }, { value: "EU", label: "Europe" }]} />
             <Select value={equipment} onValueChange={(v) => setEquipment(v ?? "all")}>
               <SelectTrigger className="w-40"><SelectValue>{equipment === "all" ? "All equipment" : equipment}</SelectValue></SelectTrigger>
               <SelectContent>

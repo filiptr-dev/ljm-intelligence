@@ -56,6 +56,12 @@ export function buildProfile(best: { entity: Profileable; weight: number }[]): L
   for (const region of ["US", "EU"] as Region[]) {
     const rows = best.filter((b) => b.entity.region === region)
     const vecs = rows.map((r) => featureVector(r.entity).map((v) => v * r.weight))
+    if (!vecs.length) {
+      // Region has no brokers (e.g. LJM operates US-only): give it a zero vector of the right shape.
+      const len = featureVector({ region, zone: ZONES[0] ?? "", lanes: [], equipment: [], size: "Small" }).length
+      out[region] = Array(len).fill(0)
+      continue
+    }
     out[region] = vecs[0].map((_, j) => vecs.reduce((s, v) => s + v[j], 0))
   }
   return out

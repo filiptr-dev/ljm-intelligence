@@ -38,11 +38,10 @@ export default async function OverviewPage() {
 
       <MonitoringHero sources={sources} />
 
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Loads booked · 90 days" value={k.booked90} delta={bookedDelta} deltaLabel={`${bookedDelta >= 0 ? "+" : ""}${pct(bookedDelta)} vs previous 90 days`} />
         <StatTile label="Win rate · 90 days" value={pct(k.winRate90)} delta={winDelta} deltaLabel={`${winDelta >= 0 ? "+" : ""}${Math.round(winDelta * 100)} pts vs previous 90 days`} />
-        <StatTile label="US revenue · 90 days" value={money(k.revenueUSD90, "US", true)} sub={`${money(k.revenueUSD, "US", true)} over 18 months`} />
-        <StatTile label="EU revenue · 90 days" value={money(k.revenueEUR90, "EU", true)} sub={`${money(k.revenueEUR, "EU", true)} over 18 months`} />
+        <StatTile label="Revenue · 90 days" value={money(k.revenueUSD90, "US", true)} sub={`${money(k.revenueUSD, "US", true)} over 18 months`} />
         <StatTile label="Median quote reply time" value={`${Math.round(k.medianResponseMin)} min`} sub="Time from load offer to your quote" />
       </div>
 

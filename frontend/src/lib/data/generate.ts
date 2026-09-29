@@ -50,7 +50,7 @@ function makeBrokers(rng: Rng): Broker[] {
   const used = new Set<string>()
   const brokers: Broker[] = []
   for (let i = 0; i < 150; i++) {
-    const region: Region = i < 90 ? "US" : "EU"
+    const region: Region = "US"
     const persona = weighted(rng, PERSONA_WEIGHTS)
     // brokers that work well with the client tend to run the client's lanes
     const bias = persona === "loyal" || persona === "growing" ? 4 : persona === "occasional" ? 0.6 : 1.5

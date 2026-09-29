@@ -118,7 +118,6 @@ export function OutreachBuilder({
     return new Set()
   })
   const [q, setQ] = React.useState("")
-  const [region, setRegion] = React.useState<"all" | Region>("all")
   const [segment, setSegment] = React.useState<string>(initial.segment ?? "all")
   const [minScore, setMinScore] = React.useState("0")
   const [kindFilter, setKindFilter] = React.useState<"all" | LeadKind>(tplKind && tplKind !== "existing" ? tplKind : "all")
@@ -161,7 +160,6 @@ export function OutreachBuilder({
   const leadRows = allLeads.filter(
     (l) =>
       showLeads &&
-      (region === "all" || l.region === region) &&
       l.score >= Number(minScore) &&
       (kindFilter === "all" || l.kind === kindFilter) &&
       (!hideContacted || !contacted.has(l.id)) &&
@@ -170,7 +168,6 @@ export function OutreachBuilder({
   const existingRows = existing.filter(
     (b) =>
       showExisting &&
-      (region === "all" || b.region === region) &&
       (segment === "all" || b.segment === segment) &&
       (!q || `${b.name} ${b.contactName} ${b.email} ${b.lane} ${b.equipment} ${b.segment}`.toLowerCase().includes(q.toLowerCase())),
   )
@@ -362,7 +359,6 @@ export function OutreachBuilder({
                   { value: "both", label: "Both" },
                 ]}
               />
-              <Segmented value={region} onChange={setRegion} options={[{ value: "all", label: "US & EU" }, { value: "US", label: "US" }, { value: "EU", label: "EU" }]} />
             </div>
 
             <div className="relative mt-3">

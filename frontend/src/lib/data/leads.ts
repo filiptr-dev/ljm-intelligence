@@ -40,7 +40,8 @@ const INDUSTRY_EQUIPMENT: Record<string, Record<Region, Equipment[]>> = {
 /** A crawled company that needs transport, without its score (scored against the lookalike profile). */
 export function makeLead(rng: Rng, n: number, used: Set<string>, discoveredAt: Date): Omit<Lead, "score"> {
   const kind = weighted<LeadKind>(rng, [["Broker", 45], ["Shipper", 40], ["Forwarder", 15]])
-  const region: Region = chance(rng, 0.6) ? "US" : "EU"
+  const region: Region = "US"
+  void chance
   const hq = fitWeightedCity(rng, region, 1.2)
   const industry = kind === "Shipper" ? pick(rng, INDUSTRIES) : undefined
   const { name, contact, registration } = makeCompany(rng, hq, used, kind, industry)
