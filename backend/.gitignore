@@ -1,2 +1,8 @@
 # Overpass on-disk cache (Slice 2b)
 .cache/
+
+# Local sqlite scratch DB for offline dev (never committed).
+local-dev.db
+local-dev.db-journal
+*.sqlite
+*.sqlite3

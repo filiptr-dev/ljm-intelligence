@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 from sqlalchemy import MetaData, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -26,13 +27,23 @@ class Base(DeclarativeBase):
 
 
 def create_engine(settings: Settings) -> AsyncEngine:
-    """Neon-friendly engine.
+    """DB engine. Postgres-tuned for Neon; sqlite fallback for local/tests.
 
+    Postgres branch (Neon / any postgres backend):
     - `pool_pre_ping`: Neon autosuspend + Render idle both drop connections; a ping avoids a stale-conn 500.
     - `prepare_threshold=None`: psycopg3 skips server-side prepared statements, so a pgbouncer transaction
       pooler would also work if we ever switch to it.
     - `connect_timeout=15`: first connect after Neon autosuspend can be slow (cold branch wake).
+
+    Sqlite branch: aiosqlite rejects the psycopg-only `connect_args` above AND
+    the pool sizing (StaticPool-style single-conn is what makes an in-memory DB
+    usable across sessions). We only take the sqlite branch when the URL says
+    so — Postgres behaviour is byte-for-byte the same as before.
     """
+    backend = make_url(settings.database_url).get_backend_name()
+    if backend == "sqlite":
+        # No pool tuning, no psycopg kwargs — just a working async engine.
+        return create_async_engine(settings.database_url)
     return create_async_engine(
         settings.database_url,
         pool_size=settings.db_pool_size,

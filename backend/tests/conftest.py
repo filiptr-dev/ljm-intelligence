@@ -93,6 +93,10 @@ def _test_create_engine(settings):
 
 
 _db_mod.create_engine = _test_create_engine
+# Keep a handle to the un-shimmed builder so tests can exercise the real
+# create_engine() (e.g. verifying the sqlite backend branch) without loading
+# a fresh module and re-triggering side effects.
+_db_mod._orig_create_engine = _orig_create_engine
 # app.main did `from app.db import create_engine` — rebind that name too so the
 # lifespan uses our shim.
 import app.main as _main_mod

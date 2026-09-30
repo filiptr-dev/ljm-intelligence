@@ -7,7 +7,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 import app.models  # noqa: F401 — registers tables on Base.metadata
@@ -41,9 +41,16 @@ def _run(connection: Connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(
-        _database_url(), connect_args={"prepare_threshold": None, "connect_timeout": 15}
-    )
+    url = _database_url()
+    # Mirror app.db.create_engine: psycopg-only connect_args must not be passed
+    # to aiosqlite (which rejects `prepare_threshold` / `connect_timeout`), so
+    # only apply them for a Postgres backend. Postgres path unchanged.
+    if make_url(url).get_backend_name() == "sqlite":
+        engine = create_async_engine(url)
+    else:
+        engine = create_async_engine(
+            url, connect_args={"prepare_threshold": None, "connect_timeout": 15}
+        )
     try:
         async with engine.connect() as connection:
             await connection.run_sync(_run)
