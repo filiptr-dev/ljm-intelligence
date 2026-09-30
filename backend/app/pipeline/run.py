@@ -74,7 +74,13 @@ async def run_crawl(
     counts = {"discovered": 0, "new": 0, "scored": 0, "auto_contacted": 0, "errors": 0}
     error: str | None = None
     try:
-        fmcsa_leads = await fetch_fmcsa(limit=fmcsa_limit)
+        # Slice 1: fetch_fmcsa is now an async generator. The pipeline still
+        # consumes one page — the frontier / page loop / per-run caps land in
+        # slice 2. `max_pages=1` keeps the contract identical for now.
+        fmcsa_leads: list = []
+        async for _page in fetch_fmcsa(page_size=fmcsa_limit, max_pages=1):
+            fmcsa_leads = _page
+            break
         counts["discovered"] += len(fmcsa_leads)
         async with sessionmaker() as s:
             new_ids: list[str] = []

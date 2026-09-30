@@ -67,8 +67,10 @@ async def test_crawl_run_accepts_correct_secret_and_returns_202() -> None:
     app.state.sessionmaker = await _sqlite_sessionmaker()
 
     # No FMCSA call, no Gemini, no Overpass — just prove the auth + 202 path.
+    # fetch_fmcsa is an async generator (slice 1 keyset paginator); fake it as one.
     async def fake_fetch(**_):
-        return []
+        if False:  # pragma: no cover - typing hint that this is an async generator
+            yield []
 
     async def fake_overpass(*_a, **_kw):  # belt-and-suspenders; enabled=False already skips
         return []
