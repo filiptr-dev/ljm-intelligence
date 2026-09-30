@@ -35,6 +35,11 @@ services:
         value: gemini-3.5-flash-lite
       - key: GEMINI_MODEL_DISCOVERY
         value: gemini-3.5-flash-lite
+      # OSM Overpass ingest — bound the per-crawl state count so each run stays short.
+      # With 32 states × 2s throttle + 30s timeout, an unbounded run could exceed 20 min.
+      # 8 states = ~16s throttle time minimum (worst-case ~4 min). Increase if full coverage needed.
+      - key: OSM_OVERPASS_MAX_STATES
+        value: "8"
       # Shared secret with the GitHub Actions cron.
       - key: CRON_SECRET
         sync: false

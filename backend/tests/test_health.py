@@ -22,6 +22,11 @@ async def test_health_reports_db_up() -> None:
 
 def test_settings_load() -> None:
     s = get_settings()
-    assert s.database_url.startswith("postgresql+psycopg://"), "DATABASE_URL not rewritten to psycopg driver"
+    # Under the test conftest we pin DATABASE_URL to sqlite for prod safety, so the
+    # driver-rewrite assertion is exercised directly against psycopg_url() instead.
+    from app.config import psycopg_url
+
+    assert psycopg_url("postgres://u:p@h/db").startswith("postgresql+psycopg://")
+    assert psycopg_url("postgresql://u:p@h/db").startswith("postgresql+psycopg://")
     # Simulated delivery MUST default on unless explicitly turned off in .env.
     assert s.simulated_delivery is True

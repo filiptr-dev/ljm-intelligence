@@ -34,9 +34,7 @@ class Settings(BaseSettings):
     db_health_timeout: float = Field(default=8.0, gt=0)
 
     # Vercel origin(s). Comma-separated in env.
-    cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
-    )
+    cors_allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:3000"])
     cors_allowed_origin_regex: str | None = None
 
     # Gemini — used from Slice 3 on. Present here so config is complete.
@@ -50,6 +48,23 @@ class Settings(BaseSettings):
     simulated_delivery: bool = True
 
     frontend_origin: str | None = None
+
+    # Shipper Finder — OSM Overpass ingest (Slice 2b). Enabled by default; the
+    # source itself fails gracefully so a bad Overpass day never blocks the
+    # FMCSA pass. `osm_overpass_max_states` bounds how many in-region states
+    # each run touches (0 = all 32); the demo cron sets a low value to keep
+    # runs short. `osm_overpass_states` optionally overrides the state list
+    # (comma-separated 2-letter codes) — useful for a fast smoke run.
+    osm_overpass_enabled: bool = True
+    osm_overpass_max_states: int = Field(default=0, ge=0, le=64)
+    osm_overpass_states: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("osm_overpass_states", mode="before")
+    @classmethod
+    def _split_osm_states(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [s.strip().upper() for s in value.split(",") if s.strip()]
+        return value
 
     @field_validator("database_url")
     @classmethod

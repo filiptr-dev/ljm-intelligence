@@ -14,9 +14,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
 from app.models import CrawlRun, Lead, LeadSource
-from app.region import in_region
+from app.pipeline.shipper_ingest import (
+    ingest_osm_incomings,
+    project_fmcsa_shippers_to_candidates,
+)
+from app.region import IN_REGION_STATES, in_region
 from app.sources.emails import add_contact_email
 from app.sources.fmcsa import fetch_fmcsa
+from app.sources.osm_overpass import elements_to_incomings, fetch_overpass_elements
 
 log = logging.getLogger(__name__)
 
@@ -63,9 +68,7 @@ async def run_crawl(
             await s.commit()
     else:
         async with sessionmaker() as s:
-            await s.execute(
-                update(CrawlRun).where(CrawlRun.id == run_id).values(status="running")
-            )
+            await s.execute(update(CrawlRun).where(CrawlRun.id == run_id).values(status="running"))
             await s.commit()
 
     counts = {"discovered": 0, "new": 0, "scored": 0, "auto_contacted": 0, "errors": 0}
@@ -136,6 +139,22 @@ async def run_crawl(
             counts["new"] += len(new_ids)
             await s.commit()
 
+        # Shipper Finder stage — FMCSA-shipper projection + optional OSM Overpass
+        # ingest (plan Slice 2b). Wrapped in its own try/except so a source outage
+        # never touches the FMCSA pass we just committed.
+        try:
+            shipper_counts = await _run_shipper_stage(
+                sessionmaker,
+                settings,
+                fmcsa_leads=fmcsa_leads,
+                started=started,
+            )
+            for k, v in shipper_counts.items():
+                counts[k] = counts.get(k, 0) + v
+        except Exception:
+            log.exception("run_crawl: shipper stage failed; FMCSA leads persisted")
+            counts["errors"] += 1
+
         try:
             gemini_counts = await run_gemini_stage(sessionmaker, settings, run_id=run_id, started=started)
             for k, v in gemini_counts.items():
@@ -159,6 +178,65 @@ async def run_crawl(
         await s.commit()
 
     return RunSummary(id=run_id, counts=counts)
+
+
+async def _run_shipper_stage(
+    sessionmaker: async_sessionmaker,
+    settings: Settings,
+    *,
+    fmcsa_leads: list,
+    started: datetime,
+) -> dict[str, int]:
+    """Slice 2b — project FMCSA shippers, then optionally ingest OSM Overpass finds.
+
+    Every candidate — FMCSA or OSM — flows through `match_and_merge` inside
+    `shipper_ingest`, so a repeat sighting updates the existing row and a
+    cross-source hit unifies onto one row with both sources.
+
+    Overpass is optional (`settings.osm_overpass_enabled`); per-state failures
+    log and continue so a bad Overpass day never poisons the crawl.
+    """
+    totals = {"shippers_projected": 0, "osm_new": 0, "osm_merged": 0, "osm_states_failed": 0}
+
+    # 1) FMCSA-shipper projection. Own its own transaction so a later OSM error
+    #    can't roll it back.
+    async with sessionmaker() as s:
+        proj = await project_fmcsa_shippers_to_candidates(s, fmcsa_leads, started=started)
+        await s.commit()
+    totals["shippers_projected"] = proj.get("projected_new", 0) + proj.get("projected_updated", 0)
+
+    # 2) OSM Overpass — one query per in-region state, throttled + cached.
+    if not settings.osm_overpass_enabled:
+        return totals
+
+    # Which states to touch. Explicit override wins; else the full in-region set.
+    states = list(settings.osm_overpass_states) if settings.osm_overpass_states else sorted(IN_REGION_STATES)
+    if settings.osm_overpass_max_states:
+        states = states[: settings.osm_overpass_max_states]
+
+    for state in states:
+        try:
+            elements = await fetch_overpass_elements(state)
+        except Exception:
+            log.exception("run_crawl: overpass fetch raised for %s; continuing", state)
+            totals["osm_states_failed"] += 1
+            continue
+        if not elements:
+            continue
+        incomings = elements_to_incomings(elements, state)
+        if not incomings:
+            continue
+        try:
+            async with sessionmaker() as s:
+                osm_counts = await ingest_osm_incomings(s, incomings, started=started)
+                await s.commit()
+            totals["osm_new"] += osm_counts.get("osm_new", 0)
+            totals["osm_merged"] += osm_counts.get("osm_merged", 0)
+        except Exception:
+            log.exception("run_crawl: osm ingest failed for %s; continuing", state)
+            totals["osm_states_failed"] += 1
+
+    return totals
 
 
 async def get_run(sessionmaker: async_sessionmaker, run_id: str) -> CrawlRun | None:
