@@ -23,17 +23,47 @@ from app.sources.gemini_search import GeminiDiscoverer
 log = logging.getLogger(__name__)
 
 
+_ERROR_TRUNCATE = 500
+
+
+def _truncate(msg: str, limit: int = _ERROR_TRUNCATE) -> str:
+    return msg if len(msg) <= limit else msg[: limit - 1] + "…"
+
+
+def _classify_gemini_error(exc: Exception) -> str:
+    """Best-effort exception → status. Quota / rate-limit shapes vary by SDK; keyword-match."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if any(k in text for k in ("quota", "rate limit", "rate-limit", "resource_exhausted", "429")):
+        return "quota_exceeded"
+    return "discovery_failed"
+
+
 async def run_gemini_stage(
     sessionmaker: async_sessionmaker,
     settings: Settings,
     *,
     run_id: str,
     started: datetime,
-) -> dict[str, int]:
-    counts = {"gemini_discovered": 0, "gemini_new": 0, "scored": 0}
+) -> dict:
+    """Discovery + scoring stage.
+
+    Returns `counts` with numeric progress *and* explicit visibility keys:
+      - `gemini_status`: "ok" | "no_api_key" | "discovery_failed" | "quota_exceeded" | "scoring_failed"
+      - `gemini_error`: truncated exception string (only when status != "ok"/"no_api_key")
+
+    Never rolls back FMCSA work — a failed discovery still commits whatever
+    leads or scores landed before the failure.
+    """
+    counts: dict = {
+        "gemini_discovered": 0,
+        "gemini_new": 0,
+        "scored": 0,
+        "gemini_status": "ok",
+    }
     key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None
     if not key:
         log.info("gemini stage: GEMINI_API_KEY not set, skipping discovery + scoring")
+        counts["gemini_status"] = "no_api_key"
         return counts
 
     import os
@@ -44,9 +74,11 @@ async def run_gemini_stage(
     discoverer = GeminiDiscoverer(api_key=key, model=discovery_model)
     try:
         discovered = await discoverer.discover(target_count=8)
-    except Exception:
+    except Exception as exc:
         log.exception("gemini discovery failed")
-        discovered = []
+        counts["gemini_status"] = _classify_gemini_error(exc)
+        counts["gemini_error"] = _truncate(f"{type(exc).__name__}: {exc}")
+        return counts
 
     counts["gemini_discovered"] = len(discovered)
 
@@ -125,14 +157,17 @@ async def run_gemini_stage(
 
     scorer = GeminiScorer(api_key=key, model=scoring_model)
     scored = 0
+    first_scoring_exc: Exception | None = None
     for i, lead in enumerate(unscored):
         if i:
             # Space calls at ~1/s to avoid tripping free-tier RPM.
             await asyncio.sleep(1.0)
         try:
             result = await scorer.score(lead)
-        except Exception:
+        except Exception as exc:
             log.exception("gemini scoring failed for %s", lead.id)
+            if first_scoring_exc is None:
+                first_scoring_exc = exc
             continue
         async with sessionmaker() as s:
             s.add(
@@ -150,4 +185,12 @@ async def run_gemini_stage(
         scored += 1
 
     counts["scored"] = scored
+    # If every scoring call failed and none landed, surface the reason.
+    if unscored and scored == 0 and first_scoring_exc is not None:
+        counts["gemini_status"] = (
+            "quota_exceeded"
+            if _classify_gemini_error(first_scoring_exc) == "quota_exceeded"
+            else "scoring_failed"
+        )
+        counts["gemini_error"] = _truncate(f"{type(first_scoring_exc).__name__}: {first_scoring_exc}")
     return counts

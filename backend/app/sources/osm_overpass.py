@@ -179,12 +179,17 @@ async def fetch_overpass_elements(
     cache_dir: Path | None = None,
     cache_ttl_seconds: int = CACHE_TTL_SECONDS,
     throttle: bool = True,
+    raise_on_error: bool = False,
 ) -> list[OverpassElement]:
     """Fetch Overpass elements for `state`. Cached, throttled, graceful.
 
-    Returns [] on any failure (HTTP error, network error, JSON parse error,
-    unknown state). Caller is expected to log-and-continue — the crawler
-    must never fail because Overpass is having a bad day.
+    Default behaviour returns [] on any failure (HTTP error, network error,
+    JSON parse error, unknown state) — the crawler must never fail because
+    Overpass is having a bad day. Set `raise_on_error=True` when the caller
+    wants to *count* those failures (plan slice 3 — `osm_states_failed` /
+    `osm_status`): all HTTP / network / JSON-parse failures are re-raised as
+    the original `httpx.HTTPError` or `ValueError`. An unknown state (no bbox)
+    still returns [] — it's a config issue, not a fetch failure.
 
     `client` can be a pre-built AsyncClient (with e.g. a MockTransport for
     tests). If None, a fresh client is created per call.
@@ -218,6 +223,8 @@ async def fetch_overpass_elements(
         payload = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("overpass: fetch failed for %s: %s", state, exc)
+        if raise_on_error:
+            raise
         return []
     finally:
         if owns_client:
@@ -225,6 +232,8 @@ async def fetch_overpass_elements(
 
     if not isinstance(payload, dict):
         log.warning("overpass: unexpected payload shape for %s (not a dict)", state)
+        if raise_on_error:
+            raise ValueError(f"overpass: unexpected payload shape for {state} (not a dict)")
         return []
 
     _write_cache(cpath, payload)

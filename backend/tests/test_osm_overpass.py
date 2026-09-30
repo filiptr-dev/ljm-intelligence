@@ -230,3 +230,35 @@ async def test_cache_written_to_disk(cache_dir: Path):
     assert len(files) == 1
     payload = json.loads(files[0].read_text())
     assert isinstance(payload.get("elements"), list)
+
+
+async def test_raise_on_error_reraises_http_failure(cache_dir: Path):
+    """crawl-depth plan slice 3: callers can opt into exceptions so they can
+    count Overpass failures as `osm_states_failed` rather than silently seeing []."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="overpass down")
+
+    async with _mock_client(handler) as client:
+        with pytest.raises(httpx.HTTPError):
+            await osm_overpass.fetch_overpass_elements(
+                "NJ",
+                client=client,
+                cache_dir=cache_dir,
+                throttle=False,
+                raise_on_error=True,
+            )
+
+
+async def test_default_swallows_http_failure(cache_dir: Path):
+    """Default behaviour unchanged — still returns [] on HTTP failure so existing
+    call sites (that don't opt in) can't regress into a new exception path."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="overpass down")
+
+    async with _mock_client(handler) as client:
+        elements = await osm_overpass.fetch_overpass_elements(
+            "NJ", client=client, cache_dir=cache_dir, throttle=False
+        )
+    assert elements == []

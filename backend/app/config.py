@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash-lite"
 
+    # FMCSA paginator knobs — see plan `2026-09-30-fmcsa-crawl-depth`.
+    # `fmcsa_app_token` lifts us from the shared SODA throttle bucket to a per-app one;
+    # optional (the paginator works keyless). `fmcsa_page_size` is the SODA `$limit`.
+    # `fmcsa_per_run_page_cap` bounds a *steady-state* run (~ page_cap × page_size rows).
+    # `fmcsa_backfill_page_cap` is used only on the first run (frontier is NULL) and lets
+    # us pull a comfortable year of B/S/F registrations in one shot.
+    # `fmcsa_time_budget_s` is a soft wall-clock cap — the paginator finishes the
+    # current page then stops and records `stopped_reason="timeout"` so partial
+    # progress lands even when Render reclaims the free-tier dyno.
+    fmcsa_app_token: SecretStr | None = None
+    fmcsa_page_size: int = Field(default=500, ge=1, le=50000)
+    fmcsa_per_run_page_cap: int = Field(default=6, ge=1, le=200)
+    fmcsa_backfill_page_cap: int = Field(default=40, ge=1, le=500)
+    fmcsa_time_budget_s: float = Field(default=120.0, gt=0)
+
     # Cron shared secret — used from Slice 2 on.
     cron_secret: SecretStr | None = None
 

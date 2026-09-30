@@ -40,6 +40,22 @@ services:
       # 8 states = ~16s throttle time minimum (worst-case ~4 min). Increase if full coverage needed.
       - key: OSM_OVERPASS_MAX_STATES
         value: "8"
+      # FMCSA paginator (crawl-depth plan 2026-09-30). Defaults are already sensible;
+      # values below match Settings defaults so ops can see them in the dashboard.
+      # FMCSA_APP_TOKEN lifts SODA off the shared throttle bucket (optional; leave unset for keyless).
+      - key: FMCSA_APP_TOKEN
+        sync: false
+      - key: FMCSA_PAGE_SIZE
+        value: "500"
+      # Steady-state cap: ~3000 rows/run.
+      - key: FMCSA_PER_RUN_PAGE_CAP
+        value: "6"
+      # First-run backfill cap (no frontier yet): ~20 000 rows / ~1yr of B/S/F registrations.
+      - key: FMCSA_BACKFILL_PAGE_CAP
+        value: "40"
+      # Soft wall-clock cap; paginator finishes current page then stops with stopped_reason=timeout.
+      - key: FMCSA_TIME_BUDGET_S
+        value: "120"
       # Shared secret with the GitHub Actions cron.
       - key: CRON_SECRET
         sync: false
