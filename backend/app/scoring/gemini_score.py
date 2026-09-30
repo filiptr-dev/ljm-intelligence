@@ -41,7 +41,7 @@ class GeminiScorer:
         self.api_key = api_key
         self.model = model
 
-    async def score(self, lead) -> ScoreResult:  # noqa: ANN001 - accepts either ORM Lead or dict-shape
+    async def score(self, lead) -> ScoreResult:
         facts = {
             "name": getattr(lead, "name", None),
             "kind": getattr(lead, "kind", None),

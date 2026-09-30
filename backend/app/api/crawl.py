@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
 import logging
 from datetime import UTC, datetime
 
@@ -43,13 +42,7 @@ def _serialize(r: CrawlRun) -> CrawlRunOut:
     )
 
 
-def _check_secret(settings: Settings, provided: str | None) -> None:
-    expected = settings.cron_secret.get_secret_value() if settings.cron_secret else None
-    if not expected:
-        log.warning("CRON_SECRET not set - /crawl/run is unauthenticated. Set it before deploying.")
-        return
-    if not provided or not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=401, detail="invalid cron secret")
+from app.api._auth import check_secret as _check_secret  # re-export for backward compat
 
 
 @router.post("/run", status_code=202)

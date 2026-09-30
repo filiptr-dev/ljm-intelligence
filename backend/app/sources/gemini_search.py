@@ -79,9 +79,7 @@ class GeminiDiscoverer:
     async def discover(self, *, target_count: int = 8) -> list[DiscoveredCompany]:
         url = GEMINI_ENDPOINT.format(model=self.model)
         body = {
-            "contents": [
-                {"role": "user", "parts": [{"text": DISCOVERY_PROMPT.replace("{n}", str(target_count))}]}
-            ],
+            "contents": [{"role": "user", "parts": [{"text": DISCOVERY_PROMPT.replace("{n}", str(target_count))}]}],
             # Grounding via Google Search (Gemini 1.5+/2.x). Documented as `google_search` for 2.x.
             "tools": [{"google_search": {}}],
             "generationConfig": {"temperature": 0.4, "responseMimeType": "text/plain"},
@@ -98,7 +96,7 @@ class GeminiDiscoverer:
             text = "".join(p.get("text", "") for p in parts)
         try:
             payload = _extract_json(text)
-        except Exception:
+        except Exception:  # noqa: BLE001 — any malformed LLM payload short-circuits to []
             log.warning("gemini discovery: could not parse JSON, raw text=%r", text[:400])
             return []
 
@@ -119,7 +117,7 @@ class GeminiDiscoverer:
             kind = (row.get("kind") or "").strip().title()
             if kind not in ("Broker", "Shipper", "Forwarder"):
                 continue
-            domain = (row.get("domain") or "").strip().lower().lstrip("www.").rstrip("/")
+            domain = (row.get("domain") or "").strip().lower().rstrip("/").removeprefix("www.")
             if not domain:
                 continue
             if domain in seen_domains:

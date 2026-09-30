@@ -56,6 +56,20 @@ class Lead(Base):
     raw: Mapped[dict] = mapped_column(JSONType, default=dict)
     evidence: Mapped[dict] = mapped_column(JSONType, default=dict)
     recommendations: Mapped[list] = mapped_column(JSONType, default=list)
+    # Enrichment status (migration 0006). See app/pipeline/enrichment.py.
+    last_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    enrichment_status: Mapped[str | None] = mapped_column(String(32))
+    enrichment_error: Mapped[str | None] = mapped_column(Text)
+    is_js_only_site: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    # Company discovery — LinkedIn company page + website URL discovered via Gemini
+    # grounded search (never fetched). Evidence lives in `evidence` (citations).
+    linkedin_company_url: Mapped[str | None] = mapped_column(String(500))
+    website_url: Mapped[str | None] = mapped_column(String(500))
+    # Fit score — deterministic computation in app/scoring/fit_score.py. Current
+    # value on the row; every re-computation appended to `fit_score_history`.
+    fit_score: Mapped[int | None] = mapped_column(Integer)
+    fit_reasons: Mapped[list | None] = mapped_column(JSONType)
+    fit_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         # Partial-unique dedupe: MC → DOT → domain (plan rule).
@@ -80,7 +94,12 @@ class LeadSource(Base):
 class LeadContact(Base):
     __tablename__ = "lead_contacts"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # BigInteger on Postgres; Integer on SQLite so the rowid-alias autoincrement works in tests.
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     lead_id: Mapped[str] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"))
     name: Mapped[str | None] = mapped_column(String(255))
     title: Mapped[str | None] = mapped_column(String(255))
@@ -89,7 +108,86 @@ class LeadContact(Base):
     source: Mapped[str | None] = mapped_column(String(64))
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("lead_contacts_lead_id", "lead_id"),)
+    # Enrichment additions (migration 0006).
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    is_decision_maker: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    linkedin_url: Mapped[str | None] = mapped_column(String(500))
+    evidence: Mapped[dict | None] = mapped_column(JSONType)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[str | None] = mapped_column(String(16))
+    pipeline_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="found", server_default=text("'found'")
+    )
+    pipeline_status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("lead_contacts_lead_id", "lead_id"),
+        Index("lead_contacts_lead_dm", "lead_id", "is_decision_maker"),
+        Index("lead_contacts_lead_email", "lead_id", "email"),
+        Index("lead_contacts_pipeline_status", "pipeline_status"),
+    )
+
+
+class LeadContactProvenance(Base):
+    """Per-sighting evidence for a `lead_contacts` row.
+
+    One row per page-observation. Trust signal: N provenance rows for one contact
+    means N distinct pages sighted the same email/phone — the "sighted 3 times"
+    tooltip in the UI keys off this count.
+    """
+
+    __tablename__ = "lead_contact_provenance"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    contact_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("lead_contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    snippet: Mapped[str | None] = mapped_column(Text)
+    citations: Mapped[dict | None] = mapped_column(JSONType)
+    run_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("crawl_runs.id", ondelete="SET NULL"))
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("lead_contact_provenance_contact_disc", "contact_id", text("discovered_at DESC")),)
+
+
+class EnrichmentCandidate(Base):
+    """Pre-promotion contacts for a `shipper_candidates` row.
+
+    Copied into `lead_contacts` + `lead_contact_provenance` inside the promote
+    transaction that creates/links the `leads` row.
+    """
+
+    __tablename__ = "enrichment_candidates"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    candidate_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("shipper_candidates.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str | None] = mapped_column(String(255))
+    title: Mapped[str | None] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    linkedin_url: Mapped[str | None] = mapped_column(String(500))
+    is_decision_maker: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    confidence: Mapped[str | None] = mapped_column(String(16))
+    source: Mapped[str | None] = mapped_column(String(64))
+    source_url: Mapped[str | None] = mapped_column(String(500))
+    evidence: Mapped[dict | None] = mapped_column(JSONType)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("enrichment_candidates_cand_dm", "candidate_id", "is_decision_maker"),)
 
 
 class CrawlRun(Base):
@@ -146,12 +244,39 @@ class SettingsRow(Base):
     daily_send_cap: Mapped[int] = mapped_column(Integer, default=50)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_by: Mapped[str | None] = mapped_column(String(128))
+    # Auto-outreach (migration 0006). OFF by default. Compliance is mandatory:
+    # a run with an empty `outreach_postal_address` (in Settings env) is refused.
+    auto_outreach_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    auto_outreach_template_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("email_templates.id", ondelete="SET NULL")
+    )
+    auto_outreach_daily_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=20, server_default=text("20"))
+    # Send-window in local hours [start, end). 8..18 = 08:00–18:00.
+    auto_outreach_window_start_h: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=8, server_default=text("8")
+    )
+    auto_outreach_window_end_h: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=18, server_default=text("18")
+    )
+    # Which contact pipeline_status qualifies for auto-send. Default 'found' (never contacted yet).
+    auto_outreach_status_filter: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="found", server_default=text("'found'")
+    )
+    # Fit-score weights blob (deterministic weights; see app/scoring/fit_score.py
+    # for the DEFAULT_WEIGHTS shape). Ops can widen/narrow signals without a deploy.
+    fit_weights: Mapped[dict | None] = mapped_column(JSONType)
 
 
 class SentLog(Base):
     __tablename__ = "sent_log"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     lead_id: Mapped[str] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"))
     run_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("crawl_runs.id", ondelete="SET NULL"))
     template_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("email_templates.id", ondelete="SET NULL"))
@@ -162,6 +287,13 @@ class SentLog(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Enrichment (migration 0006): FK the FIND→CONTACT→INBOX loop keys off.
+    contact_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("lead_contacts.id", ondelete="SET NULL"),
+    )
+
+    __table_args__ = (Index("sent_log_contact_sent", "contact_id", text("sent_at DESC")),)
 
 
 class Suppression(Base):
@@ -307,6 +439,17 @@ class ShipperCandidate(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    # Enrichment additions (migration 0006). Same shape as on `leads`.
+    last_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    enrichment_status: Mapped[str | None] = mapped_column(String(32))
+    enrichment_error: Mapped[str | None] = mapped_column(Text)
+    is_js_only_site: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    linkedin_company_url: Mapped[str | None] = mapped_column(String(500))
+    website_url: Mapped[str | None] = mapped_column(String(500))
+    fit_score: Mapped[int | None] = mapped_column(Integer)
+    fit_reasons: Mapped[list | None] = mapped_column(JSONType)
+    fit_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     __table_args__ = (
         Index("shipper_candidates_state", "state"),
         # Partial index mirrors migration 0004 — only un-promoted rows.
@@ -335,3 +478,24 @@ class ShipperCandidate(Base):
             postgresql_where=(osm_ref.isnot(None)),
         ),
     )
+
+
+class FitScoreHistory(Base):
+    """Append-only history of every fit-score computation. Save everything."""
+
+    __tablename__ = "fit_score_history"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    lead_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"))
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(32), ForeignKey("shipper_candidates.id", ondelete="CASCADE")
+    )
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    reasons: Mapped[list] = mapped_column(JSONType, default=list)
+    signals: Mapped[dict] = mapped_column(JSONType, default=dict)
+    weights: Mapped[dict] = mapped_column(JSONType, default=dict)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

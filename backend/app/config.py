@@ -74,6 +74,54 @@ class Settings(BaseSettings):
     osm_overpass_max_states: int = Field(default=0, ge=0, le=64)
     osm_overpass_states: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # Enrichment (plan `2026-09-30-llm-scraper`). All quota-safe defaults.
+    enrichment_enabled: bool = True
+    enrichment_per_run_cap: int = Field(default=10, ge=0, le=200)
+    enrichment_page_cap_per_company: int = Field(default=8, ge=1, le=32)
+    enrichment_request_timeout_s: float = Field(default=15.0, gt=0)
+    enrichment_between_requests_s: float = Field(default=1.5, ge=0)
+    enrichment_cache_ttl_hours: int = Field(default=24, ge=1, le=720)
+    # Freight-relevant titles — case-insensitive substring test in the extractor + validator.
+    enrichment_titles_regex: str = (
+        r"logistics|transportation|traffic|warehouse|supply chain|distribution|shipping|"
+        r"procurement|buyer|operations|vp\s+ops|director\s+of\s+logistics"
+    )
+    discovery_industries: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "retail",
+            "food & beverage",
+            "manufacturing",
+            "building materials",
+            "paper & packaging",
+            "chemicals",
+            "steel/metals",
+            "agriculture",
+            "automotive parts",
+        ]
+    )
+    discovery_per_run_cap: int = Field(default=8, ge=0, le=50)
+    gemini_model_enrichment: str = "gemini-3.5-flash-lite"
+
+    # Auto-outreach (scope change 2026-09-30). CAN-SPAM footer address is mandatory
+    # for a run — an empty value refuses to send. Kept env-driven so ops can rotate
+    # without a DB write.
+    outreach_from_email: str = "safety@ljminternational.com"
+    outreach_from_name: str = "LJM International"
+    outreach_postal_address: str = ""
+    # Public base URL for the unsubscribe route. Rendered into every auto-send email.
+    unsubscribe_base_url: str | None = None
+    # HMAC-SHA256 secret used to sign per-contact unsubscribe tokens. Without this,
+    # tokens cannot be minted and POST /unsubscribe returns 400 — a deploy without
+    # the secret cannot mass-unsubscribe by URL enumeration.
+    unsubscribe_secret: SecretStr | None = None
+
+    @field_validator("discovery_industries", mode="before")
+    @classmethod
+    def _split_industries(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [s.strip() for s in value.split(",") if s.strip()]
+        return value
+
     @field_validator("osm_overpass_states", mode="before")
     @classmethod
     def _split_osm_states(cls, value: object) -> object:

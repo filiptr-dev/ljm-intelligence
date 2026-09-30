@@ -90,6 +90,16 @@ def _merge_scalars(existing: ShipperCandidate, incoming: IncomingCandidate, extr
         # Name — FMCSA legal name is preferred for outreach.
         if incoming.name and incoming.name.strip():
             existing.name = incoming.name.strip()
+    elif src == "GEMINI":
+        # Grounded discovery — fill nulls only, never overwrite authority.
+        if incoming.domain and not existing.domain:
+            existing.domain = incoming.domain
+        if incoming.phone and not existing.phone:
+            existing.phone = incoming.phone
+        if extra.get("primary_email") and not existing.primary_email:
+            existing.primary_email = extra["primary_email"]
+        if not (existing.name or "").strip() and incoming.name:
+            existing.name = incoming.name.strip()
     else:  # OSM
         if incoming.osm_ref:
             existing.osm_ref = incoming.osm_ref

@@ -15,7 +15,7 @@ Kept dependency-free so it can run in tests without Gemini.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.models import CapacityPost, Lead
 
@@ -56,11 +56,11 @@ def score_broker_for_post(post: CapacityPost, lead: Lead) -> Suggestion:
         fs = lead.first_seen_at
         # first_seen_at is timezone-aware from server_default; guard anyway.
         try:
-            age = datetime.now(timezone.utc) - (fs if fs.tzinfo else fs.replace(tzinfo=timezone.utc))
+            age = datetime.now(UTC) - (fs if fs.tzinfo else fs.replace(tzinfo=UTC))
             if age < timedelta(days=90):
                 score += 5
                 parts.append("new authority")
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — scoring is best-effort; a bad first_seen_at can't fail a match
             pass
 
     if lead.primary_email and lead.phone:

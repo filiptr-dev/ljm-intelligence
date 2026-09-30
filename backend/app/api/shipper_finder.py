@@ -74,6 +74,9 @@ class ShipperRowOut(BaseModel):
     reasons: list[str]
     promoted_lead_id: str | None
     match_reason: str | None
+    # Fit-score (scope change 2026-09-30). Null if never computed.
+    fit_score: int | None = None
+    fit_reasons: list[str] = Field(default_factory=list)
 
 
 class ShipperListOut(BaseModel):
@@ -119,7 +122,7 @@ class ShipperDetailOut(BaseModel):
 # ---------- serializers -----------------------------------------------------
 
 
-def _row_out(r: ShipperRow) -> ShipperRowOut:
+def _row_out(r: ShipperRow, *, fit_score: int | None = None, fit_reasons: list[str] | None = None) -> ShipperRowOut:
     return ShipperRowOut(
         id=r.id,
         name=r.name,
@@ -138,6 +141,8 @@ def _row_out(r: ShipperRow) -> ShipperRowOut:
         reasons=list(r.reasons),
         promoted_lead_id=r.promoted_lead_id,
         match_reason=r.match_reason,
+        fit_score=fit_score,
+        fit_reasons=list(fit_reasons or []),
     )
 
 
@@ -224,7 +229,7 @@ async def _rank_all(
 async def list_shippers(
     request: Request,
     state: str | None = Query(None, min_length=2, max_length=2),
-    source: Literal["FMCSA", "OSM", "Both"] | None = Query(None),
+    source: Literal["FMCSA", "OSM", "Gemini", "Both"] | None = Query(None),
     min_score: int | None = Query(None, ge=0, le=100),
     promoted: bool | None = Query(None),
     q: str | None = Query(None, max_length=128),
@@ -247,8 +252,27 @@ async def list_shippers(
     if len(rows) > limit and page:
         last = page[-1]
         next_cursor = _encode_cursor(last.score, last.id)
+
+    # Fold in fit_score/fit_reasons — one small lookup per page.
+    fit_by_id: dict[str, tuple[int | None, list[str]]] = {}
+    ids = [r.id for r in page]
+    if ids:
+        async with request.app.state.sessionmaker() as s:
+            fit_rows = (
+                await s.execute(
+                    select(ShipperCandidate.id, ShipperCandidate.fit_score, ShipperCandidate.fit_reasons).where(
+                        ShipperCandidate.id.in_(ids)
+                    )
+                )
+            ).all()
+        for cid, fs, fr in fit_rows:
+            fit_by_id[cid] = (fs, list(fr or []))
+
     return ShipperListOut(
-        items=[_row_out(r) for r in page],
+        items=[
+            _row_out(r, fit_score=fit_by_id.get(r.id, (None, []))[0], fit_reasons=fit_by_id.get(r.id, (None, []))[1])
+            for r in page
+        ],
         next_cursor=next_cursor,
     )
 
@@ -325,11 +349,18 @@ async def promote(request: Request, body: PromoteIn) -> PromoteOut:
             # Idempotent short-circuit — a candidate already pointing at a lead
             # returns the existing link, never a new lead.
             if c.promoted_lead_id:
+                # Still copy any enrichment_candidates onto the linked lead (idempotent).
+                from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
+
+                await copy_enrichment_candidates_to_lead(s, candidate_id=c.id, lead_id=c.promoted_lead_id, run_id=None)
                 return PromoteOut(lead_id=c.promoted_lead_id, created=False)
 
             existing = await _find_existing_lead(s, c)
             if existing is not None:
                 c.promoted_lead_id = existing.id
+                from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
+
+                await copy_enrichment_candidates_to_lead(s, candidate_id=c.id, lead_id=existing.id, run_id=None)
                 return PromoteOut(lead_id=existing.id, created=False)
 
             lead_id = _mint_lead_id(c)
@@ -358,6 +389,10 @@ async def promote(request: Request, body: PromoteIn) -> PromoteOut:
             )
             s.add(lead)
             c.promoted_lead_id = lead_id
+            await s.flush()
+            from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
+
+            await copy_enrichment_candidates_to_lead(s, candidate_id=c.id, lead_id=lead_id, run_id=None)
             return PromoteOut(lead_id=lead_id, created=True)
 
 
@@ -393,7 +428,7 @@ async def get_shipper(request: Request, candidate_id: str) -> ShipperDetailOut:
         filters=ShipperFilters(limit=SHIPPER_FINDER_LIMIT_CAP),
     )
     if ranked:
-        row_out = _row_out(ranked[0])
+        row_out = _row_out(ranked[0], fit_score=c.fit_score, fit_reasons=list(c.fit_reasons or []))
     else:
         row_out = ShipperRowOut(
             id=c.id,
@@ -413,6 +448,8 @@ async def get_shipper(request: Request, candidate_id: str) -> ShipperDetailOut:
             reasons=[],
             promoted_lead_id=c.promoted_lead_id,
             match_reason=c.match_reason,
+            fit_score=c.fit_score,
+            fit_reasons=list(c.fit_reasons or []),
         )
 
     promoted_out: PromotedLeadOut | None = None

@@ -70,3 +70,28 @@ services:
         value: LJM International
       - key: OUTREACH_POSTAL_ADDRESS
         value: "22 Troy Lane, Lincoln Park NJ 07035"
+      # LLM enrichment scraper (plan 2026-09-30-llm-scraper).
+      - key: ENRICHMENT_ENABLED
+        value: "true"
+      - key: ENRICHMENT_PER_RUN_CAP
+        value: "10"          # quota-safe: ≤10 site-scrapes + ≤10 LinkedIn-search calls per crawl
+      - key: ENRICHMENT_PAGE_CAP_PER_COMPANY
+        value: "8"
+      - key: ENRICHMENT_REQUEST_TIMEOUT_S
+        value: "15"
+      - key: ENRICHMENT_BETWEEN_REQUESTS_S
+        value: "1.5"
+      - key: ENRICHMENT_CACHE_TTL_HOURS
+        value: "24"
+      - key: DISCOVERY_PER_RUN_CAP
+        value: "8"
+      - key: GEMINI_MODEL_ENRICHMENT
+        value: gemini-3.5-flash-lite
+      # Auto-outreach — OFF by default. Compliance rules enforced in code.
+      - key: UNSUBSCRIBE_BASE_URL
+        sync: false
+      # HMAC-SHA256 secret for unsubscribe tokens. Without this the unsubscribe
+      # route hard-400s — a misconfigured deploy can never mass-unsubscribe by
+      # URL enumeration.
+      - key: UNSUBSCRIBE_SECRET
+        sync: false

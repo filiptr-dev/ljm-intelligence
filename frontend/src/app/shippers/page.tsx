@@ -46,6 +46,8 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { Mail, MapPin, PhoneCall, PlusCircle, ExternalLink } from "lucide-react"
 
+import { EnrichmentPanel } from "@/components/app/enrichment-panel"
+import { EnrichmentMetricStrip } from "@/components/app/enrichment-metric-strip"
 import { PageHeader, Panel, RegionTag } from "@/components/app/ui"
 import { ScoreChip } from "@/components/app/live-feed"
 import { Button } from "@/components/ui/button"
@@ -323,6 +325,7 @@ export default function ShippersPage() {
         }
       />
 
+      <EnrichmentMetricStrip scope="shipper" />
       <FilterBar filters={filters} onChange={setFilters} />
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,460px)]">
@@ -559,6 +562,14 @@ function ShipperRowItem({
               {row.reasons.map((reason) => (
                 <ReasonChip key={reason} label={reason} />
               ))}
+              {typeof row.fit_score === "number" ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-sm bg-chart-1/10 px-2 py-0.5 text-xs font-semibold text-chart-1"
+                  title={(row.fit_reasons ?? []).join(" · ")}
+                >
+                  Fit {row.fit_score}
+                </span>
+              ) : null}
             </div>
           </div>
         </button>
@@ -677,6 +688,18 @@ function DetailBody({
           <ReasonChip key={reason} label={reason} />
         ))}
       </div>
+
+      <EnrichmentPanel candidateId={row.id} leadId={row.promoted_lead_id ?? null} />
+      {typeof row.fit_score === "number" ? (
+        <div className="rounded-sm border border-border bg-muted/40 p-2 text-xs">
+          <div className="font-semibold">Fit {row.fit_score} / 100</div>
+          <ul className="mt-1 list-disc pl-5">
+            {(row.fit_reasons ?? []).map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Field label="Phone" value={row.phone ? <a href={`tel:${row.phone}`} className="font-mono underline">{row.phone}</a> : "—"} />

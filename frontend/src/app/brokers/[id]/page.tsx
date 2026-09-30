@@ -138,6 +138,11 @@ export default async function BrokerPage({ params }: PageProps<"/brokers/[id]">)
         </Panel>
       </div>
 
+      {/* Enrichment panel intentionally hidden on broker detail: broker rows come
+          from the in-memory demo store (generated ids like "broker-3"), not real DB
+          primary keys. Calling /enrichment/leads/broker-3 would always 404. Wire
+          this back once brokers migrate to the real API. See review 2026-09-30. */}
+
       <Panel className="mt-5" title="Email timeline" description={`${emails.length} emails, each tagged by the AI. Click one to read it.`} bodyClassName="p-0">
         <ol className="divide-y divide-border">
           {emails.map((e) => {

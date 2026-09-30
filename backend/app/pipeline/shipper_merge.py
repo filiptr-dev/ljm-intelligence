@@ -254,13 +254,16 @@ def match_and_merge(existing: list[Any], incoming: IncomingCandidate) -> MergeDe
 
     for row in existing:
         row_sources = _field(row, "sources") or []
-        # Cross-source only. If incoming is FMCSA, we merge into a row that
-        # has OSM (and may already have FMCSA); if incoming is OSM, we merge
-        # into a row that has FMCSA. A row that already has our source
-        # exactly means we'd need a source-key match (rule 1) — otherwise
-        # they're likely two different real entities.
-        counterpart = "OSM" if in_source == "FMCSA" else "FMCSA"
-        if counterpart not in row_sources:
+        # Cross-source only. GEMINI is the third source (scope change 2026-09-30);
+        # it may merge into an FMCSA or OSM row on name+state+corroborator, but two
+        # rows of the same source require a source-key match (rule 1).
+        if in_source == "FMCSA":
+            counterparts = {"OSM", "GEMINI"}
+        elif in_source == "OSM":
+            counterparts = {"FMCSA", "GEMINI"}
+        else:  # GEMINI
+            counterparts = {"FMCSA", "OSM"}
+        if not any(cp in row_sources for cp in counterparts):
             continue
 
         # Same state.

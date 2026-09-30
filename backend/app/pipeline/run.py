@@ -63,14 +63,10 @@ async def _read_fmcsa_frontier(sessionmaker: async_sessionmaker) -> str | None:
         bind = s.get_bind()
         dialect = bind.dialect.name
         if dialect == "postgresql":
-            stmt = text(
-                "SELECT max(raw->'fmcsa'->>'add_date') "
-                "FROM leads WHERE first_seen_run_id IS NOT NULL"
-            )
+            stmt = text("SELECT max(raw->'fmcsa'->>'add_date') FROM leads WHERE first_seen_run_id IS NOT NULL")
         else:  # sqlite (tests) — same shape via json_extract
             stmt = text(
-                "SELECT max(json_extract(raw, '$.fmcsa.add_date')) "
-                "FROM leads WHERE first_seen_run_id IS NOT NULL"
+                "SELECT max(json_extract(raw, '$.fmcsa.add_date')) FROM leads WHERE first_seen_run_id IS NOT NULL"
             )
         res = await s.execute(stmt)
         val = res.scalar()
@@ -135,15 +131,9 @@ async def run_crawl(
         # Frontier = the newest ``add_date`` we've already stored (derived from
         # ``leads.raw``, no cursor column). NULL frontier ⇒ first run ⇒ backfill.
         frontier = await _read_fmcsa_frontier(sessionmaker)
-        page_cap = (
-            settings.fmcsa_backfill_page_cap
-            if frontier is None
-            else settings.fmcsa_per_run_page_cap
-        )
+        page_cap = settings.fmcsa_backfill_page_cap if frontier is None else settings.fmcsa_per_run_page_cap
         page_size = settings.fmcsa_page_size or fmcsa_limit
-        app_token = (
-            settings.fmcsa_app_token.get_secret_value() if settings.fmcsa_app_token else None
-        )
+        app_token = settings.fmcsa_app_token.get_secret_value() if settings.fmcsa_app_token else None
         budget_s = settings.fmcsa_time_budget_s
 
         # Wall-clock deadline. We check it *between* pages so an in-flight
@@ -233,6 +223,54 @@ async def run_crawl(
         except Exception:
             log.exception("run_crawl: gemini stage failed; FMCSA pass persisted")
             counts["errors"] += 1
+
+        # Enrichment stage (LLM scraper plan 2026-09-30). Own try/except so an
+        # enrichment failure never touches the FMCSA / shipper / Gemini passes
+        # we just committed.
+        try:
+            from app.pipeline.enrichment import discover_new_shippers, run_enrichment_stage
+
+            enrichment_counts = await run_enrichment_stage(sessionmaker, settings, run_id=run_id, started=started)
+            _merge_counts(counts, enrichment_counts)
+            discovery_counts = await discover_new_shippers(sessionmaker, settings, run_id=run_id)
+            _merge_counts(counts, discovery_counts)
+        except Exception:
+            log.exception("run_crawl: enrichment stage failed; upstream passes persisted")
+            counts["errors"] += 1
+
+        # Auto-outreach stage — only fires when `settings.auto_outreach_enabled`
+        # is True (default False). Own try/except so a bad send-day never rolls
+        # back enrichment. Loud status in `crawl_runs.counts`.
+        try:
+            from app.api.enrichment import AutoSendIn, _auto_send_impl
+            from app.models import SettingsRow
+
+            async with sessionmaker() as _s:
+                cfg = (await _s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+            if cfg is None or not cfg.auto_outreach_enabled:
+                counts["auto_outreach_status"] = "disabled"
+            else:
+                # Fake request object — _auto_send_impl reads only app.state.
+                class _AppState:
+                    def __init__(self):
+                        self.settings = settings
+                        self.sessionmaker = sessionmaker
+
+                class _App:
+                    state = _AppState()
+
+                class _Req:
+                    app = _App()
+
+                result = await _auto_send_impl(_Req(), AutoSendIn(dry_run=False))
+                counts["auto_outreach_status"] = result.status
+                counts["auto_outreach_sent"] = result.sent
+                counts["auto_outreach_skipped_suppressed"] = result.skipped_suppressed
+                counts["auto_outreach_skipped_cap"] = result.skipped_cap
+        except Exception as exc:
+            log.exception("run_crawl: auto-outreach failed; enrichment persisted")
+            counts["auto_outreach_status"] = "error"
+            counts["auto_outreach_error"] = f"{type(exc).__name__}: {exc}"[:500]
 
     except Exception as exc:
         log.exception("run_crawl failed")

@@ -305,10 +305,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/enrichment/leads/{lead_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Lead Enrichment */
+        get: operations["get_lead_enrichment_enrichment_leads__lead_id__get"];
+        put?: never;
+        /** Enrich Lead Route */
+        post: operations["enrich_lead_route_enrichment_leads__lead_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/enrichment/candidates/{candidate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enrich Candidate Route */
+        post: operations["enrich_candidate_route_enrichment_candidates__candidate_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/enrichment/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Metrics */
+        get: operations["get_metrics_enrichment_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/enrichment/auto-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Auto Send */
+        post: operations["auto_send_enrichment_auto_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/unsubscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Unsubscribe
+         * @description Public — no auth. Sets the contact's email into `suppression` (do_not_contact)
+         *     and flips its pipeline_status to 'lost'. Idempotent.
+         */
+        get: operations["unsubscribe_unsubscribe_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AutoSendIn */
+        AutoSendIn: {
+            /**
+             * Dry Run
+             * @default false
+             */
+            dry_run: boolean;
+            /** Now Hour Override */
+            now_hour_override?: number | null;
+        };
+        /** AutoSendOut */
+        AutoSendOut: {
+            /** Status */
+            status: string;
+            /** Sent */
+            sent: number;
+            /** Skipped Suppressed */
+            skipped_suppressed: number;
+            /** Skipped Cap */
+            skipped_cap: number;
+            /** Dry Run */
+            dry_run: boolean;
+        };
         /** CallListOut */
         CallListOut: {
             /** Date */
@@ -359,6 +472,35 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /** DecisionMakerOut */
+        DecisionMakerOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string | null;
+            /** Title */
+            title: string | null;
+            /** Linkedin Url */
+            linkedin_url: string | null;
+            /** Email */
+            email: string | null;
+            /** Phone */
+            phone: string | null;
+            /** Confidence */
+            confidence: string | null;
+            /** Source */
+            source: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            } | null;
+            /** Last Verified At */
+            last_verified_at: string | null;
+            /** Pipeline Status */
+            pipeline_status: string;
+        };
         /** DraftIn */
         DraftIn: {
             /** Lead Id */
@@ -398,6 +540,65 @@ export interface components {
             lead_id?: string | null;
             /** Stance */
             stance?: ("positive" | "neutral" | "cooling") | null;
+        };
+        /** EnrichmentMetricsOut */
+        EnrichmentMetricsOut: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "shipper" | "broker";
+            /** Window Days */
+            window_days: number;
+            /** Enriched */
+            enriched: number;
+            /** Reachable */
+            reachable: number;
+            /** Contacted */
+            contacted: number;
+            /** Replied */
+            replied: number;
+            /** Enriched All Time */
+            enriched_all_time: number;
+            /** Reachable All Time */
+            reachable_all_time: number;
+            /** Reachable Rate */
+            reachable_rate: number;
+            /** Replied Rate */
+            replied_rate: number;
+        };
+        /** EnrichmentResultOut */
+        EnrichmentResultOut: {
+            /** Lead Id */
+            lead_id: string | null;
+            /** Candidate Id */
+            candidate_id: string | null;
+            /** Status */
+            status: string;
+            /** Error */
+            error: string | null;
+            /** Is Js Only Site */
+            is_js_only_site: boolean;
+            /** Decision Makers */
+            decision_makers: components["schemas"]["DecisionMakerOut"][];
+            /** Contacts */
+            contacts: components["schemas"]["WebsiteContactOut"][];
+            /** Pages Fetched */
+            pages_fetched: number;
+            /** Linkedin Company Url */
+            linkedin_company_url: string | null;
+            /** Website Url */
+            website_url: string | null;
+            /** Ran At */
+            ran_at: string;
+            /** Per Stage */
+            per_stage?: {
+                [key: string]: string;
+            };
+            /** Fit Score */
+            fit_score?: number | null;
+            /** Fit Reasons */
+            fit_reasons?: string[];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -679,6 +880,22 @@ export interface components {
             daily_send_cap: number;
             /** Updated At */
             updated_at: string;
+            /** Auto Outreach Enabled */
+            auto_outreach_enabled: boolean;
+            /** Auto Outreach Template Id */
+            auto_outreach_template_id: string | null;
+            /** Auto Outreach Daily Cap */
+            auto_outreach_daily_cap: number;
+            /** Auto Outreach Window Start H */
+            auto_outreach_window_start_h: number;
+            /** Auto Outreach Window End H */
+            auto_outreach_window_end_h: number;
+            /** Auto Outreach Status Filter */
+            auto_outreach_status_filter: string;
+            /** Fit Weights */
+            fit_weights: {
+                [key: string]: unknown;
+            } | null;
         };
         /** SettingsPatch */
         SettingsPatch: {
@@ -692,6 +909,22 @@ export interface components {
             tone?: string | null;
             /** Daily Send Cap */
             daily_send_cap?: number | null;
+            /** Auto Outreach Enabled */
+            auto_outreach_enabled?: boolean | null;
+            /** Auto Outreach Template Id */
+            auto_outreach_template_id?: string | null;
+            /** Auto Outreach Daily Cap */
+            auto_outreach_daily_cap?: number | null;
+            /** Auto Outreach Window Start H */
+            auto_outreach_window_start_h?: number | null;
+            /** Auto Outreach Window End H */
+            auto_outreach_window_end_h?: number | null;
+            /** Auto Outreach Status Filter */
+            auto_outreach_status_filter?: string | null;
+            /** Fit Weights */
+            fit_weights?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** ShipperDetailOut */
         ShipperDetailOut: {
@@ -763,6 +996,10 @@ export interface components {
             promoted_lead_id: string | null;
             /** Match Reason */
             match_reason: string | null;
+            /** Fit Score */
+            fit_score?: number | null;
+            /** Fit Reasons */
+            fit_reasons?: string[];
         };
         /** SuggestionList */
         SuggestionList: {
@@ -787,6 +1024,15 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** UnsubscribeOut */
+        UnsubscribeOut: {
+            /** Ok */
+            ok: boolean;
+            /** Email */
+            email: string | null;
+            /** Already */
+            already: boolean;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -799,6 +1045,29 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WebsiteContactOut */
+        WebsiteContactOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string | null;
+            /** Title */
+            title: string | null;
+            /** Email */
+            email: string | null;
+            /** Phone */
+            phone: string | null;
+            /** Confidence */
+            confidence: string | null;
+            /** Source */
+            source: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /** Last Verified At */
+            last_verified_at: string | null;
+            /** Pipeline Status */
+            pipeline_status: string;
         };
     };
     responses: never;
@@ -1298,7 +1567,7 @@ export interface operations {
         parameters: {
             query?: {
                 state?: string | null;
-                source?: ("FMCSA" | "OSM" | "Both") | null;
+                source?: ("FMCSA" | "OSM" | "Gemini" | "Both") | null;
                 min_score?: number | null;
                 promoted?: boolean | null;
                 q?: string | null;
@@ -1382,6 +1651,198 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ShipperDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_lead_enrichment_enrichment_leads__lead_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enrich_lead_route_enrichment_leads__lead_id__post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enrich_candidate_route_enrichment_candidates__candidate_id__post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_enrichment_metrics_get: {
+        parameters: {
+            query?: {
+                kind?: "shipper" | "broker";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentMetricsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_send_enrichment_auto_send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoSendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unsubscribe_unsubscribe_get: {
+        parameters: {
+            query: {
+                c: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnsubscribeOut"];
                 };
             };
             /** @description Validation Error */

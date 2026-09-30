@@ -34,3 +34,19 @@ jobs:
           curl -fsS -X POST "$BACKEND_URL/crawl/run?trigger=cron" \
             -H "X-Cron-Secret: $CRON_SECRET" \
             --retry 3 --retry-delay 3 --max-time 30
+
+      # Auto-outreach runs AFTER the crawl so any newly-enriched contacts land in
+      # today's cap. The route no-ops when `settings.auto_outreach_enabled=false`
+      # (the default), so it is safe to leave wired before the operator flips the
+      # toggle from the Settings page.
+      - name: POST /enrichment/auto-send
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "$BACKEND_URL/enrichment/auto-send" \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{"dry_run": false}' \
+            --retry 3 --retry-delay 3 --max-time 60
