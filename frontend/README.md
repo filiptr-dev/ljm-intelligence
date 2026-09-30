@@ -16,10 +16,60 @@ Finder alongside the seeded pool.
 
 ```bash
 pnpm install
-pnpm dev -p 3100  # http://localhost:3100
+cp .env.example .env.local        # then edit — see "Env" below
+pnpm dev -p 3100                  # http://localhost:3100
 ```
 
 Tip for the meeting: move between pages with the sidebar (client-side navigation). A full browser reload restarts the live crawler session. Campaigns survive reloads (localStorage; key `ljm.campaigns.v1`).
+
+## Env
+
+Two backend URLs, one server-only and one browser-safe. Both point at the same
+API host today; the split leaves room for a shorter internal hostname later.
+
+| Var | Where read | What for |
+|---|---|---|
+| `BACKEND_URL` | server only | Legacy `/api/*` proxy handlers (crawler + email). Never exposed to the browser so `CRON_SECRET` can travel through it. |
+| `NEXT_PUBLIC_API_URL` | server + browser | Base URL of the FastAPI backend for the typed `lib/api/` client. The Shipper Finder page (`/shippers`) calls it from the browser directly. |
+| `CRON_SECRET` | server only | Shared secret with the FastAPI `/crawl/run` endpoint. |
+
+**Local dev:** `.env.local` (git-ignored) copies from `.env.example`; both URLs
+default to `http://localhost:8765`. The backend runs on `:8000` or `:8765`
+depending on your `uvicorn` invocation — set the port on both sides to match.
+
+**Vercel Preview + Production:** add `NEXT_PUBLIC_API_URL` under
+`Settings → Environment Variables`, scoped to both **Preview** and
+**Production**, value = `https://ljm-intelligence-api.onrender.com` (the Render
+API URL). The backend's CORS allowlist already includes the canonical Vercel
+origin `https://ljm-intelligence.vercel.app` and localhost dev — see
+`backend/app/main.py`.
+
+**Vercel Preview CORS:** per-deploy preview origins (e.g.
+`ljm-intelligence-abc123-vercel.app`) are NOT covered by the hardcoded origin
+list. To allow them, add this env var on the Render backend:
+
+```
+CORS_ALLOWED_ORIGIN_REGEX=^https://ljm-intelligence-.*\.vercel\.app$
+```
+
+The `cors_allowed_origin_regex` field in `backend/app/config.py` reads this
+variable and passes it to FastAPI's `CORSMiddleware.allow_origin_regex`.
+
+## Typed API client (`src/lib/api/`)
+
+Mirrors the pattern from `bbunikoop-demo/frontend/lib/api/`. `client.ts` wraps
+`openapi-fetch` with an 8s timeout and exactly one retry on 502/503/504 for GETs
+(POSTs never retry — a duplicate promote is a duplicate promote). The generated
+`schema.d.ts` is committed so `tsc` is offline. Regenerate whenever a backend
+route or Pydantic model changes:
+
+```bash
+pnpm gen:api    # dumps FastAPI OpenAPI offline (SQLite in-memory), regenerates schema.d.ts
+```
+
+Under the hood it calls `backend/scripts/dump_openapi.py` with an in-memory
+SQLite `DATABASE_URL` — it never touches the production Neon database and never
+spins up a server.
 
 ## How it works
 
