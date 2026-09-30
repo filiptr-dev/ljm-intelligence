@@ -57,9 +57,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
 
     # CORS: Vercel origin(s) + regex for preview deploys, from env.
+    # Slice 3: the shipper-finder page (Next :3100) hits the FastAPI origin
+    # directly through the typed `lib/api/` client — no `/api/*` proxy — so
+    # the browser needs the API-side allowlist to include both the dev port
+    # and the canonical Vercel production origin. These are always merged in
+    # (dedup preserved) so a missing env var doesn't silently break CORS.
+    _finder_origins = ["http://localhost:3100", "https://ljm-intelligence.vercel.app"]
+    _merged_origins = list(settings.cors_allowed_origins) + [
+        o for o in _finder_origins if o not in settings.cors_allowed_origins
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_allowed_origins,
+        allow_origins=_merged_origins,
         allow_origin_regex=settings.cors_allowed_origin_regex,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Authorization", "X-Cron-Secret"],
@@ -90,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.email import router as email_router
     from app.api.leads import router as leads_router
     from app.api.settings import router as settings_router
+    from app.api.shipper_finder import router as shipper_finder_router
 
     app.include_router(crawl_router)
     app.include_router(leads_router)
@@ -97,4 +107,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(settings_router)
     app.include_router(capacity_router)
     app.include_router(call_list_router)
+    app.include_router(shipper_finder_router)
     return app
