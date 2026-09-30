@@ -253,20 +253,45 @@ class ShipperCandidate(Base):
     """Un-promoted discovery bucket for OSM finds + FMCSA shippers.
 
     The `/tools/shipper-finder` tool reads from here; only "Add to leads" writes
-    into `leads`. One row per (id, source) — id is unique because it encodes the
-    source in its prefix ("FMCSA-MC-…" | "OSM-way-…"). See migration 0004.
+    into `leads`. **One row per company** (Slice 2a — merged rows): the `sources`
+    JSONB list tells you which public datasets confirmed it, and per-source
+    evidence sits in the `evidence` JSON. `fmcsa_dot` / `fmcsa_mc` / `osm_ref`
+    are the source-key columns the merge fn dedupes against (partial-UNIQUE
+    WHERE NOT NULL — mirrors leads' MC/DOT/domain pattern).
+
+    `mc` and `dot` are retained as denormalised copies of `fmcsa_mc`/`fmcsa_dot`
+    so the ranker's authority-label path doesn't have to know about the merge
+    (see the amendment note in the plan). The merge fn keeps them in sync.
+
+    See migrations 0004 (initial shape) + 0005 (this merged reshape).
     """
 
     __tablename__ = "shipper_candidates"
 
-    id: Mapped[str] = mapped_column(String(96), primary_key=True)
-    source: Mapped[str] = mapped_column(String(16), nullable=False)  # 'FMCSA' | 'OSM'
+    # Neutral id (26-char ULID; String(32) for headroom). No source prefix — the
+    # row represents a company, not a source. That was the 0004 mistake.
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+
+    # Source-key columns — each nullable, each partial-UNIQUE WHERE NOT NULL so a
+    # repeat sighting lands on the existing row instead of duplicating.
+    fmcsa_dot: Mapped[str | None] = mapped_column(String(32))
+    fmcsa_mc: Mapped[str | None] = mapped_column(String(32))
+    osm_ref: Mapped[str | None] = mapped_column(String(64))  # 'way/123' | 'node/7' | 'relation/9'
+
+    # Which public datasets confirmed this row. JSONB list on Postgres, JSON on
+    # SQLite. Kept as a list rather than text[] for portability.
+    sources: Mapped[list] = mapped_column(JSONType, nullable=False, default=list, server_default=text("'[]'"))
+    # Short human-readable "why merged"; null on single-source rows.
+    match_reason: Mapped[str | None] = mapped_column(String(255))
+
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     state: Mapped[str] = mapped_column(String(2), nullable=False)
     city: Mapped[str | None] = mapped_column(String(128))
     address: Mapped[str | None] = mapped_column(String(255))
     lat: Mapped[float | None] = mapped_column(Float())
     lng: Mapped[float | None] = mapped_column(Float())
+    # Denormalised copies of fmcsa_mc / fmcsa_dot — kept for ranker/serializer
+    # ergonomics; merge fn writes both.
     mc: Mapped[str | None] = mapped_column(String(32))
     dot: Mapped[str | None] = mapped_column(String(32))
     domain: Mapped[str | None] = mapped_column(String(255))
@@ -274,6 +299,7 @@ class ShipperCandidate(Base):
     primary_email: Mapped[str | None] = mapped_column(String(255))
     osm_tags: Mapped[dict | None] = mapped_column(JSONType)
     raw: Mapped[dict | None] = mapped_column(JSONType)
+    # `evidence` layout: {"fmcsa": {...}, "osm": {...}, "match": {"rule": "...", "confidence": "..."}}
     evidence: Mapped[dict | None] = mapped_column(JSONType)
     # No hard FK to leads.id — un-promoted rows have no lead yet. The /promote
     # endpoint sets this in the same transaction that inserts the lead.
@@ -282,16 +308,30 @@ class ShipperCandidate(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        CheckConstraint(
-            "source IN ('FMCSA','OSM')",
-            name="shipper_candidates_source_check",
-        ),
         Index("shipper_candidates_state", "state"),
-        Index("shipper_candidates_source", "source"),
         # Partial index mirrors migration 0004 — only un-promoted rows.
         Index(
             "shipper_candidates_unpromoted",
             "promoted_lead_id",
             postgresql_where=(promoted_lead_id.is_(None)),
+        ),
+        # Partial-UNIQUE dedupe on the source-key columns — mirrors migration 0005.
+        Index(
+            "shipper_candidates_fmcsa_dot_key",
+            "fmcsa_dot",
+            unique=True,
+            postgresql_where=(fmcsa_dot.isnot(None)),
+        ),
+        Index(
+            "shipper_candidates_fmcsa_mc_key",
+            "fmcsa_mc",
+            unique=True,
+            postgresql_where=(fmcsa_mc.isnot(None)),
+        ),
+        Index(
+            "shipper_candidates_osm_ref_key",
+            "osm_ref",
+            unique=True,
+            postgresql_where=(osm_ref.isnot(None)),
         ),
     )
