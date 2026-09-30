@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -153,9 +154,7 @@ class SentLog(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     lead_id: Mapped[str] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"))
     run_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("crawl_runs.id", ondelete="SET NULL"))
-    template_id: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("email_templates.id", ondelete="SET NULL")
-    )
+    template_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("email_templates.id", ondelete="SET NULL"))
     mode: Mapped[str] = mapped_column(String(16))  # simulated / real
     to_email: Mapped[str] = mapped_column(String(255))
     subject: Mapped[str | None] = mapped_column(String(255))
@@ -225,16 +224,12 @@ class CallOutcome(Base):
         primary_key=True,
         autoincrement=True,
     )
-    lead_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False
-    )
+    lead_id: Mapped[str] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     # Only meaningful when outcome='callback'; Date (no time) — we schedule by day.
     callback_at: Mapped[date | None] = mapped_column(Date(), nullable=True)
     note: Mapped[str | None] = mapped_column(Text)
-    logged_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    logged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     logged_by: Mapped[str | None] = mapped_column(String(128))
 
     __table_args__ = (
@@ -250,5 +245,53 @@ class CallOutcome(Base):
             "call_outcomes_callback_at",
             "callback_at",
             postgresql_where=(outcome == "callback"),
+        ),
+    )
+
+
+class ShipperCandidate(Base):
+    """Un-promoted discovery bucket for OSM finds + FMCSA shippers.
+
+    The `/tools/shipper-finder` tool reads from here; only "Add to leads" writes
+    into `leads`. One row per (id, source) — id is unique because it encodes the
+    source in its prefix ("FMCSA-MC-…" | "OSM-way-…"). See migration 0004.
+    """
+
+    __tablename__ = "shipper_candidates"
+
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)  # 'FMCSA' | 'OSM'
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    state: Mapped[str] = mapped_column(String(2), nullable=False)
+    city: Mapped[str | None] = mapped_column(String(128))
+    address: Mapped[str | None] = mapped_column(String(255))
+    lat: Mapped[float | None] = mapped_column(Float())
+    lng: Mapped[float | None] = mapped_column(Float())
+    mc: Mapped[str | None] = mapped_column(String(32))
+    dot: Mapped[str | None] = mapped_column(String(32))
+    domain: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    primary_email: Mapped[str | None] = mapped_column(String(255))
+    osm_tags: Mapped[dict | None] = mapped_column(JSONType)
+    raw: Mapped[dict | None] = mapped_column(JSONType)
+    evidence: Mapped[dict | None] = mapped_column(JSONType)
+    # No hard FK to leads.id — un-promoted rows have no lead yet. The /promote
+    # endpoint sets this in the same transaction that inserts the lead.
+    promoted_lead_id: Mapped[str | None] = mapped_column(String(64))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('FMCSA','OSM')",
+            name="shipper_candidates_source_check",
+        ),
+        Index("shipper_candidates_state", "state"),
+        Index("shipper_candidates_source", "source"),
+        # Partial index mirrors migration 0004 — only un-promoted rows.
+        Index(
+            "shipper_candidates_unpromoted",
+            "promoted_lead_id",
+            postgresql_where=(promoted_lead_id.is_(None)),
         ),
     )
