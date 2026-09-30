@@ -41,14 +41,13 @@ os.environ["DATABASE_URL"] = _SAFE_DB_URL
 load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 os.environ["APP_ENV"] = "test"
 
-from app.config import Settings  # noqa: E402  (must come after env pin)
-from app.main import create_app  # noqa: E402
+from app.config import Settings
+from app.main import create_app
 
 _settings = Settings()
 _LOCAL_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 if not (
-    _settings.database_url.startswith("sqlite")
-    or (urlparse(_settings.database_url).hostname or "") in _LOCAL_HOSTS
+    _settings.database_url.startswith("sqlite") or (urlparse(_settings.database_url).hostname or "") in _LOCAL_HOSTS
 ):
     print(
         f"refusing to dump openapi against non-local DATABASE_URL={_settings.database_url}",

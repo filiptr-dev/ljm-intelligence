@@ -188,9 +188,7 @@ async def run_gemini_stage(
     # If every scoring call failed and none landed, surface the reason.
     if unscored and scored == 0 and first_scoring_exc is not None:
         counts["gemini_status"] = (
-            "quota_exceeded"
-            if _classify_gemini_error(first_scoring_exc) == "quota_exceeded"
-            else "scoring_failed"
+            "quota_exceeded" if _classify_gemini_error(first_scoring_exc) == "quota_exceeded" else "scoring_failed"
         )
         counts["gemini_error"] = _truncate(f"{type(first_scoring_exc).__name__}: {first_scoring_exc}")
     return counts

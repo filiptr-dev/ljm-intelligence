@@ -144,9 +144,7 @@ def _build_where(cursor: tuple[str, str] | None) -> str:
         # SoQL has no (a,b) < (x,y) row-value form — spelled out longhand.
         # ``add_date`` is 8-char YYYYMMDD text (lexical == chronological);
         # ``dot_number`` is numeric, so the int literal is unquoted.
-        parts.append(
-            f"(add_date < '{add_date}' OR (add_date = '{add_date}' AND dot_number < {dot_number}))"
-        )
+        parts.append(f"(add_date < '{add_date}' OR (add_date = '{add_date}' AND dot_number < {dot_number}))")
     return " AND ".join(parts)
 
 

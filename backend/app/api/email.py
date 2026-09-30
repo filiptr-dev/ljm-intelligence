@@ -31,9 +31,9 @@ Tone = Literal["professional", "friendly", "direct", "persuasive"]
 
 TONE_HINT: dict[Tone, str] = {
     "professional": "warm-professional, respectful, first-name-only greeting",
-    "friendly":     "friendly and human, still concise, no slang",
-    "direct":       "brief and direct, cut every filler word",
-    "persuasive":   "persuasive, lead with the value LJM brings, never oversell",
+    "friendly": "friendly and human, still concise, no slang",
+    "direct": "brief and direct, cut every filler word",
+    "persuasive": "persuasive, lead with the value LJM brings, never oversell",
 }
 
 
@@ -96,8 +96,10 @@ def _stance(lead: dict) -> Stance | None:
     days = _num(lead.get("days_since_last"))
     if sentiment is None and health_delta is None and days is None:
         return None
-    if (sentiment is not None and sentiment < -0.1) or (health_delta is not None and health_delta <= -10) or (
-        days is not None and days >= 60
+    if (
+        (sentiment is not None and sentiment < -0.1)
+        or (health_delta is not None and health_delta <= -10)
+        or (days is not None and days >= 60)
     ):
         return "cooling"
     if sentiment is not None and sentiment > 0.2:
@@ -126,20 +128,29 @@ def _existing_broker_draft(lead: dict, tone: Tone, stance: Stance) -> tuple[str,
     if stance == "positive":
         subject = f"Truck open this week{f' on {lane}' if lane else ''}"
         paras.append(
-            (f"Thanks again for the {booked} loads you have trusted us with. " if booked else "Thanks again for the recent work. ")
+            (
+                f"Thanks again for the {booked} loads you have trusted us with. "
+                if booked
+                else "Thanks again for the recent work. "
+            )
             + "It has been a pleasure running freight for "
             + f"{name}."
         )
         paras.append(
             f"We have a dry van opening up this week{f' that fits your {lane} lane' if lane else ''}. "
-            + ("Same driver standards, live tracking, and a quote back within 15 minutes." if tone != "direct" else "Quote in 15 minutes.")
+            + (
+                "Same driver standards, live tracking, and a quote back within 15 minutes."
+                if tone != "direct"
+                else "Quote in 15 minutes."
+            )
         )
         paras.append("Want me to hold it for you?")
     elif stance == "cooling":
         subject = f"Anything we can do better, {first}?" if first != "there" else f"Checking in from LJM, {name}"
         paras.append(
             f"It has been about {days} days since we last worked together, and I wanted to reach out personally."
-             if days >= 14 else "I wanted to reach out personally."
+            if days >= 14
+            else "I wanted to reach out personally."
         )
         paras.append(
             "If something on our side missed the mark"
@@ -161,7 +172,7 @@ def _existing_broker_draft(lead: dict, tone: Tone, stance: Stance) -> tuple[str,
 
 
 def _first_name(full: str | None) -> str:
-    return (full.split()[0].title() if full else "there")
+    return full.split()[0].title() if full else "there"
 
 
 def _fallback_draft(lead: dict, tone: Tone) -> tuple[str, str]:
@@ -172,9 +183,7 @@ def _fallback_draft(lead: dict, tone: Tone) -> tuple[str, str]:
     name = lead.get("name") or "your team"
     first = _first_name(lead.get("contact_name") or lead.get("primary_contact"))
     where = ", ".join(x for x in (lead.get("city"), lead.get("state")) if x)
-    subject = (
-        f"Direct dry-van capacity for {name}" if kind == "Shipper" else f"Dry-van capacity for {name}"
-    )
+    subject = f"Direct dry-van capacity for {name}" if kind == "Shipper" else f"Dry-van capacity for {name}"
     opener = {
         "professional": "I hope you are doing well.",
         "friendly": "Hope you are having a good week!",
@@ -245,7 +254,7 @@ async def _gemini_draft(
         "- 3-6 short paragraphs, plain text (no markdown, no HTML, no signature block).\n"
         "- Never claim facts you cannot verify from the LEAD JSON.\n"
         "- Do NOT add the LJM footer/address/phone; the app template handles that.\n"
-        "- Return STRICT JSON: {\"subject\":\"...\",\"body\":\"...\"} and nothing else.\n\n"
+        '- Return STRICT JSON: {"subject":"...","body":"..."} and nothing else.\n\n'
         f"LEAD JSON:\n{json.dumps(lead, default=str)}\n"
     )
     body_req = {
@@ -284,22 +293,26 @@ async def draft_email(payload: DraftIn, request: Request) -> DraftOut:
     if key:
         try:
             subject, body = await _gemini_draft(
-                api_key=key, model=settings.gemini_model, lead=lead,
-                tone=payload.tone, instructions=payload.instructions,
+                api_key=key,
+                model=settings.gemini_model,
+                lead=lead,
+                tone=payload.tone,
+                instructions=payload.instructions,
             )
             source = "gemini"
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — any Gemini error must fall back to the local draft
             log.warning("email/draft: gemini failed, falling back: %s", exc)
             subject, body = _fallback_draft(lead, payload.tone)
     else:
         subject, body = _fallback_draft(lead, payload.tone)
 
-    body_html = render_branded_email(
-        subject=subject, body=body, frontend_origin=settings.frontend_origin
-    )
+    body_html = render_branded_email(subject=subject, body=body, frontend_origin=settings.frontend_origin)
     return DraftOut(
-        subject=subject, body=body, body_html=body_html,
-        source=source, tone=payload.tone,
+        subject=subject,
+        body=body,
+        body_html=body_html,
+        source=source,
+        tone=payload.tone,
         lead_id=payload.lead_id or lead.get("id"),
         stance=_stance(lead),
     )

@@ -68,18 +68,14 @@ async def list_leads(
         total_res = await s.execute(select(func.count()).select_from(base.subquery()))
         total = int(total_res.scalar() or 0)
 
-        rows = await s.execute(
-            base.order_by(desc(Lead.last_seen_at), desc(Lead.id)).offset(offset).limit(limit)
-        )
+        rows = await s.execute(base.order_by(desc(Lead.last_seen_at), desc(Lead.id)).offset(offset).limit(limit))
         leads = list(rows.scalars().all())
 
         # Batch-fetch sources per lead so /leads doesn't N+1.
         source_map: dict[str, list[str]] = {}
         if leads:
             src_rows = await s.execute(
-                select(LeadSource.lead_id, LeadSource.source).where(
-                    LeadSource.lead_id.in_([lead.id for lead in leads])
-                )
+                select(LeadSource.lead_id, LeadSource.source).where(LeadSource.lead_id.in_([lead.id for lead in leads]))
             )
             for lid, src in src_rows.all():
                 source_map.setdefault(lid, [])
@@ -115,16 +111,10 @@ async def show_lead(request: Request, lead_id: str) -> LeadDetail:
         l = res.scalar_one_or_none()
         if not l:
             raise HTTPException(404, "lead not found")
-        srcs = (
-            await s.execute(select(LeadSource.source).where(LeadSource.lead_id == lead_id))
-        ).scalars().all()
-        contacts = (
-            await s.execute(select(LeadContact).where(LeadContact.lead_id == lead_id))
-        ).scalars().all()
+        srcs = (await s.execute(select(LeadSource.source).where(LeadSource.lead_id == lead_id))).scalars().all()
+        contacts = (await s.execute(select(LeadContact).where(LeadContact.lead_id == lead_id))).scalars().all()
         score_row = (
-            await s.execute(
-                select(Score).where(Score.lead_id == lead_id).order_by(desc(Score.created_at)).limit(1)
-            )
+            await s.execute(select(Score).where(Score.lead_id == lead_id).order_by(desc(Score.created_at)).limit(1))
         ).scalar_one_or_none()
     return LeadDetail(
         id=l.id,

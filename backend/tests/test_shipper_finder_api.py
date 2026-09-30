@@ -442,7 +442,9 @@ async def test_promote_then_relist_shows_promoted_lead_id(client: AsyncClient):
     be visible on the next GET even without cache invalidation.
     """
     sm = client._test_sessionmaker  # type: ignore[attr-defined]
-    await _seed_candidate(sm, id="c-fresh", name="Fresh Warehouse", state="NJ", sources=["OSM"], fmcsa_mc=None, osm_ref="way/99")
+    await _seed_candidate(
+        sm, id="c-fresh", name="Fresh Warehouse", state="NJ", sources=["OSM"], fmcsa_mc=None, osm_ref="way/99"
+    )
 
     r_promote = await client.post("/tools/shipper-finder/promote", json={"candidate_id": "c-fresh"})
     assert r_promote.status_code == 200

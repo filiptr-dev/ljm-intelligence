@@ -36,6 +36,7 @@ def _row(*, dot: str, add_date: str, state: str = "NY", carship: str = "B", lega
 
 # --- AC1 ----------------------------------------------------------------------
 
+
 async def test_fmcsa_where_contains_all_region_states():
     """AC1: the outgoing ``$where`` names ``phy_state IN (...)`` with every
     in-region state from ``region.IN_REGION_STATES``.
@@ -67,6 +68,7 @@ async def test_fmcsa_where_contains_all_region_states():
 
 
 # --- Paginator ----------------------------------------------------------------
+
 
 async def test_paginator_keyset_advances_on_page_2():
     """Page 2's ``$where`` includes the keyset clause built from page 1's last row."""

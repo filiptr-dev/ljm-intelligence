@@ -48,9 +48,7 @@ async def run_migrations_online() -> None:
     if make_url(url).get_backend_name() == "sqlite":
         engine = create_async_engine(url)
     else:
-        engine = create_async_engine(
-            url, connect_args={"prepare_threshold": None, "connect_timeout": 15}
-        )
+        engine = create_async_engine(url, connect_args={"prepare_threshold": None, "connect_timeout": 15})
     try:
         async with engine.connect() as connection:
             await connection.run_sync(_run)

@@ -11,7 +11,6 @@ against a post using the deterministic scorer in `app.pipeline.match`.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field

@@ -99,9 +99,7 @@ def _row_out(r: CallRow) -> CallRowOut:
         score=r.score,
         reasons=list(r.reasons),
         opener=r.opener,
-        last_outcome=(
-            LastOutcomeOut(**r.last_outcome) if r.last_outcome else None
-        ),
+        last_outcome=(LastOutcomeOut(**r.last_outcome) if r.last_outcome else None),
     )
 
 
@@ -127,26 +125,12 @@ async def _load_and_rank(sessionmaker, today: date, limit: int) -> list[CallRow]
     """
     async with sessionmaker() as s:
         # Leads with a phone — cheap pre-filter, the ranker also enforces it.
-        leads = (
-            (
-                await s.execute(
-                    select(Lead).where(Lead.phone.isnot(None)).where(Lead.phone != "")
-                )
-            )
-            .scalars()
-            .all()
-        )
+        leads = (await s.execute(select(Lead).where(Lead.phone.isnot(None)).where(Lead.phone != ""))).scalars().all()
         outcomes = (await s.execute(select(CallOutcome))).scalars().all()
-        posts = (
-            (await s.execute(select(CapacityPost).where(CapacityPost.status == "open")))
-            .scalars()
-            .all()
-        )
+        posts = (await s.execute(select(CapacityPost).where(CapacityPost.status == "open"))).scalars().all()
         # Latest email touchpoint per lead, as a date map — feeds the stale-relationship signal.
         email_rows = (
-            await s.execute(
-                select(SentLog.lead_id, func.max(SentLog.sent_at)).group_by(SentLog.lead_id)
-            )
+            await s.execute(select(SentLog.lead_id, func.max(SentLog.sent_at)).group_by(SentLog.lead_id))
         ).all()
     last_email_by_lead: dict[str, date] = {}
     for lid, sent_at in email_rows:
@@ -175,9 +159,7 @@ def _today() -> date:
 
 
 @router.get("", response_model=CallListOut)
-async def get_call_list(
-    request: Request, limit: int = Query(25, ge=1, le=100)
-) -> CallListOut:
+async def get_call_list(request: Request, limit: int = Query(25, ge=1, le=100)) -> CallListOut:
     today = _today()
     rows = await _load_and_rank(request.app.state.sessionmaker, today, limit)
     return CallListOut(date=today.isoformat(), items=[_row_out(r) for r in rows])
@@ -195,9 +177,7 @@ async def log_outcome(request: Request, body: OutcomeIn) -> CallListOut:
         callback_at = today + timedelta(days=CALLBACK_DEFAULT_OFFSET_DAYS)
 
     async with sessionmaker() as s:
-        exists = (
-            await s.execute(select(Lead.id).where(Lead.id == body.lead_id))
-        ).scalar_one_or_none()
+        exists = (await s.execute(select(Lead.id).where(Lead.id == body.lead_id))).scalar_one_or_none()
         if not exists:
             raise HTTPException(404, "lead not found")
 
@@ -222,9 +202,7 @@ async def get_history(
     limit: int = Query(50, ge=1, le=200),
 ) -> OutcomeHistoryOut:
     async with request.app.state.sessionmaker() as s:
-        exists = (
-            await s.execute(select(Lead.id).where(Lead.id == lead_id))
-        ).scalar_one_or_none()
+        exists = (await s.execute(select(Lead.id).where(Lead.id == lead_id))).scalar_one_or_none()
         if not exists:
             raise HTTPException(404, "lead not found")
         rows = (

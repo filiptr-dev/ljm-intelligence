@@ -258,7 +258,5 @@ async def test_default_swallows_http_failure(cache_dir: Path):
         return httpx.Response(500, text="overpass down")
 
     async with _mock_client(handler) as client:
-        elements = await osm_overpass.fetch_overpass_elements(
-            "NJ", client=client, cache_dir=cache_dir, throttle=False
-        )
+        elements = await osm_overpass.fetch_overpass_elements("NJ", client=client, cache_dir=cache_dir, throttle=False)
     assert elements == []

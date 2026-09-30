@@ -2,37 +2,37 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.models import CapacityPost, Lead
 from app.pipeline.match import score_broker_for_post
 
 
 def _post(**kw) -> CapacityPost:
-    defaults = dict(
-        id="CP-test",
-        kind="truck",
-        equipment="Dry Van",
-        origin_city="Lincoln Park",
-        origin_state="NJ",
-        destinations=["PA", "GA"],
-        status="open",
-    )
+    defaults = {
+        "id": "CP-test",
+        "kind": "truck",
+        "equipment": "Dry Van",
+        "origin_city": "Lincoln Park",
+        "origin_state": "NJ",
+        "destinations": ["PA", "GA"],
+        "status": "open",
+    }
     defaults.update(kw)
     return CapacityPost(**defaults)
 
 
 def _lead(**kw) -> Lead:
-    defaults = dict(
-        id="MC-1",
-        name="Test Broker LLC",
-        kind="Broker",
-        state="NJ",
-        current_score=80,
-        primary_email="hi@example.com",
-        phone="5551234567",
-        first_seen_at=datetime.now(timezone.utc),
-    )
+    defaults = {
+        "id": "MC-1",
+        "name": "Test Broker LLC",
+        "kind": "Broker",
+        "state": "NJ",
+        "current_score": 80,
+        "primary_email": "hi@example.com",
+        "phone": "5551234567",
+        "first_seen_at": datetime.now(UTC),
+    }
     defaults.update(kw)
     return Lead(**defaults)
 

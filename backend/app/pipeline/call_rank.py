@@ -145,18 +145,13 @@ def _index_outcomes(outcomes: Iterable[CallOutcome], today: date) -> dict[str, _
         rows_sorted = sorted(rows, key=lambda r: r.logged_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         ever_ni = any(r.outcome == "not_interested" for r in rows_sorted)
         booked_14 = any(
-            r.outcome == "booked" and (_as_date(r.logged_at) or date.min) >= cutoff_booked
-            for r in rows_sorted
+            r.outcome == "booked" and (_as_date(r.logged_at) or date.min) >= cutoff_booked for r in rows_sorted
         )
-        na_today = any(
-            r.outcome == "no_answer" and _as_date(r.logged_at) == today for r in rows_sorted
-        )
+        na_today = any(r.outcome == "no_answer" and _as_date(r.logged_at) == today for r in rows_sorted)
         any_today = any(_as_date(r.logged_at) == today for r in rows_sorted)
         # Latest scheduled callback that is today or in the future.
         cb_dates = [
-            r.callback_at
-            for r in rows_sorted
-            if r.outcome == "callback" and r.callback_at and r.callback_at >= today
+            r.callback_at for r in rows_sorted if r.outcome == "callback" and r.callback_at and r.callback_at >= today
         ]
         cb_next = min(cb_dates) if cb_dates else None
         last_call = max((_as_date(r.logged_at) for r in rows_sorted if r.logged_at), default=None)
@@ -275,9 +270,7 @@ def rank_call_list(
         if st and st.latest is not None:
             last_outcome_payload = {
                 "outcome": st.latest.outcome,
-                "logged_at": (
-                    st.latest.logged_at.isoformat() if st.latest.logged_at else None
-                ),
+                "logged_at": (st.latest.logged_at.isoformat() if st.latest.logged_at else None),
             }
 
         rows.append(

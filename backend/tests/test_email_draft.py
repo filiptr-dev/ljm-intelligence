@@ -1,6 +1,6 @@
 """POST /email/draft: Gemini path (mocked) and fallback path both return branded HTML."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient

@@ -115,9 +115,7 @@ def test_stale_relationship_from_prior_outcome():
 
 def test_stale_relationship_also_reads_email_history():
     lead = _lead(current_score=0, primary_email=None, raw={})
-    rows = rank_call_list(
-        [lead], [], [], TODAY, last_email_by_lead={"MC-1": TODAY - timedelta(days=40)}
-    )
+    rows = rank_call_list([lead], [], [], TODAY, last_email_by_lead={"MC-1": TODAY - timedelta(days=40)})
     assert rows[0].score == 15
     assert any("Last touch 40d ago" == r for r in rows[0].reasons)
 
@@ -212,10 +210,7 @@ def test_callback_pin_floats_to_top():
 
 
 def test_deterministic_same_input_same_output():
-    leads = [
-        _lead(id=f"MC-{i:03d}", current_score=(i * 3) % 100, name=f"Broker {i}")
-        for i in range(10)
-    ]
+    leads = [_lead(id=f"MC-{i:03d}", current_score=(i * 3) % 100, name=f"Broker {i}") for i in range(10)]
     a = rank_call_list(leads, [], [], TODAY)
     b = rank_call_list(leads, [], [], TODAY)
     assert [(r.lead_id, r.score, r.reasons, r.opener) for r in a] == [
