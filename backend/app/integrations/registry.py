@@ -24,9 +24,13 @@ from app.shared.tenant import TenantId
 class ConnectorRegistry:
     """Resolve ports to adapters per tenant.
 
-    v0 — not yet wired to `tenant_credentials`. Returns NotImplementedError.
-    v1 — reads credentials via `CredentialVault`, memoises per request/job.
+    v0 — not yet wired. Takes an optional `CredentialVault`; v1 reads
+    `tenant_credentials` + `tenant_feature_flags` through it.
     """
+
+    def __init__(self, vault=None) -> None:  # type: ignore[no-untyped-def]
+        self._vault = vault
+        self._cache: dict[tuple[str, str], object] = {}
 
     async def get_email_mailbox(self, tenant: TenantId) -> EmailMailboxPort:
         raise NotImplementedError("v0 — rehome `app/mail/mailbox.py` under this port")

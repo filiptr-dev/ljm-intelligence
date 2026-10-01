@@ -29,6 +29,11 @@ class Settings(BaseSettings):
 
     # Neon pooled URL (…-pooler.<region>.aws.neon.tech, sslmode=require, channel_binding=require).
     database_url: str
+    # Direct (non-pooled) URL — the planned LISTEN/NOTIFY worker + Alembic path.
+    # Neon pooled URL goes to the pgbouncer transaction mode; LISTEN/NOTIFY and
+    # some long-running ops need the direct branch URL. Optional — falls back to
+    # `database_url` if unset so dev/test with one local Postgres still works.
+    database_url_direct: str | None = None
     db_pool_size: int = Field(default=5, ge=1, le=20)
     # First query after Neon autosuspend takes ~1–2s. Keep the health timeout generous.
     db_health_timeout: float = Field(default=8.0, gt=0)
@@ -213,6 +218,11 @@ class Settings(BaseSettings):
     @classmethod
     def _use_psycopg(cls, url: str) -> str:
         return psycopg_url(url)
+
+    @field_validator("database_url_direct")
+    @classmethod
+    def _use_psycopg_direct(cls, url: str | None) -> str | None:
+        return psycopg_url(url) if url else url
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod

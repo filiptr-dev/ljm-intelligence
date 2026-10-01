@@ -25,7 +25,12 @@ def _database_url() -> str:
     url = config.attributes.get("database_url")
     if isinstance(url, str):
         return psycopg_url(url)
-    return get_settings().database_url
+    # Prefer the direct (non-pooled) URL for migrations — Alembic doesn't
+    # share connections with the app; the pooler doesn't help and can
+    # cause issues with DDL across statements. Falls back to the pooled
+    # URL if direct isn't configured (dev/test with one local PG).
+    s = get_settings()
+    return s.database_url_direct or s.database_url
 
 
 def run_migrations_offline() -> None:

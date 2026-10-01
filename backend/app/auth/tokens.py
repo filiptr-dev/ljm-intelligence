@@ -32,22 +32,40 @@ class TokenClaims:
     role: str
 
 
+# Per-process cache for the JWT secret. The secret is immutable at steady
+# state (set in `settings` row at migration 0008); on rotation, roll the pod.
+# Caching avoids a SELECT on every authenticated request.
+_jwt_secret_cache: str | None = None
+
+
 async def effective_auth_jwt_secret(settings: Settings, session: AsyncSession) -> str:
     """Env override wins; otherwise the migration-seeded settings row.
 
-    Pattern copies :func:`app.services.unsub_config.effective_unsub` so the
-    "env > DB" precedence is uniform across the two durable-secret knobs.
+    Cached per process — a rotation requires a redeploy. Pattern copies
+    :func:`app.services.unsub_config.effective_unsub` so the "env > DB"
+    precedence is uniform across the two durable-secret knobs.
     """
+    global _jwt_secret_cache
+    if _jwt_secret_cache is not None:
+        return _jwt_secret_cache
     env = getattr(settings, "auth_jwt_secret_override", None)
     if env is not None:
-        return env.get_secret_value()
+        _jwt_secret_cache = env.get_secret_value()
+        return _jwt_secret_cache
     row = (await session.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
     if row and row.auth_jwt_secret:
-        return row.auth_jwt_secret
+        _jwt_secret_cache = row.auth_jwt_secret
+        return _jwt_secret_cache
     raise AuthConfigError(
         "auth_jwt_secret is unset — migration 0008 should have backfilled settings.auth_jwt_secret; "
         "set AUTH_JWT_SECRET env var to override."
     )
+
+
+def reset_jwt_secret_cache() -> None:
+    """Test hook — reset the process-local JWT secret cache."""
+    global _jwt_secret_cache
+    _jwt_secret_cache = None
 
 
 def mint_access_token(

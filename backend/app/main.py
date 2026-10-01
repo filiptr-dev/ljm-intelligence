@@ -41,9 +41,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         engine = create_engine(settings)
         app.state.engine = engine
         app.state.sessionmaker = create_sessionmaker(engine)
+        # Shared httpx client — one pool per process so TCP+TLS reuse amortises
+        # across adapters (FMCSA, OSM, Gemini, Claude, Gmail, load boards).
+        from app.shared.http import build_shared_client
+
+        app.state.http = build_shared_client()
         try:
             yield
         finally:
+            await app.state.http.aclose()
             await engine.dispose()
 
     app = FastAPI(
@@ -55,6 +61,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
     app.state.settings = settings
+
+    # Request-id middleware — binds a short id into a contextvar for logs and
+    # echoes it back as `x-request-id` on the response.
+    from app.shared.logging import RequestIdMiddleware
+
+    app.add_middleware(RequestIdMiddleware)
 
     # CORS: Vercel origin(s) + regex for preview deploys, from env.
     # Slice 3: the shipper-finder page (Next :3100) hits the FastAPI origin
