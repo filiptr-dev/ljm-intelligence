@@ -1,22 +1,26 @@
 "use client"
 
 import * as React from "react"
+import { api } from "@/lib/api/client"
 
-/** Poll `/api/crawler/health` so the UI can flip a Live/Simulated badge honestly.
+/** Poll `/health` through the typed client so the UI can flip a Live/Simulated
+ *  badge honestly. Universal `openapi-fetch` client sends the request to
+ *  `/api/proxy/health` from the browser (same-origin, HttpOnly cookie rides
+ *  along) — no `/api/crawler/*` BFF needed.
  *
- *  Design note: this only asks about the backend's state — it never dispatches a crawl
- *  or fetches leads on its own. The consumer decides what to do with `live=false`
- *  (per the plan: fall back to simulated with an amber badge, never silently degrade).
+ *  Design note: this only asks about the backend's state — it never dispatches
+ *  a crawl or fetches leads on its own. The consumer decides what to do with
+ *  `live=false` (per the plan: fall back to simulated with an amber badge,
+ *  never silently degrade).
  */
 export function useBackendHealth(intervalMs = 30_000) {
   const [live, setLive] = React.useState<boolean | null>(null)
 
   const ping = React.useCallback(async () => {
     try {
-      const r = await fetch("/api/crawler/health", { cache: "no-store" })
-      if (!r.ok) return setLive(false)
-      const j = (await r.json()) as { ok?: boolean }
-      setLive(!!j.ok)
+      const { data, response } = await api.GET("/health", {})
+      if (!response.ok || !data) return setLive(false)
+      setLive(!!data.ok)
     } catch {
       setLive(false)
     }
@@ -47,9 +51,9 @@ export function useLatestRun(pollMs = 4000) {
 
   const fetchLatest = React.useCallback(async () => {
     try {
-      const r = await fetch("/api/crawler/status", { cache: "no-store" })
-      if (!r.ok) return
-      setRun((await r.json()) as LatestRun)
+      const { data, response } = await api.GET("/crawl/latest", {})
+      if (!response.ok) return
+      setRun((data as LatestRun) ?? null)
     } catch {}
   }, [])
 
@@ -64,7 +68,10 @@ export function useLatestRun(pollMs = 4000) {
   const trigger = React.useCallback(async (limit = 25) => {
     setRunning(true)
     try {
-      await fetch(`/api/crawler/run?limit=${limit}`, { method: "POST" })
+      // The proxy injects `X-Cron-Secret` for POST /crawl/run from a server-
+      // only env var; the browser never learns the secret. See
+      // `app/api/proxy/[...path]/route.ts`.
+      await api.POST("/crawl/run", { params: { query: { trigger: "on_demand", limit } } })
       await fetchLatest()
     } finally {
       setRunning(false)

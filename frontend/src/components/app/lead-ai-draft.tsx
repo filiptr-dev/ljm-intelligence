@@ -15,6 +15,7 @@ import { RefreshCw, Send, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { EMAIL_TONES, STANCE_LABEL, TONE_LABEL, type EmailDraft, type EmailTone } from "@/lib/backend"
+import { api } from "@/lib/api/client"
 import type { Lead } from "@/lib/data/types"
 import { cn } from "@/lib/utils"
 
@@ -75,13 +76,10 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
     setError(null)
     try {
       const body = { ...target.request, tone: t }
-      const r = await fetch("/api/email/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!r.ok) throw new Error(`draft ${r.status}`)
-      setDraft((await r.json()) as EmailDraft)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, response } = await api.POST("/email/draft", { body: body as any })
+      if (!response.ok || !data) throw new Error(`draft ${response.status}`)
+      setDraft(data as unknown as EmailDraft)
     } catch (e) {
       setError(String(e))
       // Never leave the dialog blank; the backend already falls back to a template on Gemini errors.

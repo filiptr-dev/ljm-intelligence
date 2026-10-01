@@ -19,7 +19,7 @@
 
 import { SESSION_COOKIE } from "@/lib/auth/bff"
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
+const BACKEND = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
 const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7d — matches backend auth_access_ttl_days default.
 
 export const dynamic = "force-dynamic"
@@ -67,7 +67,22 @@ export async function POST(req: Request) {
     "SameSite=Lax",
   ].join("; ")
 
-  return new Response(text, {
+  // Fetch user profile with the fresh token so the browser can render the
+  // signed-in chrome without ever learning the token itself.
+  let user: unknown = null
+  try {
+    const me = await fetch(`${BACKEND}/auth/me`, {
+      headers: { authorization: `Bearer ${data.access_token}` },
+      cache: "no-store",
+    })
+    if (me.ok) user = await me.json()
+  } catch {
+    // Non-fatal: the SessionProvider will refetch /api/auth/me on mount.
+  }
+
+  // NOTE: `access_token` is intentionally stripped from the response body.
+  // The browser never sees the JWT (cookie-only auth).
+  return new Response(JSON.stringify({ ok: true, user }), {
     status: 200,
     headers: {
       "content-type": "application/json",
