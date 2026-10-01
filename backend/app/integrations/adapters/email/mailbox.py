@@ -66,14 +66,27 @@ class MailboxSource(Protocol):
     async def incremental(self, mailbox: str, start_history_id: str) -> AsyncIterator[tuple[RawMessage, str]]: ...
 
 
+def _default_corpus() -> dict[str, list[RawMessage]]:
+    """Lazy-load the whole-inbox demo corpus. Kept behind a function so tests
+    that construct an empty ``SimulatedMailbox(messages={})`` still get an
+    empty one."""
+    from app.integrations.adapters.email.simulated_corpus import build_corpus
+
+    return build_corpus()
+
+
 @dataclass
 class SimulatedMailbox:
     """A deterministic in-memory fixture source so inbox-analysis can be built
     without live Workspace access.
+
+    When constructed without ``messages``, loads the whole-inbox demo corpus
+    (``simulated_corpus.build_corpus()``) so the inbox-analysis UI has real
+    data today, before DWD is granted.
     """
 
     kind: str = "simulated"
-    messages: dict[str, list[RawMessage]] = field(default_factory=dict)
+    messages: dict[str, list[RawMessage]] = field(default_factory=_default_corpus)
 
     async def list_mailboxes(self) -> list[str]:
         return list(self.messages.keys())
