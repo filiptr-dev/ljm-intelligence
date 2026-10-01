@@ -10,10 +10,11 @@
  *  - Tone (used by the "enhance with AI" pass when it runs)
  *  - Daily cap (CAN-SPAM guard, default 50)
  *
- * The "Unsubscribe link" card (migration 0007) MUST be configured before the
- * auto-outreach toggle can be armed — the server rejects an arm with 409
- * `unsub_config_missing` if the base URL is blank. We disable the toggle
- * client-side too so the shape of the form matches the shape of the truth.
+ * The unsubscribe footer is not configurable: the backend appends it to every
+ * outgoing email from a fixed public base URL. If the backend reports it can't
+ * build the link (`unsub_config_ready=false`, e.g. no HMAC secret), the server
+ * rejects an arm with 409 `unsub_config_missing`; we disable the toggle
+ * client-side too.
  */
 
 import * as React from "react"
@@ -56,7 +57,6 @@ type SettingsOut = {
   auto_outreach_status_filter: string
   auto_outreach_min_fit: number
   fit_weights: FitWeights | null
-  unsubscribe_base_url: string | null
   unsub_secret_set: boolean
   unsub_config_ready: boolean
 }
@@ -72,14 +72,6 @@ const TONES = [
   { value: "brief-direct", label: "Brief / Direct" },
   { value: "friendly", label: "Friendly" },
 ]
-
-/** The base URL that the typed openapi-fetch client points at (the FastAPI
- *  origin, not the Next.js origin). The `/unsubscribe` route is served by the
- *  backend — the placeholder guides operators to the correct hostname so we
- *  don't end up minting tokens against `window.location.origin`, which would
- *  404 in production. */
-const API_BASE_URL_HINT =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || ""
 
 /** Small info button + tooltip trigger. Accessible via mouse hover, keyboard
  *  focus, and (base-ui default) touch tap. `aria-label` gives screen readers
@@ -123,7 +115,9 @@ export default function SettingsPage() {
   const [fitWeights, setFitWeights] = React.useState<FitWeights>(DEFAULT_FIT_WEIGHTS)
   // Unsubscribe config (migration 0007). The secret VALUE never leaves the API;
   // we only know whether it's set. `unsubReady` gates the auto-outreach toggle.
-  const [unsubBaseUrl, setUnsubBaseUrl] = React.useState("")
+  // `unsubReady` keeps the auto-outreach toggle disabled if the backend
+  // reports it can't build the unsubscribe link (defence in depth).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [unsubSecretSet, setUnsubSecretSet] = React.useState(false)
   const [unsubReady, setUnsubReady] = React.useState(false)
 
@@ -145,7 +139,6 @@ export default function SettingsPage() {
         setStatusFilter(s.auto_outreach_status_filter)
         setMinFit(s.auto_outreach_min_fit)
         setFitWeights({ ...DEFAULT_FIT_WEIGHTS, ...(s.fit_weights ?? {}) })
-        setUnsubBaseUrl(s.unsubscribe_base_url ?? "")
         setUnsubSecretSet(s.unsub_secret_set)
         setUnsubReady(s.unsub_config_ready)
       } catch (e) {
@@ -174,7 +167,6 @@ export default function SettingsPage() {
           auto_outreach_status_filter: statusFilter,
           auto_outreach_min_fit: minFit,
           fit_weights: fitWeights,
-          unsubscribe_base_url: unsubBaseUrl,
         }),
       })
       if (r.status === 409) {
@@ -183,14 +175,13 @@ export default function SettingsPage() {
         const detail = (await r.json())?.detail
         setAutoOutreachEnabled(false)
         toast.error("Can't arm auto-outreach", {
-          description: detail?.message ?? "Unsubscribe config is incomplete.",
+          description: detail?.message ?? "Unsubscribe link unavailable.",
         })
         return
       }
       if (!r.ok) throw new Error(`save ${r.status}`)
       const s = (await r.json()) as SettingsOut
       setUpdatedAt(s.updated_at)
-      setUnsubBaseUrl(s.unsubscribe_base_url ?? "")
       setUnsubSecretSet(s.unsub_secret_set)
       setUnsubReady(s.unsub_config_ready)
       toast.success("Settings saved")
@@ -265,51 +256,8 @@ export default function SettingsPage() {
           </Panel>
 
           <Panel
-            title="Unsubscribe link"
-            description="Every auto-outreach email must carry an unsubscribe link (CAN-SPAM). This is the base URL those links point at; the token appended to it is signed with a secret generated on the server."
-          >
-            <div className="grid gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="unsub-base-url">Unsubscribe base URL</Label>
-                <Input
-                  id="unsub-base-url"
-                  type="url"
-                  pattern="https://.*"
-                  placeholder={API_BASE_URL_HINT || "https://api.your-app.example"}
-                  value={unsubBaseUrl}
-                  onChange={(e) => setUnsubBaseUrl(e.target.value)}
-                  disabled={!loaded}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Must be https. This is the <strong>API</strong> origin (the same host your typed API client
-                  uses — the value of <code className="font-mono">NEXT_PUBLIC_API_URL</code>), not the frontend
-                  origin: <code className="font-mono">/unsubscribe</code> is a backend route.
-                </p>
-              </div>
-              <div
-                className={
-                  "rounded-sm border p-3 text-sm " +
-                  (unsubSecretSet
-                    ? "border-emerald-600/50 bg-emerald-500/5 text-emerald-800 dark:text-emerald-300"
-                    : "border-amber-600/50 bg-amber-500/5 text-amber-800 dark:text-amber-300")
-                }
-              >
-                Unsubscribe secret: {unsubSecretSet ? "set" : "not set"}
-                <span className="ml-2 text-xs text-muted-foreground">
-                  (generated on the server; never shown to the browser)
-                </span>
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-3 border-t border-border pt-4">
-              <Button onClick={save} disabled={!loaded || saving} className="font-semibold">
-                <Save /> {saving ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </Panel>
-
-          <Panel
             title="Auto-outreach"
-            description="Post-crawl outreach to freshly enriched contacts. Off by default. When on, the daily cron POSTs /enrichment/auto-send with the cron secret; the route still short-circuits if the CAN-SPAM footer or unsubscribe link is not configured."
+            description="Post-crawl outreach to freshly enriched contacts. Off by default. When on, the daily cron POSTs /enrichment/auto-send with the cron secret; every email always carries the CAN-SPAM footer and an unsubscribe link, and nothing sends if that link can't be built."
           >
             <div className="flex items-center justify-between rounded-sm border border-border bg-background p-3">
               <div>
@@ -318,7 +266,7 @@ export default function SettingsPage() {
                   Off by default. Unsubscribes are honored via signed HMAC tokens; the suppression list is checked before every send.
                   {!unsubReady && (
                     <span className="mt-1 block text-amber-700 dark:text-amber-400">
-                      Configure the unsubscribe link above before arming auto-outreach.
+                      Unsubscribe link unavailable (server is missing its signing secret), so auto-outreach cannot be armed.
                     </span>
                   )}
                 </div>

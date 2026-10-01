@@ -4,6 +4,8 @@
  * a 502 so the client can toast and NOT clobber its optimistic list state.
  */
 
+import { authHeaders } from "@/lib/auth/bff"
+
 const BACKEND = process.env.BACKEND_URL || "http://localhost:8765"
 
 export const dynamic = "force-dynamic"
@@ -13,7 +15,7 @@ export async function POST(req: Request) {
     const body = await req.text()
     const r = await fetch(`${BACKEND}/tools/call-list/outcome`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders(req, { "content-type": "application/json" }),
       body,
       cache: "no-store",
     })

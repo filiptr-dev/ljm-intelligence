@@ -124,8 +124,13 @@ class Settings(BaseSettings):
     outreach_from_email: str = "safety@ljminternational.com"
     outreach_from_name: str = "LJM International"
     outreach_postal_address: str = ""
-    # Public base URL for the unsubscribe route. Rendered into every auto-send email.
-    unsubscribe_base_url: str | None = None
+    # Public base URL of the API that serves ``/unsubscribe``. Rendered into the
+    # mandatory unsubscribe footer of EVERY outgoing email. Not user-configurable
+    # (no Settings UI, no DB value). Code default is the Render API origin from
+    # render.yaml / frontend/README.md; env ``UNSUBSCRIBE_BASE_URL`` may override
+    # it per deploy. Never derived from the incoming request host — behind a
+    # proxy that yields an internal URL and dead links.
+    unsubscribe_base_url: str = "https://ljm-intelligence-api.onrender.com"
     # HMAC-SHA256 secret used to sign per-contact unsubscribe tokens. Without this,
     # tokens cannot be minted and POST /unsubscribe returns 400 — a deploy without
     # the secret cannot mass-unsubscribe by URL enumeration.

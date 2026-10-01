@@ -98,21 +98,37 @@ async function fetchJson<T>(url: string, init: RequestInit & { timeoutMs?: numbe
   }
 }
 
+/** Merge a bearer token into a headers init object. Centralised so every
+ *  `backend.*` call stamps `Authorization` the same way; keep in sync with
+ *  `@/lib/auth/bff#authHeaders` (same shape, different signature). */
+function withAuth(extra: HeadersInit | undefined, authToken: string | undefined): HeadersInit | undefined {
+  if (!authToken) return extra
+  const h = new Headers(extra ?? {})
+  if (!h.has("authorization")) h.set("authorization", `Bearer ${authToken}`)
+  return h
+}
+
 export const backend = {
   base: DEFAULT_BACKEND,
   async health(base = DEFAULT_BACKEND): Promise<{ ok: boolean; db: "up" | "down" }> {
     return fetchJson(`${base}/health`, { timeoutMs: 4000 })
   },
-  async listLeads(base = DEFAULT_BACKEND, params: { limit?: number; state?: string; kind?: string; min_score?: number } = {}) {
+  async listLeads(base = DEFAULT_BACKEND, params: { limit?: number; state?: string; kind?: string; min_score?: number } = {}, authToken?: string) {
     const qs = new URLSearchParams()
     if (params.limit) qs.set("limit", String(params.limit))
     if (params.state) qs.set("state", params.state)
     if (params.kind) qs.set("kind", params.kind)
     if (params.min_score !== undefined) qs.set("min_score", String(params.min_score))
-    return fetchJson<BackendLeadsPage>(`${base}/leads?${qs.toString()}`, { timeoutMs: 8000 })
+    return fetchJson<BackendLeadsPage>(`${base}/leads?${qs.toString()}`, {
+      headers: withAuth(undefined, authToken),
+      timeoutMs: 8000,
+    })
   },
-  async latestRun(base = DEFAULT_BACKEND): Promise<BackendCrawlRun | null> {
-    return fetchJson<BackendCrawlRun | null>(`${base}/crawl/latest`, { timeoutMs: 5000 })
+  async latestRun(base = DEFAULT_BACKEND, authToken?: string): Promise<BackendCrawlRun | null> {
+    return fetchJson<BackendCrawlRun | null>(`${base}/crawl/latest`, {
+      headers: withAuth(undefined, authToken),
+      timeoutMs: 5000,
+    })
   },
   /** SERVER-only. Uses CRON_SECRET from the process env; never call from the browser. */
   async triggerRun(base = DEFAULT_BACKEND, limit = 25): Promise<{ run_id: string; status: string }> {
@@ -123,10 +139,14 @@ export const backend = {
       timeoutMs: 8000,
     })
   },
-  async draftEmail(base = DEFAULT_BACKEND, body: { lead_id?: string; lead?: Record<string, unknown>; tone: EmailTone; instructions?: string }) {
+  async draftEmail(
+    base = DEFAULT_BACKEND,
+    body: { lead_id?: string; lead?: Record<string, unknown>; tone: EmailTone; instructions?: string },
+    authToken?: string,
+  ) {
     return fetchJson<EmailDraft>(`${base}/email/draft`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: withAuth({ "Content-Type": "application/json" }, authToken),
       body: JSON.stringify(body),
       timeoutMs: 45000,
     })

@@ -27,7 +27,7 @@
  */
 
 import createClient from "openapi-fetch"
-import { getAccessToken } from "@/lib/auth/session"
+import { ensureAccessToken } from "@/lib/auth/session"
 import type { paths } from "./schema"
 
 const RAW_BASE_URL =
@@ -48,11 +48,30 @@ async function apiFetch(req: Request): Promise<Response> {
   const isRetryable = req.method === "GET" || req.method === "HEAD"
 
   // Inject `Authorization: Bearer <jwt>` from the session module. The token
-  // ref is populated by `SessionProvider` after `/api/auth/me` succeeds. If
-  // it's absent (server rendering or pre-auth), we just let the request go —
-  // the backend will answer 401 and the UI's session gate handles the
-  // redirect.
-  const token = typeof window !== "undefined" ? getAccessToken() : null
+  // ref is populated by `SessionProvider` after `/api/auth/me` succeeds.
+  //
+  // Race fix: on a fresh page load, SessionProvider's `/api/auth/me` and the
+  // first typed-client call fire in parallel. Without a gate, the typed call
+  // reaches the backend WITHOUT a bearer and the backend 401s — the exact
+  // "panel stuck on Loading…, toast says 401" symptom. We await
+  // `waitForSession()` (resolves after the first /me round-trip settles,
+  // either way) before reading the token, so the first in-flight data call
+  // blocks just long enough for the session to hydrate. Subsequent calls hit
+  // the already-resolved Promise synchronously — no measurable overhead.
+  // Attach `Authorization: Bearer <jwt>` by asking the session layer for the
+  // current token. `ensureAccessToken()` returns the cached token when there is
+  // one and otherwise calls `/api/auth/me` ONCE (deduped) to resolve it from
+  // the HttpOnly session cookie. This is the single source of truth — there is
+  // no race window where the typed client would ship a request without a
+  // bearer that the session cookie could provide.
+  let token: string | null = null
+  if (typeof window !== "undefined") {
+    try {
+      token = await ensureAccessToken()
+    } catch {
+      // ensureAccessToken swallows network errors and returns null.
+    }
+  }
   const headers = new Headers(req.headers)
   if (token && !headers.has("authorization")) {
     headers.set("authorization", `Bearer ${token}`)

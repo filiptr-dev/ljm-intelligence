@@ -1097,8 +1097,6 @@ export interface components {
             fit_weights: {
                 [key: string]: unknown;
             } | null;
-            /** Unsubscribe Base Url */
-            unsubscribe_base_url: string | null;
             /** Unsub Secret Set */
             unsub_secret_set: boolean;
             /** Unsub Config Ready */
@@ -1138,8 +1136,6 @@ export interface components {
             fit_weights?: {
                 [key: string]: unknown;
             } | null;
-            /** Unsubscribe Base Url */
-            unsubscribe_base_url?: string | null;
             /** Ai Features */
             ai_features?: {
                 [key: string]: unknown;

@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { Tire } from "@/components/brand/tire"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useSession } from "@/lib/auth/session"
@@ -11,11 +10,17 @@ import { useEngine } from "./engine"
 export function Topbar() {
   const { counters } = useEngine()
   const { user, logout, status } = useSession()
-  const router = useRouter()
 
   async function onLogout() {
     await logout()
-    router.replace("/login")
+    // Hard navigation (not `router.replace`) to force the whole React tree to
+    // tear down. If we rely on a client-side nav, SessionProvider is reused
+    // and the login page can mount with a stale `status === "authenticated"`
+    // context value — its "already signed in, redirect to ?next=" effect
+    // fires and bounces the user straight back to the page they tried to
+    // leave. A full page load guarantees SessionProvider boots fresh and
+    // `/api/auth/me` is replayed against the now-empty cookie jar.
+    if (typeof window !== "undefined") window.location.replace("/login")
   }
 
   return (

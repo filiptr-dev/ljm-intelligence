@@ -6,16 +6,17 @@
 The unsubscribe **secret** is deliberately not patchable through the public API
 — the migration seeds a durable value; the API only exposes an advisory
 `unsub_secret_set` boolean so the UI can show "set" / "not set" without ever
-leaking the token. The unsubscribe **base URL** is user-editable, https-only.
+leaking the token. The unsubscribe **base URL** is not configurable here — it
+is a fixed public URL in backend config (``Settings.unsubscribe_base_url``) and
+the footer is appended to every outgoing email by the send code.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import AnyHttpUrl, BaseModel, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from app.models import SettingsRow
@@ -23,23 +24,6 @@ from app.services.unsub_config import effective_unsub, unsub_missing_field
 from app.sources.provider import ALLOWED_MODELS, DEFAULT_FEATURES, FEATURE_NAMES
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-
-
-@dataclass
-class _PendingUnsubState:
-    """Shape-compatible stand-in for ``SettingsRow`` for the arm-time guard.
-
-    ``effective_unsub`` / ``unsub_missing_field`` only read these two attrs,
-    so a tiny dataclass is a cleaner contract than an ad-hoc inner class — if
-    the config helpers ever grow a new attribute, the type system flags it
-    here instead of surprising us with a runtime ``AttributeError``.
-    """
-
-    unsubscribe_secret: str | None
-    unsubscribe_base_url: str | None
-
-
-_HTTPS_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
 class SettingsOut(BaseModel):
@@ -61,7 +45,6 @@ class SettingsOut(BaseModel):
     # Unsubscribe config (migration 0007). The secret VALUE is never returned;
     # only a boolean flag so the UI can show set/not-set. `unsub_config_ready`
     # gates the auto-outreach toggle client-side.
-    unsubscribe_base_url: str | None
     unsub_secret_set: bool
     unsub_config_ready: bool
     # AI provider matrix (migration 0009). Each feature → {provider, model}.
@@ -83,27 +66,10 @@ class SettingsPatch(BaseModel):
     auto_outreach_status_filter: str | None = None
     auto_outreach_min_fit: int | None = Field(default=None, ge=0, le=100)
     fit_weights: dict | None = None
-    # Https-only; the empty string is a legal "clear it" signal.
-    unsubscribe_base_url: str | None = None
     # AI provider matrix. Each entry MUST be ``{provider: "gemini"|"claude",
     # model: <allowed-model>}``. Validator rejects unknown features / models /
     # providers with 422 so the UI can surface a specific message.
     ai_features: dict | None = None
-
-    @field_validator("unsubscribe_base_url")
-    @classmethod
-    def _https_only(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value == "":
-            return ""
-        try:
-            parsed = _HTTPS_URL_ADAPTER.validate_python(value)
-        except ValidationError as exc:
-            raise ValueError("unsubscribe_base_url must be a valid URL") from exc
-        if parsed.scheme != "https":
-            raise ValueError("unsubscribe_base_url must use https")
-        return str(parsed).rstrip("/")
 
     @field_validator("ai_features")
     @classmethod
@@ -146,9 +112,7 @@ def _serialize(request: Request, row: SettingsRow) -> SettingsOut:
         auto_outreach_status_filter=row.auto_outreach_status_filter,
         auto_outreach_min_fit=row.auto_outreach_min_fit,
         fit_weights=row.fit_weights,
-        # Advisory only. The base URL is echoed so the form prefills; the
-        # secret is *never* in the response — only its set/not-set bit.
-        unsubscribe_base_url=row.unsubscribe_base_url,
+        # Advisory only — the secret is *never* in the response.
         unsub_secret_set=bool(secret),
         unsub_config_ready=bool(secret and base_url),
         ai_features=_effective_ai_features(row.ai_features),
@@ -191,28 +155,18 @@ async def put_settings(request: Request, patch: SettingsPatch) -> SettingsOut:
         row = await _get_or_create(s)
         data = patch.model_dump(exclude_unset=True)
 
-        # Apply patch to a shadow copy so we can validate the post-write state
-        # before committing. Two knobs we care about together:
-        #  * `unsubscribe_base_url` change → recompute readiness against
-        #    `effective_unsub` (env overrides still apply).
-        #  * `auto_outreach_enabled=True` → refuse (409) unless the post-patch
-        #    config is ready. Disarming is never blocked.
-        # Only guard the *arm* action itself. Disarming is never blocked; a
-        # blanked base URL on an already-armed row is caught at send-time via
-        # the `no_unsub_config` short-circuit.
+        # Arm-time guard: refuse (409) to arm auto-outreach if the unsubscribe
+        # link could not be built. Disarming is never blocked; anything that
+        # goes missing after arming is caught at send time (`no_unsub_config`).
         if data.get("auto_outreach_enabled") is True:
-            pending = _PendingUnsubState(
-                unsubscribe_secret=row.unsubscribe_secret,
-                unsubscribe_base_url=data.get("unsubscribe_base_url", row.unsubscribe_base_url),
-            )
-            missing = unsub_missing_field(request.app.state.settings, pending)
+            missing = unsub_missing_field(request.app.state.settings, row)
             if missing:
                 raise HTTPException(
                     status_code=409,
                     detail={
                         "error": "unsub_config_missing",
                         "missing": missing,
-                        "message": "Set the unsubscribe base URL before arming auto-outreach.",
+                        "message": "Unsubscribe link cannot be built; auto-outreach cannot be armed.",
                     },
                 )
 

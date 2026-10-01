@@ -62,7 +62,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # the browser needs the API-side allowlist to include both the dev port
     # and the canonical Vercel production origin. These are always merged in
     # (dedup preserved) so a missing env var doesn't silently break CORS.
-    _finder_origins = ["http://localhost:3100", "https://ljm-intelligence.vercel.app"]
+    # localhost:3000 / 3030 / 3100 all appear in dev depending on which Next
+    # dev server is up; keep the trio in the hardcoded fallback so the typed
+    # `lib/api/` client's CORS preflight never fails on local dev regardless
+    # of which port Next picked. The AI providers panel + shipper-finder both
+    # go direct-to-:8765 and need this allowlist to include the frontend
+    # origin, otherwise the browser's OPTIONS preflight 400s.
+    _finder_origins = [
+        "http://localhost:3000",
+        "http://localhost:3030",
+        "http://localhost:3100",
+        "https://ljm-intelligence.vercel.app",
+    ]
     _merged_origins = list(settings.cors_allowed_origins) + [
         o for o in _finder_origins if o not in settings.cors_allowed_origins
     ]

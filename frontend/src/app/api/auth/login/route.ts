@@ -10,10 +10,16 @@
  * origin is the simplest robust answer. We reuse `NEXT_PUBLIC_API_URL`
  * server-side (readable in both contexts) — no new env var per plan
  * amendment 1.
+ *
+ * Cookie attributes: HttpOnly + Secure + SameSite=Lax, always. Modern Chrome
+ * (M89+), Firefox, and Safari all treat `http://localhost` and `http://127.0.0.1`
+ * as potentially-trustworthy origins and accept `Secure` cookies there — a
+ * stricter dev default is safer than special-casing production.
  */
 
+import { SESSION_COOKIE } from "@/lib/auth/bff"
+
 const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
-const COOKIE = "ljm_session"
 const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7d — matches backend auth_access_ttl_days default.
 
 export const dynamic = "force-dynamic"
@@ -52,11 +58,8 @@ export async function POST(req: Request) {
   }
 
   const maxAge = Math.min(data.expires_in ?? COOKIE_MAX_AGE_S, COOKIE_MAX_AGE_S)
-  // HttpOnly + Secure + SameSite=Lax: Lax allows top-level nav from external
-  // sites (so a bookmark to the dashboard still carries the cookie) but
-  // blocks CSRF on sensitive methods from third-party contexts.
   const cookie = [
-    `${COOKIE}=${encodeURIComponent(data.access_token)}`,
+    `${SESSION_COOKIE}=${encodeURIComponent(data.access_token)}`,
     "Path=/",
     `Max-Age=${maxAge}`,
     "HttpOnly",

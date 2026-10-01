@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api._auth import check_secret, sign_unsubscribe_token, verify_unsubscribe_token
+from app.api._auth import check_secret, verify_unsubscribe_token
 from app.config import Settings
 from app.models import (
     EnrichmentCandidate,
@@ -34,7 +34,13 @@ from app.pipeline.enrichment import (
     enrich_company,
     mark_contact_contacted,
 )
-from app.services.unsub_config import effective_unsub
+from app.services.unsub_config import (
+    build_unsub_link,
+    effective_secret,
+    effective_unsub,
+    unsub_headers,
+    with_unsub_footer,
+)
 
 log = logging.getLogger(__name__)
 
@@ -380,7 +386,9 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
     tests pass a mock. Compliance rules (mandatory):
 
       * `outreach_postal_address` must be non-empty (CAN-SPAM footer).
-      * `unsubscribe_base_url` must be set; each email gets a `?c=<contact_id>` link.
+      * Every email ALWAYS gets the unsubscribe footer + List-Unsubscribe headers,
+        built from the fixed public base URL (never the request host). If the
+        link cannot be built (no secret), nothing sends: `no_unsub_config`.
       * A contact in `suppression` (any reason) is skipped, not sent.
       * Only contacts at `pipeline_status == settings.auto_outreach_status_filter` qualify.
       * Daily cap counted from `sent_log.sent_at` today (UTC).
@@ -397,11 +405,11 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
         return AutoSendOut(status="no_footer", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
     if cfg.auto_outreach_template_id is None:
         return AutoSendOut(status="no_template", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
-    # Send-time guard: config can go missing *after* arming (someone blanks the
-    # base URL from Settings mid-day). Zero writes, zero sender() calls, loud
-    # distinct status so ops can see which knob is empty from the Settings UI.
-    effective_secret, effective_base_url = effective_unsub(settings, cfg)
-    if not effective_secret or not effective_base_url:
+    # Send-time fence: if the unsubscribe link cannot be built (no HMAC secret
+    # in env or DB, or a blanked base URL override), refuse. Zero writes, zero
+    # sender() calls.
+    unsub_secret, unsub_base = effective_unsub(settings, cfg)
+    if not unsub_secret or not unsub_base:
         return AutoSendOut(status="no_unsub_config", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
 
     now_hour = body.now_hour_override if body.now_hour_override is not None else now.hour
@@ -454,23 +462,15 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
             # row and render tokens. For this build, tests exercise send-decisions,
             # not template body content.
             subject = "Trucking capacity"
-            # Belt-and-braces: the send-time guard above proved both non-null.
-            assert effective_secret is not None and effective_base_url is not None
-            token = sign_unsubscribe_token(c.id, effective_secret)
-            unsub = f"{effective_base_url.rstrip('/')}/unsubscribe?t={token}"
-            list_unsub_url = unsub
-            body_text = (
+            # Footer + RFC 8058 headers are unconditional — not a setting.
+            unsub = build_unsub_link(unsub_secret, unsub_base, c.id)
+            body_text = with_unsub_footer(
                 "Hello,\n\nLJM International runs dry vans across the eastern US. "
-                "Reply if you have freight moving in the next couple of weeks.\n\n"
-                f"— LJM International\n{settings.outreach_postal_address}\n"
-                + (f"Unsubscribe: {unsub}\n" if unsub else "")
+                "Reply if you have freight moving in the next couple of weeks.",
+                postal_address=settings.outreach_postal_address,
+                unsub_url=unsub,
             )
-            # RFC 8058 one-click unsubscribe headers. Rendered so a real MTA
-            # can add them to the outbound; the mock `sender` receives them too.
-            headers = {}
-            if list_unsub_url:
-                headers["List-Unsubscribe"] = f"<{list_unsub_url}>"
-                headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+            headers = unsub_headers(unsub)
 
             if not body.dry_run:
                 if sender is not None:
@@ -521,13 +521,18 @@ class UnsubscribeOut(BaseModel):
 unsub_router = APIRouter(tags=["unsubscribe"])
 
 
-def _verify_or_400(request: Request, token: str) -> int:
+async def _verify_or_400(request: Request, token: str) -> int:
     settings: Settings = request.app.state.settings
-    if not settings.unsubscribe_secret:
+    # Same env → DB precedence the send path signs with, so a link minted from
+    # the migration-seeded DB secret actually verifies (no dead links).
+    async with request.app.state.sessionmaker() as s:
+        cfg = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+    secret = effective_secret(settings, cfg)
+    if not secret:
         # No secret configured → no minted tokens can be valid → hard 400.
         # A misconfigured deploy must NEVER succeed at mass-unsubscribing.
         raise HTTPException(400, "unsubscribe not configured")
-    cid = verify_unsubscribe_token(token, settings.unsubscribe_secret.get_secret_value())
+    cid = verify_unsubscribe_token(token, secret)
     if cid is None:
         raise HTTPException(400, "invalid unsubscribe token")
     return cid
@@ -542,7 +547,7 @@ async def unsubscribe_confirm_page(request: Request, t: str = Query(..., min_len
     unsubscribe the recipient before they read the message. Confirm-then-POST is
     the CAN-SPAM one-click contract (RFC 8058); we honor it.
     """
-    _ = _verify_or_400(request, t)
+    _ = await _verify_or_400(request, t)
     # Minimal HTML — an autosubmit form is not used; the operator clicks once.
     html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -566,7 +571,7 @@ async def unsubscribe_post(request: Request, t: str = Query(..., min_length=1)) 
     `List-Unsubscribe=One-Click` payloads via `?t=<token>` on the query string.
     Invalid / forged token → 400 with zero side effects.
     """
-    cid = _verify_or_400(request, t)
+    cid = await _verify_or_400(request, t)
     sessionmaker = request.app.state.sessionmaker
     async with sessionmaker() as s:
         contact = (await s.execute(select(LeadContact).where(LeadContact.id == cid))).scalar_one_or_none()

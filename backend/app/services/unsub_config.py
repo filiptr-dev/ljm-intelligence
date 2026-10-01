@@ -1,30 +1,34 @@
-"""Single source of truth for the effective unsubscribe secret + base URL.
+"""Single source of truth for the unsubscribe secret + public base URL.
 
-Both values can live in two places:
+The unsubscribe footer is always on: every outgoing email gets it, appended
+by the send code itself. Nothing about it is user-configurable.
 
-  * Env vars — `Settings.unsubscribe_secret` (SecretStr) / `unsubscribe_base_url`
-    (str). Optional; a `render.yaml` override lane for ops.
-  * DB row — `SettingsRow.unsubscribe_secret` / `unsubscribe_base_url`, edited
-    from the Settings UI (secret is seeded by migration 0007 and never patched
-    through the public API).
+Secret
+  * Env — ``Settings.unsubscribe_secret`` (SecretStr), ops override.
+  * DB — ``SettingsRow.unsubscribe_secret``, seeded by migration 0007 and never
+    patched through the public API.
 
-`effective_unsub` prefers env → DB. That order is deliberate:
+Base URL
+  * ``Settings.unsubscribe_base_url`` only — a fixed public URL with a code
+    default (the Render API origin) and an optional env override. The legacy
+    ``SettingsRow.unsubscribe_base_url`` column is no longer read, and the
+    incoming request host is never used (behind Docker/a proxy it is an
+    internal address, which would ship dead unsubscribe links).
 
-  * Preserves the current `render.yaml` contract — existing deploys keep
-    working without a data migration on their DB.
-  * Gives ops a break-glass override (rotate an env var, redeploy, done)
-    without touching the DB.
-  * DB values are the friendly path: first-time setup happens from Settings,
-    no shell required.
-
-The helper returns `(secret, base_url)`. A blank string on either side is
-treated as "missing" — the UI writes `""` to clear a value.
+If the link cannot be built (no secret anywhere, or a blank base URL), the send
+path refuses with ``no_unsub_config`` and sends nothing.
 """
 
 from __future__ import annotations
 
+from typing import Protocol
+
+from app.api._auth import sign_unsubscribe_token
 from app.config import Settings
-from app.models import SettingsRow
+
+
+class _HasSecret(Protocol):
+    unsubscribe_secret: str | None
 
 
 def _clean(value: str | None) -> str | None:
@@ -34,25 +38,31 @@ def _clean(value: str | None) -> str | None:
     return stripped or None
 
 
-def effective_unsub(settings: Settings, row: SettingsRow | None) -> tuple[str | None, str | None]:
-    """Return `(secret, base_url)` — env wins over DB; blank/None both mean missing."""
+def effective_secret(settings: Settings, row: _HasSecret | None) -> str | None:
+    """HMAC secret, env → DB. ``None`` when neither side has a value."""
     env_secret = settings.unsubscribe_secret.get_secret_value() if settings.unsubscribe_secret else None
-    secret = _clean(env_secret) or _clean(row.unsubscribe_secret if row else None)
-
-    env_base = settings.unsubscribe_base_url
-    base_url = _clean(env_base) or _clean(row.unsubscribe_base_url if row else None)
-
-    return secret, base_url
+    return _clean(env_secret) or _clean(row.unsubscribe_secret if row else None)
 
 
-def unsub_config_ready(settings: Settings, row: SettingsRow | None) -> bool:
-    """True iff both effective sides resolve to a non-blank value."""
+def unsub_base_url(settings: Settings) -> str | None:
+    """The fixed public base URL (code default, env override). No trailing slash."""
+    base = _clean(settings.unsubscribe_base_url)
+    return base.rstrip("/") if base else None
+
+
+def effective_unsub(settings: Settings, row: _HasSecret | None) -> tuple[str | None, str | None]:
+    """Return ``(secret, base_url)``."""
+    return effective_secret(settings, row), unsub_base_url(settings)
+
+
+def unsub_config_ready(settings: Settings, row: _HasSecret | None) -> bool:
+    """True iff an unsubscribe link can be built."""
     secret, base_url = effective_unsub(settings, row)
     return bool(secret) and bool(base_url)
 
 
-def unsub_missing_field(settings: Settings, row: SettingsRow | None) -> str | None:
-    """Which knob(s) still need filling — for the 409 detail on arm."""
+def unsub_missing_field(settings: Settings, row: _HasSecret | None) -> str | None:
+    """Which piece is missing — for the ``unsub_config_missing`` detail."""
     secret, base_url = effective_unsub(settings, row)
     if not secret and not base_url:
         return "unsubscribe_base_url_and_secret"
@@ -61,3 +71,22 @@ def unsub_missing_field(settings: Settings, row: SettingsRow | None) -> str | No
     if not secret:
         return "unsubscribe_secret"
     return None
+
+
+def build_unsub_link(secret: str, base_url: str, contact_id: int) -> str:
+    """Signed per-contact unsubscribe URL."""
+    return f"{base_url.rstrip('/')}/unsubscribe?t={sign_unsubscribe_token(contact_id, secret)}"
+
+
+def with_unsub_footer(body: str, *, postal_address: str, unsub_url: str) -> str:
+    """Append the mandatory CAN-SPAM footer (sender, postal address, unsubscribe
+    link). Always applied by the send code; there is no way to turn it off."""
+    return f"{body.rstrip()}\n\n— LJM International\n{postal_address}\nUnsubscribe: {unsub_url}\n"
+
+
+def unsub_headers(unsub_url: str) -> dict[str, str]:
+    """RFC 8058 one-click unsubscribe headers, always set on outgoing mail."""
+    return {
+        "List-Unsubscribe": f"<{unsub_url}>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    }

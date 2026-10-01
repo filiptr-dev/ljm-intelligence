@@ -10,13 +10,14 @@
  * through BFFs, trading that for a lot of handler code.
  */
 
+import { readSessionCookie, SESSION_COOKIE } from "@/lib/auth/bff"
+
 const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
-const COOKIE = "ljm_session"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(req: Request) {
-  const token = readCookie(req.headers.get("cookie"), COOKIE)
+  const token = readSessionCookie(req)
   if (!token) {
     return Response.json({ authenticated: false }, { status: 401 })
   }
@@ -32,11 +33,12 @@ export async function GET(req: Request) {
   if (upstream.status === 401) {
     // Expired / revoked / mis-issued token → clear the cookie so the next
     // request from this browser doesn't re-attempt the same dead token.
-    const clear = [`${COOKIE}=`, "Path=/", "Max-Age=0", "HttpOnly", "Secure", "SameSite=Lax"].join("; ")
-    return new Response(JSON.stringify({ authenticated: false }), {
-      status: 401,
-      headers: { "content-type": "application/json", "set-cookie": clear },
-    })
+    // Match the login route's Secure attribute so the clear takes.
+    const base = [`${SESSION_COOKIE}=`, "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Lax"]
+    const headers = new Headers({ "content-type": "application/json" })
+    headers.append("set-cookie", base.join("; "))
+    headers.append("set-cookie", [...base, "Secure"].join("; "))
+    return new Response(JSON.stringify({ authenticated: false }), { status: 401, headers })
   }
   const text = await upstream.text()
   if (!upstream.ok) {
@@ -49,13 +51,4 @@ export async function GET(req: Request) {
     return Response.json({ detail: "bad backend response" }, { status: 502 })
   }
   return Response.json({ authenticated: true, user, access_token: token })
-}
-
-function readCookie(header: string | null, name: string): string | null {
-  if (!header) return null
-  for (const part of header.split(";")) {
-    const [k, ...rest] = part.trim().split("=")
-    if (k === name) return decodeURIComponent(rest.join("="))
-  }
-  return null
 }

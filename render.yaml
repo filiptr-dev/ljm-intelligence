@@ -97,6 +97,9 @@ services:
       - key: GEMINI_MODEL_ENRICHMENT
         value: gemini-3.5-flash-lite
       # Auto-outreach — OFF by default. Compliance rules enforced in code.
+      # Unsubscribe footer is always appended to every email. Its base URL
+      # defaults in code to https://ljm-intelligence-api.onrender.com; set this
+      # only to override it (e.g. a custom domain).
       - key: UNSUBSCRIBE_BASE_URL
         sync: false
       # HMAC-SHA256 secret for unsubscribe tokens. Without this the unsubscribe
