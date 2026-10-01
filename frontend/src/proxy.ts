@@ -24,7 +24,7 @@ const COOKIE = "ljm_session"
 
 const PUBLIC_PREFIXES = ["/login", "/api/auth/", "/_next/", "/favicon"]
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
     return NextResponse.next()
