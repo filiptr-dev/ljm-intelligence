@@ -37,6 +37,7 @@ import {
   FIT_PANEL_INTRO,
   FIT_WEIGHT_META,
 } from "./fit-weight-meta"
+import { AiProvidersPanel } from "./ai-providers-panel"
 
 type FitWeights = Record<string, number>
 
@@ -498,6 +499,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-4 xl:sticky xl:top-20 xl:self-start">
+          <AiProvidersPanel />
           <Panel title="How this works">
             <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground marker:text-safety">
               <li>The crawler finds new brokers/shippers every day at 3 PM ET.</li>

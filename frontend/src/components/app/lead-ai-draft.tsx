@@ -106,7 +106,7 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
     // see it landed; the campaigns UI keeps working with the existing engine pipeline.
     onSent?.(draft)
     toast.success(`Email sent (simulated) → ${target.email || "no address on file"}`, {
-      description: `${TONE_LABEL[draft.tone]} tone · ${draft.source === "gemini" ? "AI-written" : "template"}`,
+      description: `${TONE_LABEL[draft.tone]} tone · ${draft.source !== "fallback" ? "AI-written" : "template"}`,
     })
     onOpenChange(false)
   }
@@ -124,9 +124,9 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
           <DialogDescription>
             {loading
               ? "Drafting with AI…"
-              : draft?.source === "gemini"
-                ? "Written by Gemini from this broker's real data. Tap a tone to regenerate. Edit anything before sending."
-                : "Written from the LJM template (Gemini unavailable). Tap a tone to regenerate."}
+              : draft?.source !== "fallback"
+                ? `Written by ${draft?.source === "claude" ? "Claude" : "Gemini"} from this broker's real data. Tap a tone to regenerate. Edit anything before sending.`
+                : "Written from the LJM template (AI unavailable). Tap a tone to regenerate."}
           </DialogDescription>
         </DialogHeader>
 

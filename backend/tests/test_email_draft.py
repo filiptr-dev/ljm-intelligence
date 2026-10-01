@@ -46,17 +46,36 @@ async def test_email_draft_fallback_when_no_gemini_key() -> None:
 
 @pytest.mark.asyncio
 async def test_email_draft_uses_gemini_when_key_present() -> None:
+    from decimal import Decimal
+
     from pydantic import SecretStr
 
     from app.config import Settings
+    from app.sources.provider import ProviderCall
 
-    settings = Settings().model_copy(update={"gemini_api_key": SecretStr("fake-key")})
+    settings = Settings().model_copy(
+        update={"gemini_api_key": SecretStr("fake-key"), "anthropic_api_key": SecretStr("fake-key")}
+    )
     app = create_app(settings)
 
-    async def fake_gemini(**_kwargs):
-        return ("Dry-van coverage this week", "Hi Sam,\n\nQuick note about a truck we can send your way.\n\n- Nick")
+    async def fake_generate_json(self, prompt, *, schema_hint=None):
+        return ProviderCall(
+            text='{"subject":"Dry-van coverage this week","body":"Hi Sam,\\n\\nQuick note about a truck we can send your way.\\n\\n- Nick"}',
+            parsed={
+                "subject": "Dry-van coverage this week",
+                "body": "Hi Sam,\n\nQuick note about a truck we can send your way.\n\n- Nick",
+            },
+            input_tokens=10,
+            output_tokens=20,
+            latency_ms=5,
+            cost_usd=Decimal("0.000001"),
+            model="gemini-3.5-flash-lite",
+            provider="gemini",
+            status="ok",
+        )
 
-    with patch("app.api.email._gemini_draft", side_effect=fake_gemini):
+    # email_drafts defaults to Gemini; patch Gemini's seam.
+    with patch("app.sources.provider.GeminiProvider.generate_json", new=fake_generate_json):
         async with app.router.lifespan_context(app):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -79,17 +98,33 @@ async def test_email_draft_uses_gemini_when_key_present() -> None:
 @pytest.mark.asyncio
 async def test_email_draft_falls_back_on_gemini_error() -> None:
     """Gemini 429/5xx must not surface as a 500 — the composer needs a body no matter what."""
+    from decimal import Decimal
+
     from pydantic import SecretStr
 
     from app.config import Settings
+    from app.sources.provider import ProviderCall
 
-    settings = Settings().model_copy(update={"gemini_api_key": SecretStr("fake-key")})
+    settings = Settings().model_copy(
+        update={"gemini_api_key": SecretStr("fake-key"), "anthropic_api_key": SecretStr("fake-key")}
+    )
     app = create_app(settings)
 
-    async def boom(**_kwargs):
-        raise RuntimeError("upstream 429")
+    async def boom(self, prompt, *, schema_hint=None):
+        return ProviderCall(
+            text="",
+            parsed=None,
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=0,
+            cost_usd=Decimal(0),
+            model="gemini-3.5-flash-lite",
+            provider="gemini",
+            status="rate_limited",
+            error="upstream 429",
+        )
 
-    with patch("app.api.email._gemini_draft", side_effect=boom):
+    with patch("app.sources.provider.GeminiProvider.generate_json", new=boom):
         async with app.router.lifespan_context(app):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as c:

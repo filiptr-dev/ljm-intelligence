@@ -16,11 +16,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-import httpx
-
 from app.sources.emails import normalize_email
-from app.sources.linkedin_search import GEMINI_ENDPOINT
-from app.sources.provider import GeminiProvider, LLMProvider, NullProvider
+from app.sources.provider import LLMProvider, NullProvider
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +88,6 @@ async def extract_contacts(
     if not text.strip():
         return Extraction(status="ok", error=None)
 
-    assert isinstance(provider, GeminiProvider)
     prompt = (
         "Extract PUBLIC contact information from the WEBSITE TEXT below. "
         "Rules: (1) NEVER invent emails or phones — only lift what appears VERBATIM. "
@@ -104,29 +100,17 @@ async def extract_contacts(
         '"people":[{"name":"","title":"","email":"","phone":""}]}\n'
         "WEBSITE TEXT:\n" + text[:40000]
     )
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"},
-    }
-    url = GEMINI_ENDPOINT.format(model=provider.model)
-    try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            resp = await client.post(url, params={"key": provider.api_key.get_secret_value()}, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        log.info("extractor: fetch failed: %s", exc)
-        return Extraction(status="fetch_failed", error=str(exc)[:500])
-
-    out_text = ""
-    for cand in (data.get("candidates") or [])[:1]:
-        for part in (cand.get("content") or {}).get("parts") or []:
-            out_text += part.get("text", "")
-
-    try:
-        payload = _extract_json(out_text)
-    except Exception as exc:  # noqa: BLE001
-        return Extraction(status="extract_failed", error=str(exc)[:500])
+    call = await provider.generate_json(prompt)
+    if call.status != "ok":
+        log.info("extractor: provider status=%s err=%s", call.status, call.error)
+        return Extraction(status="fetch_failed", error=(call.error or call.status)[:500])
+    if isinstance(call.parsed, dict):
+        payload = call.parsed
+    else:
+        try:
+            payload = _extract_json(call.text)
+        except Exception as exc:  # noqa: BLE001
+            return Extraction(status="extract_failed", error=str(exc)[:500])
 
     # Validate + dedupe.
     seen_emails: set[str] = set()

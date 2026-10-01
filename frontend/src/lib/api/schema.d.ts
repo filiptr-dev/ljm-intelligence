@@ -429,6 +429,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Features */
+        get: operations["get_features_ai_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compare */
+        post: operations["compare_ai_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage */
+        get: operations["usage_ai_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/unsubscribe": {
         parameters: {
             query?: never;
@@ -598,7 +649,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "gemini" | "fallback";
+            source: "gemini" | "claude" | "fallback";
             /**
              * Tone
              * @enum {string}
@@ -667,6 +718,28 @@ export interface components {
             fit_score?: number | null;
             /** Fit Reasons */
             fit_reasons?: string[];
+        };
+        /** FeatureChoice */
+        FeatureChoice: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+        };
+        /** FeaturesResponse */
+        FeaturesResponse: {
+            /** Features */
+            features: {
+                [key: string]: components["schemas"]["FeatureChoice"];
+            };
+            /** Allowed Models */
+            allowed_models: {
+                [key: string]: string[];
+            };
+            /** Keys Present */
+            keys_present: {
+                [key: string]: boolean;
+            };
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -965,6 +1038,33 @@ export interface components {
             /** Primary Email */
             primary_email: string | null;
         };
+        /** ProviderCallResponse */
+        ProviderCallResponse: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Status */
+            status: string;
+            /** Text */
+            text: string;
+            /** Parsed */
+            parsed: unknown | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Cost Usd */
+            cost_usd: string;
+            /** Error */
+            error: string | null;
+            /** Citations */
+            citations?: {
+                [key: string]: unknown;
+            }[];
+        };
         /** SettingsOut */
         SettingsOut: {
             /** Threshold */
@@ -1003,6 +1103,10 @@ export interface components {
             unsub_secret_set: boolean;
             /** Unsub Config Ready */
             unsub_config_ready: boolean;
+            /** Ai Features */
+            ai_features: {
+                [key: string]: unknown;
+            };
         };
         /** SettingsPatch */
         SettingsPatch: {
@@ -1036,6 +1140,10 @@ export interface components {
             } | null;
             /** Unsubscribe Base Url */
             unsubscribe_base_url?: string | null;
+            /** Ai Features */
+            ai_features?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** ShipperDetailOut */
         ShipperDetailOut: {
@@ -1143,6 +1251,53 @@ export interface components {
             email: string | null;
             /** Already */
             already: boolean;
+        };
+        /** UsageResponse */
+        UsageResponse: {
+            /** Since */
+            since: string;
+            /** Totals By Provider */
+            totals_by_provider: {
+                [key: string]: components["schemas"]["UsageTotal"];
+            };
+            /** Rows */
+            rows: components["schemas"]["UsageRow"][];
+        };
+        /** UsageRow */
+        UsageRow: {
+            /** Id */
+            id: number;
+            /** Feature */
+            feature: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Status */
+            status: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Cost Usd */
+            cost_usd: string;
+            /** Error */
+            error: string | null;
+            /** Compare Id */
+            compare_id: string | null;
+            /** Created At */
+            created_at: string;
+        };
+        /** UsageTotal */
+        UsageTotal: {
+            /** Calls */
+            calls: number;
+            /** Tokens */
+            tokens: number;
+            /** Cost Usd */
+            cost_usd: string;
         };
         /** UserOut */
         UserOut: {
@@ -2101,6 +2256,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_features_ai_features_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_ai_usage_get: {
+        parameters: {
+            query?: {
+                since?: string;
+                feature?: string | null;
+                provider?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageResponse"];
                 };
             };
             /** @description Validation Error */

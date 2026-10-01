@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from app.models import SettingsRow
 from app.services.unsub_config import effective_unsub, unsub_missing_field
+from app.sources.provider import ALLOWED_MODELS, DEFAULT_FEATURES, FEATURE_NAMES
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -63,6 +64,9 @@ class SettingsOut(BaseModel):
     unsubscribe_base_url: str | None
     unsub_secret_set: bool
     unsub_config_ready: bool
+    # AI provider matrix (migration 0009). Each feature → {provider, model}.
+    # Missing / unknown keys fall back to code defaults in `provider.DEFAULT_FEATURES`.
+    ai_features: dict
 
 
 class SettingsPatch(BaseModel):
@@ -81,6 +85,10 @@ class SettingsPatch(BaseModel):
     fit_weights: dict | None = None
     # Https-only; the empty string is a legal "clear it" signal.
     unsubscribe_base_url: str | None = None
+    # AI provider matrix. Each entry MUST be ``{provider: "gemini"|"claude",
+    # model: <allowed-model>}``. Validator rejects unknown features / models /
+    # providers with 422 so the UI can surface a specific message.
+    ai_features: dict | None = None
 
     @field_validator("unsubscribe_base_url")
     @classmethod
@@ -96,6 +104,28 @@ class SettingsPatch(BaseModel):
         if parsed.scheme != "https":
             raise ValueError("unsubscribe_base_url must use https")
         return str(parsed).rstrip("/")
+
+    @field_validator("ai_features")
+    @classmethod
+    def _validate_ai_features(cls, value: dict | None) -> dict | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("ai_features must be an object")  # noqa: TRY004
+        out: dict[str, dict[str, str]] = {}
+        for feature, choice in value.items():
+            if feature not in FEATURE_NAMES:
+                raise ValueError(f"unknown ai feature: {feature}")
+            if not isinstance(choice, dict):
+                raise ValueError(f"ai_features[{feature}] must be an object")  # noqa: TRY004
+            provider = str(choice.get("provider") or "")
+            model = str(choice.get("model") or "")
+            if provider not in ALLOWED_MODELS:
+                raise ValueError(f"ai_features[{feature}].provider invalid: {provider}")
+            if model not in ALLOWED_MODELS[provider]:
+                raise ValueError(f"ai_features[{feature}].model not allowed for {provider}: {model}")
+            out[feature] = {"provider": provider, "model": model}
+        return out
 
 
 def _serialize(request: Request, row: SettingsRow) -> SettingsOut:
@@ -121,7 +151,22 @@ def _serialize(request: Request, row: SettingsRow) -> SettingsOut:
         unsubscribe_base_url=row.unsubscribe_base_url,
         unsub_secret_set=bool(secret),
         unsub_config_ready=bool(secret and base_url),
+        ai_features=_effective_ai_features(row.ai_features),
     )
+
+
+def _effective_ai_features(stored: dict | None) -> dict:
+    """Merge the stored overrides over DEFAULT_FEATURES; invalid entries fall through."""
+    out: dict[str, dict[str, str]] = {}
+    stored = stored or {}
+    for feature, default in DEFAULT_FEATURES.items():
+        choice = stored.get(feature) if isinstance(stored.get(feature), dict) else None
+        provider = (choice or {}).get("provider") or default["provider"]
+        model = (choice or {}).get("model") or default["model"]
+        if provider not in ALLOWED_MODELS or model not in ALLOWED_MODELS.get(provider, []):
+            provider, model = default["provider"], default["model"]
+        out[feature] = {"provider": provider, "model": model}
+    return out
 
 
 async def _get_or_create(session) -> SettingsRow:

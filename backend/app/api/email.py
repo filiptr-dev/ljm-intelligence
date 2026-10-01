@@ -9,23 +9,21 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Literal
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.config import Settings
-from app.models import Lead
+from app.models import Lead, SettingsRow
 from app.outreach.brand import render_branded_email
+from app.services.ai_usage import hash_prompt, record
+from app.sources.provider import NullProvider, get_for
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/email", tags=["email"])
-
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 Tone = Literal["professional", "friendly", "direct", "persuasive"]
 
@@ -67,7 +65,10 @@ class DraftOut(BaseModel):
     subject: str
     body: str
     body_html: str
-    source: Literal["gemini", "fallback"]
+    # "gemini" | "claude" | "fallback". Named after the provider that wrote the
+    # draft so the frontend can show the correct attribution ("Written by Claude…"
+    # vs "Written by Gemini…" vs the local template fallback).
+    source: Literal["gemini", "claude", "fallback"]
     tone: Tone
     lead_id: str | None = None
     # Only set when the lead carries relationship data (sentiment/health) or an explicit stance.
@@ -231,19 +232,10 @@ async def _load_lead(request: Request, lead_id: str) -> dict:
     }
 
 
-def _extract_json(text: str) -> dict:
-    m = re.search(r"\{[\s\S]*\}", text)
-    if not m:
-        raise ValueError("no JSON in model output")
-    return json.loads(m.group(0))
-
-
-async def _gemini_draft(
-    *, api_key: str, model: str, lead: dict, tone: Tone, instructions: str | None
-) -> tuple[str, str]:
+def _draft_prompt(lead: dict, tone: Tone, instructions: str | None) -> str:
     stance = _stance(lead)
     angle = f"ANGLE: {STANCE_HINT[stance]}\n" if stance else ""
-    prompt = (
+    return (
         "You write outreach email drafts for LJM International, a US long-haul dry-van freight "
         "brokerage in Lincoln Park, NJ, serving the eastern US. Sender is Nick Rivera.\n\n"
         f"TONE: {TONE_HINT[tone]}\n"
@@ -257,24 +249,6 @@ async def _gemini_draft(
         '- Return STRICT JSON: {"subject":"...","body":"..."} and nothing else.\n\n'
         f"LEAD JSON:\n{json.dumps(lead, default=str)}\n"
     )
-    body_req = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.5, "responseMimeType": "application/json"},
-    }
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        resp = await client.post(GEMINI_URL.format(model=model), params={"key": api_key}, json=body_req)
-        resp.raise_for_status()
-        data = resp.json()
-    text = ""
-    for cand in (data.get("candidates") or [])[:1]:
-        for part in (cand.get("content") or {}).get("parts") or []:
-            text += part.get("text", "")
-    payload = _extract_json(text)
-    subject = str(payload.get("subject", "")).strip() or "Trucking capacity"
-    body_text = str(payload.get("body", "")).strip()
-    if not body_text:
-        raise ValueError("empty draft body")
-    return subject, body_text
 
 
 @router.post("/draft", response_model=DraftOut)
@@ -288,23 +262,44 @@ async def draft_email(payload: DraftIn, request: Request) -> DraftOut:
     else:
         raise HTTPException(400, "provide lead_id or lead")
 
-    source: Literal["gemini", "fallback"] = "fallback"
-    key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None
-    if key:
-        try:
-            subject, body = await _gemini_draft(
-                api_key=key,
-                model=settings.gemini_model,
-                lead=lead,
-                tone=payload.tone,
-                instructions=payload.instructions,
-            )
-            source = "gemini"
-        except Exception as exc:  # noqa: BLE001 — any Gemini error must fall back to the local draft
-            log.warning("email/draft: gemini failed, falling back: %s", exc)
-            subject, body = _fallback_draft(lead, payload.tone)
-    else:
+    # Pull per-feature override from the settings row, if present. Resilient:
+    # a missing table (test fixtures that skip migrations) or any read error
+    # falls back to the code default — the draft route must never 500 on a
+    # settings lookup.
+    ai_features: dict | None = None
+    try:
+        async with request.app.state.sessionmaker() as s:
+            row = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+            ai_features = (row.ai_features if row else None) or None
+    except Exception as exc:  # noqa: BLE001
+        log.info("email/draft: settings row lookup skipped: %s", exc)
+
+    source: Literal["gemini", "claude", "fallback"] = "fallback"
+    provider = get_for("email_drafts", settings=settings, ai_features=ai_features)
+    subject: str
+    body: str
+    if isinstance(provider, NullProvider):
         subject, body = _fallback_draft(lead, payload.tone)
+    else:
+        prompt = _draft_prompt(lead, payload.tone, payload.instructions)
+        call = await provider.generate_json(prompt)
+        try:
+            async with request.app.state.sessionmaker() as s:
+                await record(s, call, feature="email_drafts", input_hash=hash_prompt(prompt))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("email/draft: ai_usage.record failed: %s", exc)
+        parsed = call.parsed if isinstance(call.parsed, dict) else None
+        if call.status == "ok" and parsed:
+            subject = str(parsed.get("subject", "")).strip() or "Trucking capacity"
+            body = str(parsed.get("body", "")).strip()
+            if body:
+                source = provider.kind if provider.kind in ("gemini", "claude") else "gemini"
+            else:
+                log.warning("email/draft: empty body, falling back")
+                subject, body = _fallback_draft(lead, payload.tone)
+        else:
+            log.warning("email/draft: provider status=%s err=%s, falling back", call.status, call.error)
+            subject, body = _fallback_draft(lead, payload.tone)
 
     body_html = render_branded_email(subject=subject, body=body, frontend_origin=settings.frontend_origin)
     return DraftOut(

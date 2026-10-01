@@ -27,6 +27,17 @@ services:
       # Gemini — model names env-driven; SDK gets picked up from these.
       - key: GEMINI_API_KEY
         sync: false
+      # Anthropic (ai-provider-layer-claude). Missing key → Claude-routed features
+      # fall back to NullProvider (`status="no_api_key"`), never a 500. Set in the
+      # Render dashboard; `sync: false` keeps it out of the blueprint.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_DEFAULT_MODEL
+        value: claude-sonnet-5-5
+      - key: CLAUDE_CHEAPER_MODEL
+        value: claude-haiku-4-5-20251001
+      - key: AI_COMPARE_ENABLED
+        value: "true"
       # Model IDs are env-driven. Default is gemini-3.5-flash-lite (cheapest quota).
       # Override in the Render dashboard without a redeploy when Google rotates models.
       - key: GEMINI_MODEL

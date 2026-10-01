@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.5-flash-lite"
 
+    # Anthropic (ai-provider-layer-claude). Env-only; `ANTHROPIC_API_KEY` on Render.
+    # Missing → every Claude-routed feature returns `status="no_api_key"` through
+    # the LLMProvider seam, never a 500. The daily crawl keeps running.
+    anthropic_api_key: SecretStr | None = None
+    claude_default_model: str = "claude-sonnet-5-5"
+    claude_cheaper_model: str = "claude-haiku-4-5-20251001"
+
     # FMCSA paginator knobs — see plan `2026-09-30-fmcsa-crawl-depth`.
     # `fmcsa_app_token` lifts us from the shared SODA throttle bucket to a per-app one;
     # optional (the paginator works keyless). `fmcsa_page_size` is the SODA `$limit`.

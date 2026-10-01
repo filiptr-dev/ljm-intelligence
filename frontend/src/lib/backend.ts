@@ -58,7 +58,7 @@ export type EmailDraft = {
   subject: string
   body: string
   body_html: string
-  source: "gemini" | "fallback"
+  source: "gemini" | "claude" | "fallback"
   tone: EmailTone
   lead_id: string | null
   /** angle the draft took from the broker's sentiment; null for cold leads */

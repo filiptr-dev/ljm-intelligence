@@ -16,14 +16,13 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-import httpx
+from pydantic import SecretStr
 
 from app.region import IN_REGION_STATES
 from app.sources.emails import normalize_email
+from app.sources.provider import GeminiProvider, LLMProvider, NullProvider
 
 log = logging.getLogger(__name__)
-
-GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 LJM_PROFILE = (
     "LJM International is a US freight brokerage/carrier in Lincoln Park, NJ. "
@@ -72,41 +71,44 @@ def _extract_json(text: str) -> dict:
 
 
 class GeminiDiscoverer:
-    def __init__(self, *, api_key: str, model: str) -> None:
-        self.api_key = api_key
-        self.model = model
+    """Grounded shipper-discovery, now routed through the LLM provider seam.
+
+    Keeps the historical `(api_key, model)` constructor signature so the
+    gemini_stage call site is unchanged. A caller that wants Claude (never, in
+    v1 — Claude has no grounded search) can pass a pre-built `provider=`.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str,
+        provider: LLMProvider | None = None,
+    ) -> None:
+        if provider is not None:
+            self._provider = provider
+        elif api_key:
+            self._provider = GeminiProvider(api_key=SecretStr(api_key), model=model, timeout_s=60.0)
+        else:
+            self._provider = NullProvider(model=model)
+        self.model = getattr(self._provider, "model", model)
 
     async def discover(self, *, target_count: int = 8) -> list[DiscoveredCompany]:
-        url = GEMINI_ENDPOINT.format(model=self.model)
-        body = {
-            "contents": [{"role": "user", "parts": [{"text": DISCOVERY_PROMPT.replace("{n}", str(target_count))}]}],
-            # Grounding via Google Search (Gemini 1.5+/2.x). Documented as `google_search` for 2.x.
-            "tools": [{"google_search": {}}],
-            "generationConfig": {"temperature": 0.4, "responseMimeType": "text/plain"},
-        }
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, params={"key": self.api_key}, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-
-        text = ""
-        candidates = data.get("candidates") or []
-        if candidates:
-            parts = (candidates[0].get("content") or {}).get("parts") or []
-            text = "".join(p.get("text", "") for p in parts)
+        if isinstance(self._provider, NullProvider):
+            return []
+        prompt = DISCOVERY_PROMPT.replace("{n}", str(target_count))
+        call = await self._provider.search_grounded(prompt)
+        if call.status != "ok":
+            log.warning("gemini discovery failed: status=%s err=%s", call.status, call.error)
+            raise RuntimeError(f"{call.status}: {call.error or ''}")
+        text = call.text
         try:
             payload = _extract_json(text)
         except Exception:  # noqa: BLE001 — any malformed LLM payload short-circuits to []
             log.warning("gemini discovery: could not parse JSON, raw text=%r", text[:400])
             return []
 
-        # Pull citations out of groundingMetadata if present.
-        citations: list[dict] = []
-        gm = (candidates[0].get("groundingMetadata") if candidates else None) or {}
-        for chunk in gm.get("groundingChunks", []) or []:
-            web = chunk.get("web") or {}
-            if "uri" in web:
-                citations.append({"url": web["uri"], "title": web.get("title")})
+        citations = list(call.citations or [])
 
         out: list[DiscoveredCompany] = []
         seen_domains: set[str] = set()

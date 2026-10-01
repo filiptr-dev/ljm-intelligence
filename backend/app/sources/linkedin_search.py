@@ -29,13 +29,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-import httpx
-
-from app.sources.provider import GeminiProvider, LLMProvider, NullProvider
+from app.sources.provider import LLMProvider, NullProvider
 
 log = logging.getLogger(__name__)
-
-GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 _LINKEDIN_IN_RE = re.compile(r"^https?://(?:www\.|[a-z]{2}\.)?linkedin\.com/in/[A-Za-z0-9\-_%]+/?$")
 _LINKEDIN_COMPANY_RE = re.compile(r"^https?://(?:www\.|[a-z]{2}\.)?linkedin\.com/company/[A-Za-z0-9\-_%]+/?$")
@@ -105,37 +101,12 @@ def _extract_json(text: str) -> dict:
     return json.loads(m.group(0))
 
 
-def _pull_citations(candidates: list[dict]) -> list[dict]:
-    if not candidates:
-        return []
-    gm = candidates[0].get("groundingMetadata") or {}
-    out: list[dict] = []
-    for chunk in gm.get("groundingChunks", []) or []:
-        web = chunk.get("web") or {}
-        if "uri" in web:
-            out.append({"url": web["uri"], "title": web.get("title")})
-    return out
-
-
 async def _grounded_call(provider: LLMProvider, prompt: str, *, timeout_s: float = 30.0) -> tuple[str, list[dict]]:
-    """POST to Gemini with google_search grounding. Returns (text, citations)."""
-    assert isinstance(provider, GeminiProvider)  # NullProvider short-circuits above
-    url = GEMINI_ENDPOINT.format(model=provider.model)
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "tools": [{"google_search": {}}],
-        "generationConfig": {"temperature": 0.3, "responseMimeType": "text/plain"},
-    }
-    async with httpx.AsyncClient(timeout=timeout_s) as client:
-        resp = await client.post(url, params={"key": provider.api_key.get_secret_value()}, json=body)
-        resp.raise_for_status()
-        data = resp.json()
-    text = ""
-    candidates = data.get("candidates") or []
-    if candidates:
-        parts = (candidates[0].get("content") or {}).get("parts") or []
-        text = "".join(p.get("text", "") for p in parts)
-    return text, _pull_citations(candidates)
+    """Grounded search through the LLM seam. Returns (text, citations)."""
+    call = await provider.search_grounded(prompt)
+    if call.status != "ok":
+        raise RuntimeError(f"grounded search failed: {call.status} {call.error}")
+    return call.text, list(call.citations or [])
 
 
 async def find_decision_makers(

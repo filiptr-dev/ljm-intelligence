@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     func,
@@ -280,6 +281,45 @@ class SettingsRow(Base):
     # optional env override (`AUTH_JWT_SECRET`) wins at read time via
     # `effective_auth_jwt_secret` so ops can rotate without a DB write.
     auth_jwt_secret: Mapped[str | None] = mapped_column(String(128))
+    # AI provider matrix (migration 0009). JSONB blob of
+    # ``{feature: {provider, model}}``. See ``app.sources.provider.DEFAULT_FEATURES``
+    # for the fallback shape — missing keys resolve against the code default.
+    ai_features: Mapped[dict | None] = mapped_column(JSONType)
+
+
+class AiUsageLog(Base):
+    """One row per adapter call (migration 0009).
+
+    Prompt bodies are NEVER written here; only ``input_hash`` (sha256) for
+    coarse analytics. Rows under a shared ``compare_id`` form a side-by-side
+    comparison record for the Settings → AI Compare view.
+    """
+
+    __tablename__ = "ai_usage_log"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    feature: Mapped[str] = mapped_column(String(48), nullable=False)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    cost_usd: Mapped[Numeric] = mapped_column(Numeric(10, 6), nullable=False, default=0, server_default=text("0"))
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    compare_id: Mapped[str | None] = mapped_column(String(32))
+    input_hash: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ai_usage_log_feature_created", "feature", "created_at"),
+        Index("ai_usage_log_provider_created", "provider", "created_at"),
+        Index("ai_usage_log_compare_id", "compare_id"),
+    )
 
 
 class SentLog(Base):
