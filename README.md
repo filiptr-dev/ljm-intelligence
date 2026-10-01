@@ -77,9 +77,10 @@ SQLite dev harness.
 
 ### Env vars (operator-facing)
 
-The authoritative list, with exact names and how LJM's operator sets them in
-Render, is in the academy dossier at
-`projects/ljm-intelligence/reference/operator-setup-guide.md`. Shortlist:
+The architecture and the authoritative env-var list live in
+[`docs/architecture.md`](./docs/architecture.md); the longer module-level
+breakdown is in [`backend/docs/architecture.md`](./backend/docs/architecture.md).
+Shortlist:
 
 - **Core:** `DATABASE_URL`, `DATABASE_URL_DIRECT` (optional — Alembic / future
   LISTEN/NOTIFY worker), `APP_ENV`, `LOG_LEVEL`, `CORS_ALLOWED_ORIGINS`,
@@ -105,6 +106,8 @@ Render, is in the academy dossier at
   `TRUCKSTOP_INTEGRATION_ID` / `TRUCKSTOP_USERNAME` / `TRUCKSTOP_PASSWORD`.
 - **Scheduler:** `CRON_SECRET` (shared with the GitHub Actions daily crawl in
   `.github/workflows/daily-crawl.yml`).
+- **Observability (optional):** `SENTRY_DSN` (unset = SDK not initialised,
+  dev + CI run clean), `SENTRY_TRACES_SAMPLE_RATE` (default `0.0`).
 
 Env names are stable: each feature block is a `pydantic-settings` sub-model
 with a fixed `env_prefix` (`GMAIL_`, `DAT_`, `CHR_`, `LB123_`, `TRUCKSTOP_`),
@@ -157,11 +160,13 @@ pnpm gen:api
 | Frontend | Vercel project, Root Directory `frontend` | Set `API_URL` (server-only; the proxy's upstream) and keep `NEXT_PUBLIC_API_URL` only for same-origin link building. CORS allowlist is in `backend/app/main.py`. |
 | Scheduler | `.github/workflows/daily-crawl.yml` | GitHub Actions cron, 3 PM `America/New_York` → `POST /crawl/run` with `X-Cron-Secret`. |
 
-## Architecture plan
+## Architecture
 
-The modular layout, tenancy model, port/adapter contract, and the server-first
-auth story all come from the architecture foundation plan in the academy
-dossier: `projects/ljm-intelligence/plan/2026-10-01-architecture-foundation-tenant-ready.md`.
+The modular layout, tenancy model, port/adapter contract, and the
+server-first auth story all live in [`docs/architecture.md`](./docs/architecture.md)
+(repo-local, the one a developer reading freight-demo cold should start with).
+The deeper module-level detail is in
+[`backend/docs/architecture.md`](./backend/docs/architecture.md).
 
 More detail on the frontend (data path, branding, dev-only mocks) in
 [`frontend/README.md`](frontend/README.md).
