@@ -1,29 +1,29 @@
-"use client"
-
 /**
- * Overview — the Today desk.
+ * Overview — the Today desk. SERVER COMPONENT.
  *
- * One aggregate read (`GET /overview/today` via the typed client) powers
- * three honest tiles, one merged "Do next" action list, and one booked-vs-
- * rejected chart. No MonitoringHero, no LiveFeed, no segments, no demo
- * `SOURCE_LIST`. Rows link to the real page that handles the action — the
- * server owns the ordering, this page never re-sorts.
+ * One aggregate read (`GET /overview/today` via the typed server-side
+ * client) powers three honest tiles, one merged "Do next" action list,
+ * and one booked-vs-rejected chart. The server owns the ordering and the
+ * demo flags — the UI never re-sorts.
  *
- * Why client-side: the API client reads a bearer token out of the live
- * SessionProvider, which only exists in the browser. A server-side fetch
- * would need a parallel cookie-forwarding path; the aggregate endpoint is
- * cheap enough that one browser fetch is the honest answer.
+ * Why server-first: the typed client reads the HttpOnly session cookie
+ * via `next/headers` and attaches the bearer upstream. The browser never
+ * holds a JWT; one well-shaped payload reaches the client. The only
+ * `"use client"` island is the Retry button (`./overview-retry`), which
+ * just calls `router.refresh()` to re-run this render.
  */
 
 import * as React from "react"
 import Link from "next/link"
 import { ArrowRight, Phone, PhoneCall, Sparkles, Truck, UserPlus, Zap } from "lucide-react"
-import { toast } from "sonner"
 import { PageHeader, Panel, StatTile } from "@/components/app/ui"
 import { OutcomeColumns } from "@/components/charts/charts"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { getToday, type DoNextRow, type OverviewToday } from "@/lib/api/overview"
 import { cn } from "@/lib/utils"
+import { OverviewRetryButton } from "./overview-retry"
+
+export const dynamic = "force-dynamic"
 
 function formatSince(iso: string | null): string {
   if (!iso) return "no crawl yet — click Crawl now"
@@ -78,8 +78,6 @@ function rowKey(row: DoNextRow, i: number): string {
 }
 
 function HeaderActions({ data }: { data: OverviewToday | null }) {
-  // While loading, point at sensible defaults so the chrome never blinks
-  // through a broken state.
   const crawl = data?.header.crawl_now_href ?? "/leads"
   const post = data?.header.new_post_href ?? "/capacity?new=1"
   return (
@@ -94,55 +92,28 @@ function HeaderActions({ data }: { data: OverviewToday | null }) {
   )
 }
 
-export default function OverviewPage() {
-  const [data, setData] = React.useState<OverviewToday | null>(null)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
-
-  const refresh = React.useCallback(async (signal?: AbortSignal) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const d = await getToday(signal)
-      setData(d)
-    } catch (e) {
-      if (signal?.aborted) return
-      const msg = e instanceof Error ? e.message : String(e)
-      setError(msg)
-      toast.error("Couldn't load Today", { description: msg })
-    } finally {
-      if (!signal?.aborted) setLoading(false)
-    }
-  }, [])
-
-  React.useEffect(() => {
-    const ctrl = new AbortController()
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh(ctrl.signal)
-    return () => ctrl.abort()
-  }, [refresh])
+export default async function OverviewPage() {
+  let data: OverviewToday | null = null
+  let error: string | null = null
+  try {
+    data = await getToday()
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e)
+  }
 
   const tiles = data?.tiles
   const doNext = data?.do_next ?? []
   const chart = data?.booked_vs_rejected
 
-  // Shape the chart data to match OutcomeColumns' expected `Month` type.
-  // Series items from the API are {month, booked, rejected} — pad the rest
-  // of the Month fields with zeros so the chart type-checks (the chart only
-  // reads booked/rejected, so the extra fields are inert).
-  const chartData = React.useMemo(
-    () =>
-      (chart?.series ?? []).map((p) => ({
-        month: p.month,
-        booked: p.booked,
-        rejected: p.rejected,
-        decided: p.booked + p.rejected,
-        winRate: p.booked / Math.max(1, p.booked + p.rejected),
-        usdPerMile: null as number | null,
-        eurPerKm: null as number | null,
-      })),
-    [chart?.series],
-  )
+  const chartData = (chart?.series ?? []).map((p) => ({
+    month: p.month,
+    booked: p.booked,
+    rejected: p.rejected,
+    decided: p.booked + p.rejected,
+    winRate: p.booked / Math.max(1, p.booked + p.rejected),
+    usdPerMile: null as number | null,
+    eurPerKm: null as number | null,
+  }))
 
   return (
     <>
@@ -157,9 +128,7 @@ export default function OverviewPage() {
         <div className="mb-5 rounded-sm border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <div className="flex items-center justify-between gap-3">
             <span>Backend not reachable — {error}</span>
-            <Button variant="outline" size="sm" onClick={() => void refresh()}>
-              Retry
-            </Button>
+            <OverviewRetryButton />
           </div>
         </div>
       ) : null}
@@ -167,7 +136,7 @@ export default function OverviewPage() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatTile
           label="To call today"
-          value={loading && !tiles ? "—" : tiles?.to_call_today.value ?? 0}
+          value={tiles?.to_call_today.value ?? 0}
           sub={
             <Link href={tiles?.to_call_today.href ?? "/call-list"} className="hover:underline">
               Open call list <ArrowRight className="inline size-3" />
@@ -176,7 +145,7 @@ export default function OverviewPage() {
         />
         <StatTile
           label="New leads since last crawl"
-          value={loading && !tiles ? "—" : tiles?.new_leads_since_last_crawl.value ?? 0}
+          value={tiles?.new_leads_since_last_crawl.value ?? 0}
           sub={
             <span className="block">
               <span className="block text-muted-foreground">
@@ -190,7 +159,7 @@ export default function OverviewPage() {
         />
         <StatTile
           label="Loads booked · 90 days"
-          value={loading && !tiles ? "—" : tiles?.loads_booked_90d.value ?? 0}
+          value={tiles?.loads_booked_90d.value ?? 0}
           sub={
             <span className="flex flex-wrap items-center gap-2">
               {tiles?.loads_booked_90d.demo ? (
@@ -216,16 +185,7 @@ export default function OverviewPage() {
           description="Calls, truck matches and new leads, best first."
           bodyClassName="p-0"
         >
-          {loading && doNext.length === 0 ? (
-            <ul className="divide-y divide-border">
-              {[0, 1, 2].map((i) => (
-                <li key={i} className="flex items-center gap-3 p-4">
-                  <span className="size-9 shrink-0 animate-pulse rounded-sm bg-muted" aria-hidden />
-                  <span className="h-4 flex-1 animate-pulse rounded-sm bg-muted" aria-hidden />
-                </li>
-              ))}
-            </ul>
-          ) : doNext.length === 0 ? (
+          {doNext.length === 0 ? (
             <div className="p-6 text-center">
               <p className="text-sm text-muted-foreground">
                 Nothing due. Add a capacity post or run the crawler to seed activity.
@@ -241,9 +201,6 @@ export default function OverviewPage() {
                   key={rowKey(row, i)}
                   className="flex items-center gap-3 p-4 transition-colors hover:bg-muted/40"
                 >
-                  {/* Row click target — keep this a plain Link, don't nest a
-                      second <a> inside (hydration warns on nested anchors).
-                      The dial button is rendered as a sibling below. */}
                   <Link
                     href={row.href}
                     className="flex min-w-0 flex-1 items-center gap-3 focus-visible:outline-none"
@@ -309,9 +266,7 @@ export default function OverviewPage() {
             ) : null
           }
         >
-          {loading && !chart ? (
-            <div className="h-64 w-full animate-pulse rounded-sm bg-muted/40" aria-hidden />
-          ) : chart?.demo || chartData.length === 0 ? (
+          {chart?.demo || chartData.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">
                 Log a few call outcomes and the real trend lands here.
