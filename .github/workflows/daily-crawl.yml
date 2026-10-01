@@ -45,8 +45,16 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
+          # Tee the JSON body so we can inspect the status field. Refusal states
+          # (disabled / no_footer / no_template / outside_window / no_unsub_config)
+          # are 200s from the route — treat them as warnings, not failures, so
+          # a config gap the operator can fix from Settings shows yellow in
+          # Actions instead of red every morning.
           curl -fsS -X POST "$BACKEND_URL/enrichment/auto-send" \
             -H "X-Cron-Secret: $CRON_SECRET" \
             -H "Content-Type: application/json" \
             -d '{"dry_run": false}' \
-            --retry 3 --retry-delay 3 --max-time 60
+            --retry 3 --retry-delay 3 --max-time 60 \
+            | tee /tmp/auto-send.out
+          grep -q '"status":"ok"' /tmp/auto-send.out \
+            || echo "::warning::auto-send returned non-ok status: $(cat /tmp/auto-send.out)"

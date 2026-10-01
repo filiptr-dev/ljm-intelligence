@@ -366,7 +366,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Auto Send */
+        /**
+         * Auto Send
+         * @description Route-level auth (BLOCKING-2 fix). Application-level `auto_outreach_enabled`
+         *     is a *what*, not a *who* — this guard makes sure only the cron caller can ask.
+         */
         post: operations["auto_send_enrichment_auto_send_post"];
         delete?: never;
         options?: never;
@@ -382,13 +386,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Unsubscribe
-         * @description Public — no auth. Sets the contact's email into `suppression` (do_not_contact)
-         *     and flips its pipeline_status to 'lost'. Idempotent.
+         * Unsubscribe Confirm Page
+         * @description GET renders a confirm page — NEVER mutates.
+         *
+         *     Email security scanners (Microsoft Safe Links, Google, Proofpoint) auto-fetch
+         *     every URL in every outbound email. If GET mutated, one scanned inbox would
+         *     unsubscribe the recipient before they read the message. Confirm-then-POST is
+         *     the CAN-SPAM one-click contract (RFC 8058); we honor it.
          */
-        get: operations["unsubscribe_unsubscribe_get"];
+        get: operations["unsubscribe_confirm_page_unsubscribe_get"];
         put?: never;
-        post?: never;
+        /**
+         * Unsubscribe Post
+         * @description POST performs the suppression. Same route also accepts RFC 8058
+         *     `List-Unsubscribe=One-Click` payloads via `?t=<token>` on the query string.
+         *     Invalid / forged token → 400 with zero side effects.
+         */
+        post: operations["unsubscribe_post_unsubscribe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -411,8 +425,11 @@ export interface components {
         };
         /** AutoSendOut */
         AutoSendOut: {
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "disabled" | "no_footer" | "no_template" | "no_unsub_config" | "outside_window";
             /** Sent */
             sent: number;
             /** Skipped Suppressed */
@@ -892,10 +909,18 @@ export interface components {
             auto_outreach_window_end_h: number;
             /** Auto Outreach Status Filter */
             auto_outreach_status_filter: string;
+            /** Auto Outreach Min Fit */
+            auto_outreach_min_fit: number;
             /** Fit Weights */
             fit_weights: {
                 [key: string]: unknown;
             } | null;
+            /** Unsubscribe Base Url */
+            unsubscribe_base_url: string | null;
+            /** Unsub Secret Set */
+            unsub_secret_set: boolean;
+            /** Unsub Config Ready */
+            unsub_config_ready: boolean;
         };
         /** SettingsPatch */
         SettingsPatch: {
@@ -921,10 +946,14 @@ export interface components {
             auto_outreach_window_end_h?: number | null;
             /** Auto Outreach Status Filter */
             auto_outreach_status_filter?: string | null;
+            /** Auto Outreach Min Fit */
+            auto_outreach_min_fit?: number | null;
             /** Fit Weights */
             fit_weights?: {
                 [key: string]: unknown;
             } | null;
+            /** Unsubscribe Base Url */
+            unsubscribe_base_url?: string | null;
         };
         /** ShipperDetailOut */
         ShipperDetailOut: {
@@ -1573,6 +1602,7 @@ export interface operations {
                 q?: string | null;
                 cursor?: string | null;
                 limit?: number;
+                sort?: "lane" | "fit";
             };
             header?: never;
             path?: never;
@@ -1795,7 +1825,9 @@ export interface operations {
     auto_send_enrichment_auto_send_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Cron-Secret"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1825,10 +1857,41 @@ export interface operations {
             };
         };
     };
-    unsubscribe_unsubscribe_get: {
+    unsubscribe_confirm_page_unsubscribe_get: {
         parameters: {
             query: {
-                c: number;
+                t: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unsubscribe_post_unsubscribe_post: {
+        parameters: {
+            query: {
+                t: string;
             };
             header?: never;
             path?: never;

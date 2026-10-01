@@ -17,6 +17,8 @@ export type PromotedLead = components["schemas"]["PromotedLeadOut"]
 
 export type ShipperSource = "FMCSA" | "OSM" | "Both"
 
+export type ShipperSort = "lane" | "fit"
+
 export type ListShippersQuery = {
   state?: string
   source?: ShipperSource
@@ -25,6 +27,10 @@ export type ListShippersQuery = {
   q?: string
   cursor?: string
   limit?: number
+  // Sort control. "lane" = existing lane-ranking (default); "fit" = fit_score
+  // DESC, unscored last. The backend does the sort so cursor pagination stays
+  // correct across pages.
+  sort?: ShipperSort
 }
 
 /** GET /tools/shipper-finder — cursor-paginated ranked list. */

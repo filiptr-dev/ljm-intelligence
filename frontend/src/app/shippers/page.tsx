@@ -67,6 +67,7 @@ import {
   type ShipperRow,
   type ShipperDetail,
   type ShipperSource,
+  type ShipperSort,
 } from "@/lib/api/shipper-finder"
 
 // The 32 in-region states, from backend/app/region.py. Kept short by-hand to
@@ -89,6 +90,10 @@ type FiltersState = {
   min_score: number
   promoted: boolean
   q: string
+  // Sort control (2026-09-30). "lane" = existing lane-ranking (default),
+  // "fit" = fit_score DESC with unscored last. Server-side so cursor pagination
+  // stays consistent when the user switches sorts.
+  sort: ShipperSort
 }
 
 const EMPTY_FILTERS: FiltersState = {
@@ -97,6 +102,7 @@ const EMPTY_FILTERS: FiltersState = {
   min_score: 0,
   promoted: false,
   q: "",
+  sort: "lane",
 }
 
 export default function ShippersPage() {
@@ -154,6 +160,7 @@ export default function ShippersPage() {
           q: opts.filters.q.trim() || undefined,
           cursor: opts.cursor ?? undefined,
           limit: PAGE_LIMIT,
+          sort: opts.filters.sort,
         }
         const data = await listShippers(query)
         // A stale response from a filter that has since changed must not overwrite the current view.
@@ -503,6 +510,21 @@ function FilterBar({
             Only promoted
           </Label>
         </div>
+      </div>
+      <div>
+        <Label className="text-[0.7rem] text-muted-foreground">Sort</Label>
+        <Select
+          value={filters.sort}
+          onValueChange={(v) => v && onChange({ ...filters, sort: v as ShipperSort })}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Lane" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="lane">Lane ranking (default)</SelectItem>
+            <SelectItem value="fit">Fit score (desc, unscored last)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   )

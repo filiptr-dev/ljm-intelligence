@@ -34,6 +34,7 @@ from app.pipeline.enrichment import (
     enrich_company,
     mark_contact_contacted,
 )
+from app.services.unsub_config import effective_unsub
 
 log = logging.getLogger(__name__)
 
@@ -101,8 +102,20 @@ class EnrichmentMetricsOut(BaseModel):
     replied_rate: float
 
 
+AutoSendStatus = Literal[
+    "ok",
+    "disabled",
+    "no_footer",
+    "no_template",
+    "no_unsub_config",
+    "outside_window",
+]
+
+
 class AutoSendOut(BaseModel):
-    status: str  # 'ok' | 'disabled' | 'no_footer' | 'no_template' | 'outside_window'
+    # Narrow literal so openapi-typescript emits a union, giving the frontend
+    # exhaustive switch coverage instead of an opaque `string`.
+    status: AutoSendStatus
     sent: int
     skipped_suppressed: int
     skipped_cap: int
@@ -384,6 +397,12 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
         return AutoSendOut(status="no_footer", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
     if cfg.auto_outreach_template_id is None:
         return AutoSendOut(status="no_template", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
+    # Send-time guard: config can go missing *after* arming (someone blanks the
+    # base URL from Settings mid-day). Zero writes, zero sender() calls, loud
+    # distinct status so ops can see which knob is empty from the Settings UI.
+    effective_secret, effective_base_url = effective_unsub(settings, cfg)
+    if not effective_secret or not effective_base_url:
+        return AutoSendOut(status="no_unsub_config", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
 
     now_hour = body.now_hour_override if body.now_hour_override is not None else now.hour
     if not _within_window(now_hour, cfg.auto_outreach_window_start_h, cfg.auto_outreach_window_end_h):
@@ -399,12 +418,19 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
         if remaining == 0:
             return AutoSendOut(status="ok", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
 
-        # Candidate contacts.
+        # Candidate contacts. Join to the lead so we can filter/order by
+        # `fit_score`: unscored leads (`NULL`) are dropped, and the daily cap
+        # goes to the highest-fit contacts first. This is what makes the
+        # Settings panel's "high-fit leads are contacted automatically" claim
+        # actually true — the fit-weight sliders now change *who* gets emailed.
         stmt = (
             select(LeadContact)
+            .join(Lead, Lead.id == LeadContact.lead_id)
             .where(LeadContact.pipeline_status == cfg.auto_outreach_status_filter)
             .where(LeadContact.email.is_not(None))
-            .order_by(LeadContact.id)
+            .where(Lead.fit_score.is_not(None))
+            .where(Lead.fit_score >= cfg.auto_outreach_min_fit)
+            .order_by(Lead.fit_score.desc(), LeadContact.id)
         )
         candidates = (await s.execute(stmt)).scalars().all()
 
@@ -428,12 +454,11 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
             # row and render tokens. For this build, tests exercise send-decisions,
             # not template body content.
             subject = "Trucking capacity"
-            unsub = ""
-            list_unsub_url = ""
-            if settings.unsubscribe_base_url and settings.unsubscribe_secret:
-                token = sign_unsubscribe_token(c.id, settings.unsubscribe_secret.get_secret_value())
-                unsub = f"{settings.unsubscribe_base_url.rstrip('/')}/unsubscribe?t={token}"
-                list_unsub_url = unsub
+            # Belt-and-braces: the send-time guard above proved both non-null.
+            assert effective_secret is not None and effective_base_url is not None
+            token = sign_unsubscribe_token(c.id, effective_secret)
+            unsub = f"{effective_base_url.rstrip('/')}/unsubscribe?t={token}"
+            list_unsub_url = unsub
             body_text = (
                 "Hello,\n\nLJM International runs dry vans across the eastern US. "
                 "Reply if you have freight moving in the next couple of weeks.\n\n"

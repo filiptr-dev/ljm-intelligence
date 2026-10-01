@@ -179,6 +179,22 @@ def _after_cursor(rows: list[ShipperRow], cursor: tuple[int, str]) -> list[Shipp
     return [r for r in rows if (r.score < cs) or (r.score == cs and r.id > cid)]
 
 
+def _after_fit_cursor(
+    rows: list[ShipperRow],
+    fit_by_id: dict[str, tuple[int | None, list[str]]],
+    cursor: tuple[int, str],
+) -> list[ShipperRow]:
+    """Fit-sort cursor: after (fit_or_-1, id) under (-fit, id asc)."""
+    cf, cid = cursor
+    kept: list[ShipperRow] = []
+    for r in rows:
+        rf = fit_by_id.get(r.id, (None, []))[0]
+        rf_key = rf if rf is not None else -1
+        if rf_key < cf or (rf_key == cf and r.id > cid):
+            kept.append(r)
+    return kept
+
+
 # ---------- shared read -----------------------------------------------------
 
 
@@ -235,6 +251,10 @@ async def list_shippers(
     q: str | None = Query(None, max_length=128),
     cursor: str | None = Query(None, max_length=256),
     limit: int = Query(50, ge=25, le=100),
+    # Sort control (2026-09-30). "lane" = existing lane-ranking (default).
+    # "fit" = fit_score DESC, unscored last, stable tiebreak by id ASC. Server-
+    # side so cursor pagination stays correct even with tens of pages.
+    sort: Literal["lane", "fit"] = Query("lane"),
 ) -> ShipperListOut:
     rows = await _rank_all(
         request.app.state.sessionmaker,
@@ -244,29 +264,52 @@ async def list_shippers(
         promoted_only=promoted,
         q=q,
     )
-    if cursor:
-        rows = _after_cursor(rows, _decode_cursor(cursor))
 
-    page = rows[:limit]
-    next_cursor: str | None = None
-    if len(rows) > limit and page:
-        last = page[-1]
-        next_cursor = _encode_cursor(last.score, last.id)
-
-    # Fold in fit_score/fit_reasons — one small lookup per page.
+    # Pre-fetch fit_scores for ALL ranked rows so a fit-sort re-order works
+    # across pages. At demo scale (≤ SHIPPER_FINDER_LIMIT_CAP rows) this is one
+    # `IN (...)` lookup; if the frontier ever grows we would push the sort into
+    # SQL. Fold-in used both for the fit sort and for the page's display value.
     fit_by_id: dict[str, tuple[int | None, list[str]]] = {}
-    ids = [r.id for r in page]
-    if ids:
+    all_ids = [r.id for r in rows]
+    if all_ids:
         async with request.app.state.sessionmaker() as s:
             fit_rows = (
                 await s.execute(
                     select(ShipperCandidate.id, ShipperCandidate.fit_score, ShipperCandidate.fit_reasons).where(
-                        ShipperCandidate.id.in_(ids)
+                        ShipperCandidate.id.in_(all_ids)
                     )
                 )
             ).all()
         for cid, fs, fr in fit_rows:
             fit_by_id[cid] = (fs, list(fr or []))
+
+    if sort == "fit":
+        # `-1` sentinel for null so nulls sort last under DESC; final tiebreak on id ASC.
+        # Explicit `is not None` — `fs or -1` would collapse fit_score=0 into the
+        # null bucket (0 is falsy in Python), breaking cursor pagination at the
+        # boundary where a null-row cursor is followed by fit=0 rows. Match the
+        # cursor encoder below, which already uses this form.
+        def _fit_sort_key(r):
+            fs = fit_by_id.get(r.id, (None, []))[0]
+            return (-(fs if fs is not None else -1), r.id)
+
+        rows = sorted(rows, key=_fit_sort_key)
+        if cursor:
+            rows = _after_fit_cursor(rows, fit_by_id, _decode_cursor(cursor))
+    else:
+        if cursor:
+            rows = _after_cursor(rows, _decode_cursor(cursor))
+
+    page = rows[:limit]
+    next_cursor: str | None = None
+    if len(rows) > limit and page:
+        last = page[-1]
+        if sort == "fit":
+            fs = fit_by_id.get(last.id, (None, []))[0]
+            # Encode -1 for null so decode → int stays lossless.
+            next_cursor = _encode_cursor(fs if fs is not None else -1, last.id)
+        else:
+            next_cursor = _encode_cursor(last.score, last.id)
 
     return ShipperListOut(
         items=[

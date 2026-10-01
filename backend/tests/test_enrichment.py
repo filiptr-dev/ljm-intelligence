@@ -637,7 +637,20 @@ async def test_auto_send_respects_suppression_and_cap(sm, client, app):
                 auto_outreach_window_end_h=0,  # equal → always in window
             )
         )
-        s.add(Lead(id="MC-AS", name="AutoSend Co", kind="Shipper", state="NJ", raw={}, evidence={}, recommendations=[]))
+        # fit_score >= default min_fit (60) so the fit-filter in _auto_send_impl
+        # lets this lead through; the test is about suppression + cap, not fit.
+        s.add(
+            Lead(
+                id="MC-AS",
+                name="AutoSend Co",
+                kind="Shipper",
+                state="NJ",
+                raw={},
+                evidence={},
+                recommendations=[],
+                fit_score=80,
+            )
+        )
         await s.flush()
         s.add(
             LeadContact(

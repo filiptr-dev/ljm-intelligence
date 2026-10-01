@@ -267,6 +267,14 @@ class SettingsRow(Base):
     # Fit-score weights blob (deterministic weights; see app/scoring/fit_score.py
     # for the DEFAULT_WEIGHTS shape). Ops can widen/narrow signals without a deploy.
     fit_weights: Mapped[dict | None] = mapped_column(JSONType)
+    # Unsubscribe knobs (migration 0007). Env vars in `Settings.unsubscribe_*`
+    # win when present; otherwise these DB values are the source of truth.
+    # Secret is backfilled once in the migration and never returned via API.
+    unsubscribe_secret: Mapped[str | None] = mapped_column(String(64))
+    unsubscribe_base_url: Mapped[str | None] = mapped_column(String(500))
+    # Minimum lead fit_score for auto-outreach (migration 0007). Contacts on
+    # leads scoring below this are skipped; unscored leads are always skipped.
+    auto_outreach_min_fit: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default=text("60"))
 
 
 class SentLog(Base):
