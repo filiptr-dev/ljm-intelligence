@@ -23,6 +23,7 @@ Covers:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -349,47 +350,43 @@ async def test_enrich_happy_path(sm, monkeypatch):
 
     monkeypatch.setattr(lm, "_grounded_call", fake_call)
 
-    # Stub the extractor's Gemini POST directly by intercepting httpx.AsyncClient.
-    import app.sources.gemini_extractor as ge
+    # Stub the extractor's provider. The adapter-rehome moved
+    # `gemini_extractor` from a direct `httpx.AsyncClient.post` to
+    # `provider.generate_json(...)`, so the previous `httpx.AsyncClient`
+    # monkeypatch no longer bites. Patch `GeminiProvider.generate_json`
+    # directly to hand back the canned response.
+    import json as _json
 
-    class _FakeResp:
-        def raise_for_status(self):
-            return None
+    from app.integrations.adapters.ai import provider as _pv
 
-        def json(self):
-            return {
-                "candidates": [
-                    {
-                        "content": {
-                            "parts": [
-                                {
-                                    "text": (
-                                        '{"emails":[{"value":"hello@acme.com","context":""}],'
-                                        '"phones":[],'
-                                        '"people":[{"name":"Bob Ops","title":"Warehouse Manager",'
-                                        '"email":"bob@acme.com","phone":""}]}'
-                                    )
-                                }
-                            ]
-                        }
-                    }
-                ]
-            }
+    async def _fake_generate_json(self, prompt, *, schema_hint=None):  # noqa: ARG001
+        parsed = {
+            "emails": [{"value": "hello@acme.com", "context": ""}],
+            "phones": [],
+            "people": [
+                {
+                    "name": "Bob Ops",
+                    "title": "Warehouse Manager",
+                    "email": "bob@acme.com",
+                    "phone": "",
+                }
+            ],
+        }
+        return _pv.ProviderCall(
+            text=_json.dumps(parsed),
+            parsed=parsed,
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=0,
+            cost_usd=Decimal(0),
+            model="gemini-test",
+            provider="gemini",
+            status="ok",
+            error=None,
+            citations=[],
+        )
 
-    class _FakeClient:
-        def __init__(self, *a, **k):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return None
-
-        async def post(self, *a, **k):
-            return _FakeResp()
-
-    monkeypatch.setattr(ge.httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(_pv.GeminiProvider, "generate_json", _fake_generate_json)
 
     # Site fixture pages with the emails present (source-text check).
     site_pages = {
