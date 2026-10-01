@@ -1,6 +1,6 @@
 """C.H. Robinson Navisphere Carrier adapter — OAuth2 client-credentials.
 
-Field mapping marked (verify at access day) — CHR portal docs are gated.
+Field mapping marked ``# VERIFY-AT-ACCESS-DAY`` — CHR portal docs are gated.
 """
 
 from __future__ import annotations
@@ -11,10 +11,12 @@ from datetime import datetime
 
 import httpx
 
-from app.lib.circuit_breaker import CircuitBreaker
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
+from app.lib.circuit_breaker import CircuitBreaker
 
 log = logging.getLogger(__name__)
+
+_client_factory = lambda: httpx.AsyncClient()
 
 
 def _parse_dt(value) -> datetime | None:
@@ -27,6 +29,7 @@ def _parse_dt(value) -> datetime | None:
 
 
 def map_chr_row(row: dict) -> RawLoad:
+    # VERIFY-AT-ACCESS-DAY: CHR Navisphere Carrier field names.
     origin = row.get("origin") or {}
     dest = row.get("destination") or {}
     contact = row.get("contact") or {}
@@ -93,7 +96,7 @@ class ChrSource:
             timeout=httpx.Timeout(10.0, read=20.0),
         )
         resp.raise_for_status()
-        body = resp.json()
+        body = resp.json() or {}
         token = str(body.get("access_token") or "")
         expires_in = int(body.get("expires_in") or 1800)
         self._token = (token, now + expires_in - 60)
@@ -104,18 +107,33 @@ class ChrSource:
             return []
         if self._breaker.is_open():
             return []
+        s = self.settings
         try:
-            async with httpx.AsyncClient() as client:
-                _ = await self._token_get(client)
+            async with _client_factory() as client:
+                token = await self._token_get(client)
+                # VERIFY-AT-ACCESS-DAY: Navisphere Carrier available-loads path.
+                resp = await client.get(
+                    f"{s.chr.base_url}/carrier/v1/loads/available",
+                    params={"carrier_code": s.chr.carrier_code, "page_size": 100},
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=httpx.Timeout(10.0, read=20.0),
+                )
+                resp.raise_for_status()
+                payload = resp.json() or {}
+                # VERIFY-AT-ACCESS-DAY: CHR paginated response wrapper.
+                rows = payload.get("loads") or payload.get("items") or []
                 self._breaker.record_success()
-                return []
+                return [map_chr_row(r) for r in rows if isinstance(r, dict)]
         except httpx.HTTPStatusError as exc:
             self._breaker.record_failure(exc.response.status_code)
-            log.warning("chr/fetch: %s", exc)
+            log.warning(
+                "chr/fetch",
+                extra={"status_code": exc.response.status_code, "endpoint": "/carrier/v1/loads/available"},
+            )
             return []
         except Exception as exc:  # noqa: BLE001 — network / timeout / parse
             self._breaker.record_failure(None)
-            log.warning("chr/fetch: %s", exc)
+            log.warning("chr/fetch: %s", type(exc).__name__)
             return []
 
     async def test_connection(self, settings) -> ConnectionTest:
@@ -123,11 +141,11 @@ class ChrSource:
             return ConnectionTest(ok=False, reason=self.reason())
         t0 = time.monotonic()
         try:
-            async with httpx.AsyncClient() as client:
+            async with _client_factory() as client:
                 await self._token_get(client)
             return ConnectionTest(ok=True, latency_ms=int((time.monotonic() - t0) * 1000), sample_count=0)
         except Exception as exc:  # noqa: BLE001
-            return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=str(exc))
+            return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=type(exc).__name__)
 
 
 __all__ = ["ChrSource", "map_chr_row"]

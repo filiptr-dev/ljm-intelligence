@@ -1,6 +1,7 @@
 """123Loadboard adapter — API key header + session login.
 
-(Verify at access day — 123LB publishes the full spec after the API agreement.)
+Field mapping marked ``# VERIFY-AT-ACCESS-DAY`` — 123LB publishes the full
+spec after the API agreement is executed.
 """
 
 from __future__ import annotations
@@ -11,10 +12,12 @@ from datetime import datetime
 
 import httpx
 
-from app.lib.circuit_breaker import CircuitBreaker
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
+from app.lib.circuit_breaker import CircuitBreaker
 
 log = logging.getLogger(__name__)
+
+_client_factory = lambda: httpx.AsyncClient()
 
 
 def _parse_dt(value) -> datetime | None:
@@ -27,6 +30,7 @@ def _parse_dt(value) -> datetime | None:
 
 
 def map_lb123_row(row: dict) -> RawLoad:
+    # VERIFY-AT-ACCESS-DAY: 123Loadboard search response field names.
     broker = row.get("broker") or {}
     origin = row.get("origin") or {}
     dest = row.get("destination") or {}
@@ -93,9 +97,11 @@ class LoadBoard123Source:
             timeout=httpx.Timeout(10.0, read=20.0),
         )
         resp.raise_for_status()
-        body = resp.json()
+        body = resp.json() or {}
         token = str(body.get("session_token") or body.get("token") or "")
-        self._session = (token, now + 1800)
+        # VERIFY-AT-ACCESS-DAY: 123LB session TTL — docs quote 30 min default.
+        expires_in = int(body.get("expires_in") or 1800)
+        self._session = (token, now + expires_in - 60)
         return token
 
     async def fetch(self, settings) -> list[RawLoad]:
@@ -103,18 +109,35 @@ class LoadBoard123Source:
             return []
         if self._breaker.is_open():
             return []
+        s = self.settings
         try:
-            async with httpx.AsyncClient() as client:
-                _ = await self._login(client)
+            async with _client_factory() as client:
+                session = await self._login(client)
+                # VERIFY-AT-ACCESS-DAY: 123LB search path + auth header.
+                resp = await client.get(
+                    f"{s.lb123.base_url}/loads/search",
+                    headers={
+                        "X-API-Key": s.lb123.api_key.get_secret_value(),
+                        "Authorization": f"Bearer {session}",
+                    },
+                    params={"limit": 100},
+                    timeout=httpx.Timeout(10.0, read=20.0),
+                )
+                resp.raise_for_status()
+                payload = resp.json() or {}
+                rows = payload.get("loads") or payload.get("results") or []
                 self._breaker.record_success()
-                return []
+                return [map_lb123_row(r) for r in rows if isinstance(r, dict)]
         except httpx.HTTPStatusError as exc:
             self._breaker.record_failure(exc.response.status_code)
-            log.warning("loadboard123/fetch: %s", exc)
+            log.warning(
+                "loadboard123/fetch",
+                extra={"status_code": exc.response.status_code, "endpoint": "/loads/search"},
+            )
             return []
         except Exception as exc:  # noqa: BLE001 — network / timeout / parse
             self._breaker.record_failure(None)
-            log.warning("loadboard123/fetch: %s", exc)
+            log.warning("loadboard123/fetch: %s", type(exc).__name__)
             return []
 
     async def test_connection(self, settings) -> ConnectionTest:
@@ -122,11 +145,11 @@ class LoadBoard123Source:
             return ConnectionTest(ok=False, reason=self.reason())
         t0 = time.monotonic()
         try:
-            async with httpx.AsyncClient() as client:
+            async with _client_factory() as client:
                 await self._login(client)
             return ConnectionTest(ok=True, latency_ms=int((time.monotonic() - t0) * 1000), sample_count=0)
         except Exception as exc:  # noqa: BLE001
-            return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=str(exc))
+            return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=type(exc).__name__)
 
 
 __all__ = ["LoadBoard123Source", "map_lb123_row"]

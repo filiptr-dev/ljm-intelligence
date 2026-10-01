@@ -42,6 +42,21 @@ agreement; no browser automation.
 - Rotation: new integration credential issued by Truckstop → Render.
 - Revocation: clear env → Truckstop rep rotates the credential.
 
+## What runs now (live-fetch behaviour)
+
+Each adapter's `fetch()` now issues a real vendor HTTP call behind its env
+gate — token exchange + search — and the hourly `scheduler.loads_refresh_tick`
+procrastinate periodic calls `loads.refresh` which in turn calls
+`refresh_all` → `_store_batch`, deduping on `(source, source_ref)` via the
+`loads_source_ref_uq` unique index (second run → `IntegrityError` →
+`skipped+=1`, no dup rows). Field names assumed from the vendor's publicly
+documented shape are tagged `# VERIFY-AT-ACCESS-DAY` in each adapter — one
+mapping function per vendor so a field-name drift is a single-file edit.
+
+Behaviour when creds are absent (unchanged, re-stated): adapter stays
+`enabled=False`, `fetch()` short-circuits to `[]`, boot and `/loads/sources`
+succeed, no vendor traffic ever leaves the box.
+
 ## Secret-handling rules (apply to all vendors)
 
 - Credentials live only in Render dashboard env (encrypted at rest).
