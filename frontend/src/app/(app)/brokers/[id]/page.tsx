@@ -1,195 +1,470 @@
+"use client"
+
+/**
+ * Broker detail — /brokers/[id]  (real-data v1)
+ *
+ * Full contact block + server-computed next-action chip + merged activity
+ * timeline, all from the typed `lib/api/brokers` client. The seeded
+ * email-analytics card is deliberately kept as a dashed "Sample data" strip
+ * at the bottom until the inbox connector lands real reply-rate data.
+ *
+ * Honest-by-design: a missing field renders as "—" with no source badge.
+ * Never fake anything.
+ */
+
+import * as React from "react"
 import Link from "next/link"
-import { notFound } from "next/navigation"
-import { ArrowLeft, Mail, Phone, Send, Sparkles, TriangleAlert } from "lucide-react"
-import { IntentBadge, SentimentDot } from "@/components/app/intent"
-import { BarList, Panel, RegionTag, SegmentBadge, StatTile } from "@/components/app/ui"
-import { Gauge, Plate } from "@/components/brand/marks"
-import { ActivityColumns } from "@/components/charts/charts"
-import { buttonVariants } from "@/components/ui/button"
-import { getAI } from "@/lib/ai"
-import { REASON_LABELS } from "@/lib/analytics"
-import type { RejectionReason } from "@/lib/ai/types"
-import { getStore } from "@/lib/data/store"
-import { DEMO_NOW } from "@/lib/data/types"
-import { dateTime, money, pct, perUnit, timeAgo } from "@/lib/format"
+import { useParams } from "next/navigation"
+import { toast } from "sonner"
+import {
+  ArrowLeft,
+  Mail,
+  Phone,
+  MapPin,
+  ExternalLink,
+} from "lucide-react"
+import { Panel } from "@/components/app/ui"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import {
+  getBroker,
+  getBrokerActivity,
+  type BrokerDetail,
+  type ActivityEvent,
+  type ContactField,
+  type NamedContact,
+  type NextActionKind,
+} from "@/lib/api/brokers"
 
-export default async function BrokerPage({ params }: PageProps<"/brokers/[id]">) {
-  const { id } = await params
-  const s = await getStore()
-  const b = s.brokerMap.get(id)
-  const st = s.statsById.get(id)
-  if (!b || !st) notFound()
+const ACTION_LABEL: Record<NextActionKind, string> = {
+  call: "Call",
+  email: "Email",
+  follow_up: "Follow up",
+  wait: "Wait",
+}
+const ACTION_STYLE: Record<NextActionKind, string> = {
+  call: "bg-bad text-white",
+  email: "bg-chart-2 text-white",
+  follow_up: "bg-warn text-asphalt",
+  wait: "bg-muted text-muted-foreground",
+}
 
-  const summary = await getAI().summarizeBroker({
-    name: b.name, region: b.region, segment: st.segment, threads: st.threads, booked: st.booked,
-    rejected: st.rejected, winRate: st.winRate, fleetWinRate: s.kpis.winRate, revenue: st.revenue,
-    topLane: st.topLane, topReason: st.topReason, daysSinceLast: st.daysSinceLast,
-    avgResponseMin: st.avgResponseMin, sentiment: st.sentiment, paymentIssues: st.paymentIssues, complaints: st.complaints,
-  })
-
-  const threads = s.threads.filter((t) => t.brokerId === id)
-  const months = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(DEMO_NOW)
-    d.setUTCDate(1)
-    d.setUTCMonth(d.getUTCMonth() - 11 + i)
-    return d.toISOString().slice(0, 7)
-  })
-  const activity = months.map((m) => ({
-    month: m,
-    booked: threads.filter((t) => t.start.startsWith(m) && t.outcome === "booked").length,
-    rejected: threads.filter((t) => t.start.startsWith(m) && t.outcome === "rejected").length,
-  }))
-  const emails = s.emails.filter((e) => e.brokerId === id).reverse()
-  const outreachHref = `/emails/compose?broker=${id}`
-
+function SourceBadge({ source }: { source: string | null | undefined }) {
+  if (!source) return null
   return (
-    <>
-      <Link href="/brokers" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> All brokers
-      </Link>
-      <div className="mb-5 flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <RegionTag region={b.region} />
-            <Plate region={b.region} value={b.registration.replace(/^[A-Z]{2}(?=\d)/, "")} country={b.country} />
-            <SegmentBadge segment={st.segment} />
-            <span className="text-sm text-muted-foreground">{b.size} · {b.equipment.join(", ")}</span>
-          </div>
-          <h1 className="font-display text-3xl leading-none font-bold md:text-[2.4rem]">{b.name}</h1>
-          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted-foreground">
-            <span>{b.hq}</span>
-            <span className="font-medium text-foreground">{b.contact.name} · {b.contact.title}</span>
-            <span className="inline-flex items-center gap-1"><Mail className="size-3.5" /> {b.contact.email}</span>
-            <span className="inline-flex items-center gap-1"><Phone className="size-3.5" /> {b.contact.phone}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href={`/messages?to=${id}`} className={cn(buttonVariants({ variant: "outline", size: "lg" }), "font-semibold")}>
-            <Mail /> Email {b.contact.name.split(" ")[0]}
-          </Link>
-          <Link href={outreachHref} className={cn(buttonVariants({ size: "lg" }), "font-semibold")}>
-            <Send /> {summary.nextAction.label}
-          </Link>
-        </div>
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="flex flex-col items-center justify-center rounded-sm border border-border bg-card p-5 text-center">
-          <div className="eyebrow">Relationship health</div>
-          <Gauge value={st.health} className="mt-3 w-44" label="Relationship health" />
-          <div className="mt-1 text-4xl font-semibold">{st.health}</div>
-          <div className={cn("mt-1 text-sm font-medium", st.healthDelta > 0 ? "text-good" : st.healthDelta < 0 ? "text-bad" : "text-muted-foreground")}>
-            {st.healthDelta === 0 ? "Stable vs 90 days ago" : `${st.healthDelta > 0 ? "▲" : "▼"} ${Math.abs(st.healthDelta)} vs 90 days ago`}
-          </div>
-        </div>
-        <Panel title={<span className="flex items-center gap-2"><Sparkles className="size-4 text-chart-2" /> AI summary · {summary.headline}</span>}>
-          <p className="text-[0.95rem] leading-relaxed">{summary.summary}</p>
-          {summary.risks.length ? (
-            <ul className="mt-3 space-y-1.5">
-              {summary.risks.map((r) => (
-                <li key={r} className="flex items-start gap-2 text-sm">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" /> {r}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-sm border-l-4 border-safety bg-accent px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="eyebrow text-foreground">Recommended next step</div>
-              <div className="font-semibold">{summary.nextAction.label}</div>
-              <div className="text-sm text-muted-foreground">{summary.nextAction.detail}</div>
-            </div>
-            <Link href={`/emails/compose?broker=${id}`} className={buttonVariants({ variant: "outline" })}>Draft email</Link>
-          </div>
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Loads booked" value={st.booked} sub={`${st.threads} load conversations`} />
-        <StatTile label="Win rate" value={st.booked + st.rejected ? pct(st.winRate) : "–"} delta={st.winRate - s.kpis.winRate} deltaLabel={`${Math.round((st.winRate - s.kpis.winRate) * 100)} pts vs all brokers`} />
-        <StatTile label="Revenue" value={money(st.revenue, b.region, true)} sub="All booked loads" />
-        <StatTile label="Avg booked rate" value={st.avgPerUnit ? perUnit(st.avgPerUnit, b.region) : "–"} sub={Math.abs(st.rateIndex - 1) < 0.015 ? "Their offers are in line with market" : `Their offers are ${pct(Math.abs(st.rateIndex - 1))} ${st.rateIndex >= 1 ? "above" : "below"} market`} />
-        <StatTile label="Your reply time" value={`${Math.round(st.avgResponseMin)} min`} sub="Average, offer to quote" />
-        <StatTile label="Last contact" value={timeAgo(st.lastContact, DEMO_NOW.getTime())} sub={`First email ${timeAgo(st.firstContact, DEMO_NOW.getTime())}`} />
-      </div>
-
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        <Panel title="Activity" description="Load conversations per month, last 12 months">
-          <ActivityColumns data={activity} />
-        </Panel>
-        <Panel title="Why they said no" description={`${st.rejected} rejected quotes`}>
-          {st.rejected ? (
-            <BarList
-              color="var(--chart-3)"
-              rows={(Object.entries(st.reasons) as [RejectionReason, number][])
-                .sort((a, b) => b[1] - a[1])
-                .map(([r, v]) => ({ label: REASON_LABELS[r], value: v }))}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">No rejections yet.</p>
-          )}
-          {st.topLane ? (
-            <div className="mt-5 border-t border-border pt-3 text-sm">
-              <div className="eyebrow">Main lane</div>
-              <div className="mt-0.5 font-semibold">{st.topLane}</div>
-            </div>
-          ) : null}
-        </Panel>
-      </div>
-
-      {/* Enrichment panel intentionally hidden on broker detail: broker rows come
-          from the in-memory demo store (generated ids like "broker-3"), not real DB
-          primary keys. Calling /enrichment/leads/broker-3 would always 404. Wire
-          this back once brokers migrate to the real API. See review 2026-09-30. */}
-
-      <Panel className="mt-5" title="Email timeline" description={`${emails.length} emails, each tagged by the AI. Click one to read it.`} bodyClassName="p-0">
-        <ol className="divide-y divide-border">
-          {emails.map((e) => {
-            const ins = s.insightMap.get(e.id)!
-            return (
-              <li key={e.id}>
-                <details className="group">
-                  <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-muted/60">
-                    <span className={cn("w-10 shrink-0 font-mono text-[0.65rem] font-semibold", e.direction === "in" ? "text-chart-1" : "text-muted-foreground")}>
-                      {e.direction === "in" ? "IN" : "OUT"}
-                    </span>
-                    <IntentBadge intent={ins.intent} />
-                    <span className="min-w-0 flex-1 truncate text-sm">{e.subject}</span>
-                    {ins.rate ? <span className="num font-mono text-xs">{money(ins.rate, b.region)}</span> : null}
-                    <SentimentDot value={ins.sentiment} />
-                    <span className="w-28 text-right text-xs text-muted-foreground">{dateTime(e.sentAt)}</span>
-                  </summary>
-                  <div className="grid gap-4 border-t border-dashed border-border bg-background px-4 py-3 md:grid-cols-[minmax(0,1fr)_260px]">
-                    <pre className="font-sans text-sm whitespace-pre-wrap">{e.body}</pre>
-                    <dl className="space-y-1.5 rounded-sm border border-border bg-card p-3 text-xs">
-                      <div className="eyebrow mb-1">AI extraction</div>
-                      <Row k="Intent" v={<IntentBadge intent={ins.intent} />} />
-                      <Row k="Confidence" v={pct(ins.confidence)} />
-                      <Row k="Sentiment" v={ins.sentiment.toFixed(2)} />
-                      {ins.lane ? <Row k="Lane" v={`${ins.lane.origin} → ${ins.lane.destination}`} /> : null}
-                      {ins.equipment ? <Row k="Equipment" v={ins.equipment} /> : null}
-                      {ins.rate ? <Row k="Rate" v={money(ins.rate, b.region)} /> : null}
-                      {ins.perUnit ? <Row k="Per unit" v={perUnit(ins.perUnit, b.region)} /> : null}
-                      {ins.rejectionReason ? <Row k="Reason" v={REASON_LABELS[ins.rejectionReason]} /> : null}
-                      {ins.evidence ? <Row k="Evidence" v={<span className="bg-accent px-1">“{ins.evidence}”</span>} /> : null}
-                    </dl>
-                  </div>
-                </details>
-              </li>
-            )
-          })}
-        </ol>
-      </Panel>
-    </>
+    <span className="ml-2 inline-flex items-center rounded-[3px] border border-border bg-background px-1.5 py-0.5 text-[0.6rem] font-semibold tracking-wider uppercase text-muted-foreground">
+      {source}
+    </span>
   )
 }
 
-function Row({ k, v }: { k: string; v: React.ReactNode }) {
+function FieldLine({
+  icon,
+  field,
+  href,
+}: {
+  icon: React.ReactNode
+  field: ContactField
+  href?: string
+}) {
+  if (!field.value) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {icon}
+        <span>—</span>
+      </div>
+    )
+  }
+  const content = (
+    <>
+      <span className="min-w-0 truncate">{field.value}</span>
+      <SourceBadge source={field.source} />
+    </>
+  )
   return (
-    <div className="flex items-start justify-between gap-3">
-      <dt className="text-muted-foreground">{k}</dt>
-      <dd className="text-right font-medium">{v}</dd>
+    <div className="flex min-w-0 items-center gap-2 text-sm">
+      {icon}
+      {href ? (
+        <a href={href} className="min-w-0 flex-1 truncate underline-offset-2 hover:underline">
+          {content}
+        </a>
+      ) : (
+        <div className="min-w-0 flex-1 truncate">{content}</div>
+      )}
     </div>
+  )
+}
+
+function NamedContactCard({ c }: { c: NamedContact }) {
+  return (
+    <div className="rounded-sm border border-border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold">{c.name.value ?? "—"}</span>
+        <SourceBadge source={c.name.source} />
+        {c.is_decision_maker ? (
+          <span className="inline-flex items-center rounded-[3px] bg-safety px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wider uppercase text-asphalt">
+            DM
+          </span>
+        ) : null}
+        <span className="ml-auto text-[0.68rem] text-muted-foreground">
+          sighted {c.sighted_count}×
+        </span>
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">{c.title.value ?? "—"}</div>
+      <div className="mt-2 space-y-1">
+        <FieldLine
+          icon={<Mail className="size-3.5" />}
+          field={c.email}
+          href={c.email.value ? `mailto:${c.email.value}` : undefined}
+        />
+        <FieldLine
+          icon={<Phone className="size-3.5" />}
+          field={c.phone}
+          href={c.phone.value ? `tel:${c.phone.value}` : undefined}
+        />
+        {c.linkedin_url ? (
+          <a
+            href={c.linkedin_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline"
+          >
+            <ExternalLink className="size-3.5" /> LinkedIn
+          </a>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function ActivityRow({ e }: { e: ActivityEvent }) {
+  if (e.kind === "call_outcome") {
+    return (
+      <li className="flex items-start gap-2 border-l-2 border-border py-1.5 pl-3 text-sm">
+        <Phone className="mt-0.5 size-3.5 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">Call: {e.outcome}</div>
+          {e.note ? <div className="text-xs text-muted-foreground">{e.note}</div> : null}
+          <div className="text-[0.68rem] text-muted-foreground">
+            {new Date(e.logged_at).toLocaleString()}
+          </div>
+        </div>
+      </li>
+    )
+  }
+  return (
+    <li className="flex items-start gap-2 border-l-2 border-border py-1.5 pl-3 text-sm">
+      <Mail className="mt-0.5 size-3.5 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">
+          Email sent{e.replied_at ? " · replied" : ""}
+          <span className="ml-2 text-[0.6rem] font-semibold uppercase text-muted-foreground">
+            {e.mode}
+          </span>
+        </div>
+        <div className="truncate text-xs text-muted-foreground">
+          {e.subject || "(no subject)"} → {e.to_email}
+        </div>
+        <div className="text-[0.68rem] text-muted-foreground">
+          {new Date(e.sent_at).toLocaleString()}
+        </div>
+      </div>
+    </li>
+  )
+}
+
+export default function BrokerDetailPage() {
+  const params = useParams<{ id: string }>()
+  const id = params.id
+
+  const [data, setData] = React.useState<BrokerDetail | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [notFoundFlag, setNotFoundFlag] = React.useState(false)
+  const [moreCursor, setMoreCursor] = React.useState<string | null>(null)
+  const [moreLoading, setMoreLoading] = React.useState(false)
+  const [extraActivity, setExtraActivity] = React.useState<ActivityEvent[]>([])
+
+  React.useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      try {
+        const d = await getBroker(id)
+        if (!cancelled) {
+          setData(d)
+          // Prime the "load more" cursor using the oldest timestamp we already have.
+          const items = d.activity ?? []
+          if (items.length > 0) {
+            const last = items[items.length - 1]
+            const ts = last.kind === "call_outcome" ? last.logged_at : last.sent_at
+            setMoreCursor(btoa(ts).replace(/=+$/, ""))
+          }
+        }
+      } catch (e) {
+        const msg = String(e)
+        if (msg.includes("404")) setNotFoundFlag(true)
+        else toast.error("Couldn't load broker", { description: msg })
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  const loadMore = async () => {
+    if (!moreCursor) return
+    setMoreLoading(true)
+    try {
+      const page = await getBrokerActivity(id, moreCursor, 50)
+      setExtraActivity((prev) => [...prev, ...page.items])
+      setMoreCursor(page.next_cursor ?? null)
+    } catch (e) {
+      toast.error("Couldn't load more activity", { description: String(e) })
+    } finally {
+      setMoreLoading(false)
+    }
+  }
+
+  if (notFoundFlag) {
+    return (
+      <>
+        <Link
+          href="/brokers"
+          className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" /> All brokers
+        </Link>
+        <p className="text-sm text-muted-foreground">Broker not found.</p>
+      </>
+    )
+  }
+
+  if (loading || !data) {
+    return (
+      <>
+        <Link
+          href="/brokers"
+          className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" /> All brokers
+        </Link>
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </>
+    )
+  }
+
+  const b = data.broker
+  const activityAll = [...data.activity, ...extraActivity]
+
+  return (
+    <>
+      <Link
+        href="/brokers"
+        className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" /> All brokers
+      </Link>
+
+      <div className="mb-5 flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            {b.mc ? (
+              <span className="inline-flex items-center rounded-[3px] border border-border bg-background px-1.5 py-0.5 text-xs font-mono">
+                MC-{b.mc}
+              </span>
+            ) : null}
+            {b.dot ? (
+              <span className="inline-flex items-center rounded-[3px] border border-border bg-background px-1.5 py-0.5 text-xs font-mono">
+                DOT-{b.dot}
+              </span>
+            ) : null}
+            <span className="text-sm text-muted-foreground">
+              {b.city ? `${b.city}, ` : ""}
+              {b.state}
+            </span>
+            {b.fit_score != null ? (
+              <span className="inline-flex items-center rounded-[3px] border border-border bg-background px-1.5 py-0.5 text-[0.68rem] font-medium">
+                fit {b.fit_score}
+              </span>
+            ) : null}
+            <span
+              className={cn(
+                "inline-flex items-center rounded-[3px] px-2 py-0.5 text-[0.68rem] font-bold tracking-wider uppercase",
+                ACTION_STYLE[b.next_action.kind],
+              )}
+              title={b.next_action.reason}
+            >
+              {ACTION_LABEL[b.next_action.kind]}
+            </span>
+          </div>
+          <h1 className="font-display text-3xl leading-none font-bold md:text-[2.4rem]">
+            {b.name}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{b.next_action.reason}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+            {b.website_url ? (
+              <a
+                href={b.website_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:underline"
+              >
+                <ExternalLink className="size-3.5" /> Website
+              </a>
+            ) : null}
+            {b.linkedin_company_url ? (
+              <a
+                href={b.linkedin_company_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 hover:underline"
+              >
+                <ExternalLink className="size-3.5" /> LinkedIn
+              </a>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {b.phone.value ? (
+            <a
+              href={`tel:${b.phone.value}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-sm bg-safety px-3 text-sm font-semibold text-asphalt hover:opacity-90"
+            >
+              <Phone className="size-4" />
+              <span className="font-mono">{b.phone.value}</span>
+            </a>
+          ) : null}
+          {b.primary_email.value ? (
+            <a
+              href={`mailto:${b.primary_email.value}`}
+              className="inline-flex h-10 items-center gap-1.5 rounded-sm border border-border px-3 text-sm hover:bg-muted"
+            >
+              <Mail className="size-4" />
+              Email
+            </a>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="space-y-5">
+          <Panel
+            title="Contact block"
+            description="Every field with a visible source. Missing data stays missing — we don't fake it."
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FieldLine
+                icon={<Phone className="size-4" />}
+                field={b.phone}
+                href={b.phone.value ? `tel:${b.phone.value}` : undefined}
+              />
+              <FieldLine
+                icon={<Mail className="size-4" />}
+                field={b.primary_email}
+                href={b.primary_email.value ? `mailto:${b.primary_email.value}` : undefined}
+              />
+              <FieldLine icon={<MapPin className="size-4" />} field={b.address} />
+            </div>
+          </Panel>
+
+          <Panel
+            title={`Named contacts (${b.contacts.length})`}
+            description={
+              b.contacts.length === 0
+                ? "No named contacts yet — the enrichment run hasn't surfaced anyone here."
+                : "Ordered: decision-makers first, then confidence, then provenance count."
+            }
+          >
+            {b.contacts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">—</p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {b.contacts.map((c) => (
+                  <NamedContactCard key={c.id} c={c} />
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          <Panel
+            title="Email analytics"
+            description="Sample data — real analytics unlock when the inbox connector is live."
+          >
+            <div className="rounded-sm border border-dashed border-warn bg-warn/10 p-3 text-xs text-asphalt">
+              These tiles are seeded placeholders. Open-rate, best send-time and
+              reply-rate will light up once <code>gmail-inbox-connector</code> +{" "}
+              <code>inbox-analysis</code> ship. The data below is real:{" "}
+              <strong>{data.summary.sent_count_30d}</strong> emails sent in the
+              last 30 days,{" "}
+              <strong>{data.summary.reply_count_30d}</strong> replies. Everything
+              else here is for layout — not for decisions.
+            </div>
+          </Panel>
+        </div>
+
+        <div className="space-y-4">
+          <Panel
+            title="Activity"
+            description={activityAll.length === 0 ? "No activity yet." : "Newest first — calls + emails merged."}
+          >
+            {activityAll.length === 0 ? (
+              <p className="text-sm text-muted-foreground">—</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {activityAll.map((e, i) => (
+                  <ActivityRow
+                    key={`${e.kind}-${e.kind === "call_outcome" ? e.logged_at : e.sent_at}-${i}`}
+                    e={e}
+                  />
+                ))}
+              </ul>
+            )}
+            {moreCursor ? (
+              <div className="mt-3 flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={moreLoading}
+                  onClick={() => void loadMore()}
+                >
+                  {moreLoading ? "Loading…" : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </Panel>
+
+          <Panel title="Summary (last 30d)" description="Real numbers from sent_log + call_outcomes.">
+            <ul className="space-y-1 text-sm">
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Sent</span>
+                <span className="font-mono font-semibold">{data.summary.sent_count_30d}</span>
+              </li>
+              <li className="flex justify-between">
+                <span className="text-muted-foreground">Replied</span>
+                <span className="font-mono font-semibold">{data.summary.reply_count_30d}</span>
+              </li>
+              {data.summary.last_call ? (
+                <li className="flex justify-between">
+                  <span className="text-muted-foreground">Last call</span>
+                  <span>
+                    {data.summary.last_call.outcome} ·{" "}
+                    {new Date(data.summary.last_call.logged_at).toLocaleDateString()}
+                  </span>
+                </li>
+              ) : null}
+              {data.summary.last_email ? (
+                <li className="flex justify-between">
+                  <span className="text-muted-foreground">Last email</span>
+                  <span>{new Date(data.summary.last_email.sent_at).toLocaleDateString()}</span>
+                </li>
+              ) : null}
+            </ul>
+          </Panel>
+        </div>
+      </div>
+    </>
   )
 }
