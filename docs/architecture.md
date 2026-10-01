@@ -138,3 +138,39 @@ Two orthogonal harnesses:
 Opt-in perf benchmarks (`uv run pytest -m perf`) seed 25k leads × 2
 tenants and assert p95 < 300ms on the hot list endpoints with keyset
 pagination and the composite indexes in place.
+
+
+## Inbox analysis + Gmail Workspace connector (2026-10-01)
+
+Covers [`projects/ljm-intelligence/plan/2026-10-01-inbox-analysis-gmail-connector.md`](../../symbiosis-brain/projects/ljm-intelligence/plan/2026-10-01-inbox-analysis-gmail-connector.md).
+
+### Modules
+- `app/inbox/` — triage-on-ingest (`triage.py`), analysis queries + status
+  board + compose/reply + forget-contact (`service.py`), FastAPI surface
+  (`router.py`). Reads `mail_messages` + `message_insights` + `no_reply_tracker`.
+- `app/analysis/` — nightly feature-weighted compute of broker + lane
+  predictions, lookalikes, objection clusters (`service.py`), fan-out job
+  (`jobs.py`), aggregate HTTP surface (`router.py`).
+- `app/integrations/adapters/email/` — Simulated and Gmail adapters behind
+  one `MailboxSource`/`MailSender` port shape. Owner switch
+  (`settings.mail_owner_send_enabled`) gates real send; a flipped-off switch
+  falls back to `SimulatedSender` with a `sent_log` row recorded.
+- `app/identity/credentials.py` — AES-GCM `CredentialVault`
+  (`TENANT_CRED_KEY`), the only path that reads/writes `tenant_credentials`.
+
+### Data
+- `mail_messages` / `message_insights` / `no_reply_tracker` — the inbox.
+- `broker_predictions` / `lane_predictions` / `broker_lookalikes` /
+  `objection_clusters` / `prediction_runs` — nightly outputs (migration 0019).
+- `forget_contact_audit` — one row per owner-triggered purge.
+- RLS policies on every tenant-owned table (`tenant_id = app.tenant_id`).
+
+### Scheduler
+- `scheduler.mail_incremental_tick` — every 15 min (`inbox.mail_incremental`).
+- `scheduler.retention_sweep_nightly` — 03:00 UTC (`inbox.retention_sweep`).
+- `scheduler.analysis_nightly_tick` — 03:30 UTC (`analysis.nightly`).
+
+### Paid-Gemini posture (AC-A3)
+`app/main.py` asserts on boot in production that `GEMINI_API_KEY` is set and
+no mapped feature points at a `*free*` model id — free-tier Gemini uses
+prompt content for training; paid does not.

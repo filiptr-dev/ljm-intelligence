@@ -1,181 +1,257 @@
-import Link from "next/link"
-import { Brain, Database, Layers, ScanText } from "lucide-react"
-import { RerunButton } from "@/components/app/rerun-button"
-import { BarList, PageHeader, Panel, RegionTag, SEGMENT_COLOR } from "@/components/app/ui"
-import { RateLine, SpeedColumns, WinRateLine } from "@/components/charts/charts"
-import { Heatmap } from "@/components/charts/heatmap"
+import { PageHeader, Panel } from "@/components/app/ui"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { REASON_LABELS } from "@/lib/analytics"
-import { getStore } from "@/lib/data/store"
-import { money, num, pct, perUnit } from "@/lib/format"
+import * as analysis from "@/lib/api/analysis"
 
-const SEGMENT_NOTE: Record<string, string> = {
-  "Core partners": "High volume, high win rate, still active. Protect these accounts.",
-  Growing: "New or recently active, and volume is rising fast.",
-  "Price shoppers": "Send lots of loads but mostly say no on price.",
-  Dormant: "Used to book regularly, silent for months.",
-  Occasional: "Too little history to profile, so they go on the automated list.",
-}
-
+/**
+ * Intelligence — all prediction cards (plan-gate decision: all cards in v1).
+ *
+ * One aggregate fetch (`/analysis/predictions`) renders every card. The
+ * backend's nightly fan-out populates the tables; this page is read-only.
+ */
 export default async function IntelligencePage() {
-  const s = await getStore()
-  const avgConf = s.insights.reduce((a, i) => a + i.confidence, 0) / s.insights.length
-  const extracted = s.insights.filter((i) => i.rate || i.lane || i.rejectionReason).length
-  const intents = new Set(s.insights.map((i) => i.intent)).size
+  const data = await analysis.getPredictions()
+  const brokers = data.brokers
+  const lanes = data.lanes
+  const objections = data.objections
+  const workload = data.workload
+  const thread_age = data.thread_age
+  const loss_reasons = data.loss_reasons
+  const first_touch = data.first_touch
 
-  const steps = [
-    { icon: Database, label: "Emails ingested", value: num(s.kpis.emails), sub: `${s.kpis.threads.toLocaleString("en-US")} load conversations` },
-    { icon: ScanText, label: "Classified by intent", value: `${intents} intents`, sub: `${pct(avgConf)} average confidence` },
-    { icon: Brain, label: "Entities extracted", value: num(extracted), sub: "Rates, lanes, equipment, reasons" },
-    { icon: Layers, label: "Brokers segmented", value: `${s.segments.length} segments`, sub: "k-means on 6 behaviour features" },
-  ]
+  const topBrokers = [...brokers].sort((a, b) => b.win_probability - a.win_probability).slice(0, 10)
+  const slowPayers = brokers.filter((b) => b.is_slow_payer).slice(0, 10)
+  const churnWarnings = [...brokers].filter((b) => b.churn_risk > 0.3).sort((a, b) => b.churn_risk - a.churn_risk).slice(0, 10)
+  const bestHours = brokers.filter((b) => b.best_send_hour !== null && b.best_send_hour !== undefined).slice(0, 10)
 
   return (
     <>
       <PageHeader
-        eyebrow="Broker intelligence"
-        title="What your inbox says"
-        description={`Every email between your dispatch team and ${s.kpis.brokers} brokers was read by the AI, tagged and turned into the numbers below.`}
-        actions={<RerunButton />}
+        eyebrow="Analyze"
+        title="Intelligence"
+        description={`Nightly predictions over the inbox. ${brokers.length} broker${brokers.length === 1 ? "" : "s"} analyzed, ${lanes.length} lane${lanes.length === 1 ? "" : "s"}.`}
       />
 
-      <ol className="mb-5 grid gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
-        {steps.map((st, i) => (
-          <li key={st.label} className="flex items-start gap-3 bg-card p-4">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-sm bg-asphalt text-safety">
-              <st.icon className="size-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="eyebrow">Step {i + 1} · {st.label}</div>
-              <div className="mt-0.5 text-xl font-semibold">{st.value}</div>
-              <div className="text-xs text-muted-foreground">{st.sub}</div>
-            </div>
-          </li>
-        ))}
-      </ol>
-
       <div className="grid gap-5 lg:grid-cols-2">
-        <Panel title="Who you work with most" description="Loads booked, all time">
-          <BarList
-            rows={s.topPartners.map((b) => ({
-              label: (
-                <Link href={`/brokers/${b.id}`} className="flex items-center gap-2 hover:underline">
-                  <RegionTag region={b.region} /> <span className="truncate">{b.name}</span>
-                </Link>
-              ),
-              value: b.booked,
-              sub: `${money(b.revenue, b.region)} revenue · ${pct(b.winRate)} win rate`,
-            }))}
-            format={(v) => `${v} loads`}
-          />
-        </Panel>
-        <Panel title="Who rejects you most" description="Quotes the broker turned down, with the main reason the AI found">
-          <BarList
-            color="var(--chart-3)"
-            rows={s.topRejectors.map((b) => ({
-              label: (
-                <Link href={`/brokers/${b.id}`} className="flex items-center gap-2 hover:underline">
-                  <RegionTag region={b.region} /> <span className="truncate">{b.name}</span>
-                </Link>
-              ),
-              value: b.rejected,
-              sub: `${pct(b.rejected / (b.rejected + b.booked))} rejection rate · mostly “${b.topReason ? REASON_LABELS[b.topReason] : "n/a"}”`,
-            }))}
-            format={(v) => `${v} rejected`}
-          />
-        </Panel>
-
-        <Panel title="Why brokers say no" description={`${s.kpis.rejected} rejections, by the reason extracted from the email text`}>
-          <BarList
-            color="var(--chart-3)"
-            rows={s.reasons.map((r) => ({ label: r.label, value: r.count, sub: `${pct(r.share)} of rejections` }))}
-            format={(v) => String(v)}
-          />
-          <p className="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">AI read: </span>
-            {pct(s.reasons[0].share)} of lost loads come down to <b className="text-foreground">{s.reasons[0].label.toLowerCase()}</b>.
-            {" "}Losing to other carriers is the second biggest problem, and it clusters in brokers that later went dormant.
-          </p>
-        </Panel>
-
-        <Panel id="speed" title="Reply speed decides the load" description="Win rate by how fast your dispatcher sent the quote">
-          <SpeedColumns data={s.responseBuckets} />
-          <p className="mt-2 text-sm text-muted-foreground">
-            <span className="font-semibold text-foreground">AI read: </span>
-            quotes sent in under 30 minutes win {pct(s.responseBuckets[0].winRate)}, compared with {pct(s.responseBuckets[3].winRate)} after two hours. Auto-drafted quotes would put most replies in the fastest bucket.
-          </p>
-        </Panel>
-
-        <Panel id="timing" title="When brokers answer" description="Reply rate to your “truck available” emails, by weekday and send time">
-          <Heatmap rows={s.heatmap} />
-        </Panel>
-
-        <Panel title="Win rate trend" description="Booked ÷ (booked + rejected), by month">
-          <WinRateLine data={s.monthly} />
-        </Panel>
-
-        <Panel title="Booked rate" description="Average rate per mile on booked loads">
-          <RateLine data={s.monthly} dataKey="usdPerMile" label="$/mi" unit="$" />
-        </Panel>
-      </div>
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <Panel title="Broker segments" description="Clusters found by k-means. Click a segment to see its brokers." bodyClassName="p-0">
+        <Panel title="Win probability" description="Likelihood this broker books us on their next load.">
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-4">Segment</TableHead>
-                <TableHead className="text-right">Brokers</TableHead>
-                <TableHead className="text-right">Win rate</TableHead>
-                <TableHead className="text-right">Loads</TableHead>
-                <TableHead className="pr-4 text-right">Last contact</TableHead>
-              </TableRow>
-            </TableHeader>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Win prob</TableHead><TableHead>Health</TableHead></TableRow></TableHeader>
             <TableBody>
-              {s.segments.map((g) => (
-                <TableRow key={g.segment}>
-                  <TableCell className="pl-4 whitespace-normal">
-                    <Link href={`/brokers?segment=${encodeURIComponent(g.segment)}`} className="flex items-center gap-2 font-semibold hover:underline">
-                      <span className="size-2.5 rounded-[2px]" style={{ background: SEGMENT_COLOR[g.segment] }} />
-                      {g.segment}
-                    </Link>
-                    <div className="mt-0.5 text-xs text-muted-foreground">{SEGMENT_NOTE[g.segment]}</div>
-                  </TableCell>
-                  <TableCell className="num text-right font-mono">{g.count}</TableCell>
-                  <TableCell className="num text-right font-mono">{pct(g.winRate)}</TableCell>
-                  <TableCell className="num text-right font-mono">{g.booked}</TableCell>
-                  <TableCell className="num pr-4 text-right font-mono">{Math.round(g.avgDaysSince)}d ago</TableCell>
+              {topBrokers.map((b) => (
+                <TableRow key={b.broker_domain}>
+                  <TableCell className="font-mono text-xs">{b.broker_name || b.broker_domain}</TableCell>
+                  <TableCell>{(b.win_probability * 100).toFixed(0)}%</TableCell>
+                  <TableCell>{b.health_score}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </Panel>
 
-        <Panel title="Top lanes" description="Lanes where you book the most loads" bodyClassName="p-0">
+        <Panel title="Price-to-win by lane" description="p50 / p75 / p90 of accepted rates per lane.">
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-4">Lane</TableHead>
-                <TableHead className="text-right">Loads</TableHead>
-                <TableHead className="text-right">Win rate</TableHead>
-                <TableHead className="pr-4 text-right">Avg rate</TableHead>
-              </TableRow>
-            </TableHeader>
+            <TableHeader><TableRow><TableHead>Lane</TableHead><TableHead>p50</TableHead><TableHead>p75</TableHead><TableHead>p90</TableHead><TableHead>N</TableHead></TableRow></TableHeader>
             <TableBody>
-              {s.lanes.map((l) => (
-                <TableRow key={l.lane}>
-                  <TableCell className="pl-4">
-                    <span className="flex items-center gap-2"><RegionTag region={l.region} /> {l.lane}</span>
-                  </TableCell>
-                  <TableCell className="num text-right font-mono">{l.loads}</TableCell>
-                  <TableCell className="num text-right font-mono">{pct(l.winRate)}</TableCell>
-                  <TableCell className="num pr-4 text-right font-mono">{perUnit(l.avgPerUnit, l.region)}</TableCell>
+              {lanes.slice(0, 15).map((l, i) => (
+                <TableRow key={`${l.origin}-${l.dest}-${i}`}>
+                  <TableCell className="font-mono text-xs">{l.origin} → {l.dest}{l.equipment ? ` · ${l.equipment}` : ""}</TableCell>
+                  <TableCell>{l.price_p50 ? `$${l.price_p50.toLocaleString()}` : "—"}</TableCell>
+                  <TableCell>{l.price_p75 ? `$${l.price_p75.toLocaleString()}` : "—"}</TableCell>
+                  <TableCell>{l.price_p90 ? `$${l.price_p90.toLocaleString()}` : "—"}</TableCell>
+                  <TableCell>{l.sample_size}</TableCell>
                 </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="Broker churn warning" description="Volume drop vs prior 30 days.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Risk</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {churnWarnings.map((b) => (
+                <TableRow key={b.broker_domain}>
+                  <TableCell className="font-mono text-xs">{b.broker_name || b.broker_domain}</TableCell>
+                  <TableCell>{(b.churn_risk * 100).toFixed(0)}%</TableCell>
+                </TableRow>
+              ))}
+              {churnWarnings.length === 0 ? <TableRow><TableCell colSpan={2} className="text-sm text-muted-foreground">No churn warnings right now.</TableCell></TableRow> : null}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="Best send time" description="Hour-of-day with the highest reply ratio per broker.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Hour (UTC)</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {bestHours.map((b) => (
+                <TableRow key={b.broker_domain}>
+                  <TableCell className="font-mono text-xs">{b.broker_name || b.broker_domain}</TableCell>
+                  <TableCell>{String(b.best_send_hour).padStart(2, "0")}:00</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="Slow payers" description="Brokers whose threads show repeated payment-intent messages.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {slowPayers.map((b) => (
+                <TableRow key={b.broker_domain}><TableCell className="font-mono text-xs">{b.broker_name || b.broker_domain}</TableCell></TableRow>
+              ))}
+              {slowPayers.length === 0 ? <TableRow><TableCell className="text-sm text-muted-foreground">No slow payers flagged.</TableCell></TableRow> : null}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="Reply-speed impact" description="How much faster brokers reply when we reply fast.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Lift</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {brokers.slice(0, 10).map((b) => (
+                <TableRow key={b.broker_domain}>
+                  <TableCell className="font-mono text-xs">{b.broker_name || b.broker_domain}</TableCell>
+                  <TableCell>{b.reply_speed_lift.toFixed(2)}×</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <Panel title="Objection clusters" description="What brokers push back on, bucketed per broker.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Objection</TableHead><TableHead>Count</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {objections.slice(0, 20).map((o, i) => (
+                <TableRow key={`${o.broker_domain}-${o.label}-${i}`}>
+                  <TableCell className="font-mono text-xs">{o.broker_domain}</TableCell>
+                  <TableCell>{o.label}</TableCell>
+                  <TableCell>{o.count}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="Loss-reason tags" description="Why dropped quotes get dropped, across the whole book.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Reason</TableHead><TableHead>Count</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {loss_reasons.map((l) => (
+                <TableRow key={l.reason}><TableCell>{l.reason}</TableCell><TableCell>{l.count}</TableCell></TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="Thread age before answer" description="How long inbound threads sit before someone replies, per intent.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Intent</TableHead><TableHead>Median</TableHead><TableHead>p90</TableHead><TableHead>N</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {thread_age.map((t) => (
+                <TableRow key={t.intent}>
+                  <TableCell>{t.intent}</TableCell>
+                  <TableCell>{fmtMinutes(t.median_minutes)}</TableCell>
+                  <TableCell>{fmtMinutes(t.p90_minutes)}</TableCell>
+                  <TableCell>{t.count}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+
+        <Panel title="First-touch → first-load latency" description="Days from first contact to first load offer, per newly contacted broker.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Days</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {first_touch.slice(0, 20).map((f) => (
+                <TableRow key={f.broker_domain}>
+                  <TableCell className="font-mono text-xs">{f.broker_domain}</TableCell>
+                  <TableCell>{f.latency_days !== null && f.latency_days !== undefined ? f.latency_days.toFixed(1) : "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Panel>
+      </div>
+
+      <div className="mt-5">
+        <Panel title="Staff workload heatmap" description="When our team is actually sending (hours × day of week).">
+          <WorkloadHeatmap cells={workload} />
+        </Panel>
+      </div>
+
+      <div className="mt-5">
+        <Panel title="Lookalike brokers" description="Peers that work the same lanes — mirror-sell candidates.">
+          <Table>
+            <TableHeader><TableRow><TableHead>Broker</TableHead><TableHead>Health</TableHead><TableHead>Lookalike peers</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {brokers.slice(0, 10).map((b) => (
+                <LookalikesRow key={b.broker_domain} brokerDomain={b.broker_domain} brokerName={b.broker_name} health={b.health_score} />
               ))}
             </TableBody>
           </Table>
         </Panel>
       </div>
     </>
+  )
+}
+
+async function LookalikesRow({ brokerDomain, brokerName, health }: { brokerDomain: string; brokerName: string | null | undefined; health: number }) {
+  const peers = await analysis.getLookalikes(brokerDomain, 5).catch(() => [])
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-xs">{brokerName || brokerDomain}</TableCell>
+      <TableCell>{health}</TableCell>
+      <TableCell className="text-xs font-mono">
+        {peers.length ? peers.map((p) => `${p.peer_domain} (${p.score.toFixed(2)})`).join(", ") : <span className="text-muted-foreground">—</span>}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+function fmtMinutes(m: number): string {
+  if (m < 60) return `${m}m`
+  if (m < 1440) return `${Math.round(m / 60)}h`
+  return `${Math.round(m / 1440)}d`
+}
+
+function WorkloadHeatmap({ cells }: { cells: analysis.WorkloadCell[] }) {
+  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0))
+  let max = 0
+  for (const c of cells) {
+    if (c.day < 0 || c.day > 6 || c.hour < 0 || c.hour > 23) continue
+    grid[c.day][c.hour] = c.count
+    if (c.count > max) max = c.count
+  }
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+  return (
+    <div className="overflow-x-auto">
+      <table className="font-mono text-[0.65rem]">
+        <thead>
+          <tr>
+            <th className="px-1 text-left">·</th>
+            {Array.from({ length: 24 }, (_, h) => (
+              <th key={h} className="px-1 text-left">{String(h).padStart(2, "0")}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {grid.map((row, d) => (
+            <tr key={d}>
+              <td className="px-1 text-right pr-2">{days[d]}</td>
+              {row.map((v, h) => {
+                const alpha = max > 0 ? v / max : 0
+                const bg = `rgba(42,124,222,${alpha})`
+                return <td key={h} className="h-5 w-5 border border-border/40" style={{ backgroundColor: bg }} title={`${days[d]} ${h}:00 — ${v}`} />
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

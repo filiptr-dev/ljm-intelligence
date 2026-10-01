@@ -240,6 +240,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/connectors/gmail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Connect Gmail
+         * @description Encrypt + store Gmail service-account JSON in the vault.
+         *
+         *     This is the owner-only path that lets LJM grant the connector without
+         *     exposing creds on an env var. Vault needs ``TENANT_CRED_KEY``.
+         */
+        post: operations["connect_gmail_settings_connectors_gmail_post"];
+        /**
+         * Revoke Gmail
+         * @description Delete the stored Gmail credential + flip inbox.source back to simulated.
+         */
+        delete: operations["revoke_gmail_settings_connectors_gmail_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/gmail/send-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Switch
+         * @description Flip ``inbox.send_via_gmail`` ON/OFF. ON requires ``confirm='CONFIRM'``.
+         *
+         *     Mirrors the superadmin-tenant-delete type-to-confirm pattern — this is
+         *     the one action that can embarrass LJM in front of a broker, so it's
+         *     always a two-step gesture.
+         */
+        post: operations["send_switch_settings_connectors_gmail_send_switch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/gmail/inbox-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inbox Source Switch
+         * @description Flip ``inbox.source`` between simulated (False) and gmail (True).
+         */
+        post: operations["inbox_source_switch_settings_connectors_gmail_inbox_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capacity/posts": {
         parameters: {
             query?: never;
@@ -670,6 +741,384 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Emails Endpoint
+         * @description List emails for the /emails page. Returns the triage counts + sentiment
+         *     bar numbers in one call so the Server Component doesn't need a second trip.
+         */
+        get: operations["list_emails_endpoint_inbox_emails_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/triage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Triage Endpoint */
+        get: operations["triage_endpoint_inbox_triage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/no-reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** No Reply Endpoint */
+        get: operations["no_reply_endpoint_inbox_no_reply_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/response-time": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Response Time Endpoint */
+        get: operations["response_time_endpoint_inbox_response_time_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Staff Endpoint */
+        get: operations["staff_endpoint_inbox_staff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/overview-kpis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Overview Kpis Endpoint */
+        get: operations["overview_kpis_endpoint_inbox_overview_kpis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/relationship/{broker_domain}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Relationship Endpoint */
+        get: operations["relationship_endpoint_inbox_relationship__broker_domain__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Thread Endpoint */
+        get: operations["thread_endpoint_inbox_threads__thread_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/status-board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status Board Endpoint */
+        get: operations["status_board_endpoint_inbox_status_board_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/threads/{thread_id}/ai-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ai Draft Endpoint */
+        get: operations["ai_draft_endpoint_inbox_threads__thread_id__ai_draft_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/threads/{thread_id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reply Endpoint */
+        post: operations["reply_endpoint_inbox_threads__thread_id__reply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/compose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compose Endpoint */
+        post: operations["compose_endpoint_inbox_compose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/forget-contact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forget Contact Endpoint */
+        post: operations["forget_contact_endpoint_inbox_forget_contact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/predictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Predictions Endpoint */
+        get: operations["predictions_endpoint_analysis_predictions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/broker-predictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Broker Predictions Endpoint */
+        get: operations["broker_predictions_endpoint_analysis_broker_predictions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lane-predictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lane Predictions Endpoint */
+        get: operations["lane_predictions_endpoint_analysis_lane_predictions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lookalikes/{broker_domain}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lookalikes Endpoint */
+        get: operations["lookalikes_endpoint_analysis_lookalikes__broker_domain__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/objections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Objections Endpoint */
+        get: operations["objections_endpoint_analysis_objections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/workload-heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workload Heatmap Endpoint */
+        get: operations["workload_heatmap_endpoint_analysis_workload_heatmap_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/thread-age": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Thread Age Endpoint */
+        get: operations["thread_age_endpoint_analysis_thread_age_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/loss-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Loss Reasons Endpoint */
+        get: operations["loss_reasons_endpoint_analysis_loss_reasons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/first-touch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** First Touch Endpoint */
+        get: operations["first_touch_endpoint_analysis_first_touch_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mail/backfill": {
         parameters: {
             query?: never;
@@ -941,6 +1390,15 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** AiDraftOutModel */
+        AiDraftOutModel: {
+            /** Subject */
+            subject: string;
+            /** Body Text */
+            body_text: string;
+            /** Body Html */
+            body_html: string;
+        };
         /** AutoSendIn */
         AutoSendIn: {
             /**
@@ -1034,6 +1492,32 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** BrokerPredictionOut */
+        BrokerPredictionOut: {
+            /** Broker Domain */
+            broker_domain: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Win Probability */
+            win_probability: number;
+            /** Health Score */
+            health_score: number;
+            /** Best Send Hour */
+            best_send_hour: number | null;
+            /** Is Slow Payer */
+            is_slow_payer: boolean;
+            /** Churn Risk */
+            churn_risk: number;
+            /** Reply Speed Lift */
+            reply_speed_lift: number;
+            /** First Touch Latency Days */
+            first_touch_latency_days: number | null;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+        };
         /** BrokerRowOut */
         BrokerRowOut: {
             /** Id */
@@ -1093,6 +1577,34 @@ export interface components {
             /** Opener */
             opener: string;
             last_outcome: components["schemas"]["LastOutcomeOut"] | null;
+        };
+        /** ComposeIn */
+        ComposeIn: {
+            /**
+             * To
+             * Format: email
+             */
+            to: string;
+            /** Subject */
+            subject: string;
+            /** Body Text */
+            body_text: string;
+            /**
+             * Body Html
+             * @default
+             */
+            body_html: string;
+        };
+        /** ComposeOut */
+        ComposeOut: {
+            /** Ok */
+            ok: boolean;
+            /** Mode */
+            mode?: string | null;
+            /** Message Id */
+            message_id?: string | null;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /** ConnectionTestOut */
         ConnectionTestOut: {
@@ -1310,6 +1822,62 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** EmailListItem */
+        EmailListItem: {
+            /** Message Id */
+            message_id: string;
+            /** Mailbox */
+            mailbox: string;
+            /** Thread Id */
+            thread_id: string;
+            /** Direction */
+            direction: string;
+            /** From Addr */
+            from_addr: string;
+            /** To Addr */
+            to_addr: string;
+            /** Subject */
+            subject: string;
+            /** Body Text */
+            body_text: string;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Intent */
+            intent: string;
+            /** Urgency */
+            urgency: string;
+            /** Sentiment */
+            sentiment: number;
+            /** Confidence */
+            confidence: number;
+            /** Rate Usd */
+            rate_usd: number | null;
+            /** Lane From */
+            lane_from: string | null;
+            /** Lane To */
+            lane_to: string | null;
+            /** Evidence */
+            evidence: string | null;
+        };
+        /** EmailsPageOut */
+        EmailsPageOut: {
+            /** Items */
+            items: components["schemas"]["EmailListItem"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Intent Counts */
+            intent_counts: components["schemas"]["IntentCountOut"][];
+            sentiment: components["schemas"]["SentimentOut"];
+        };
         /** EnrichmentMetricsOut */
         EnrichmentMetricsOut: {
             /**
@@ -1391,6 +1959,59 @@ export interface components {
                 [key: string]: boolean;
             };
         };
+        /** FirstTouchOut */
+        FirstTouchOut: {
+            /** Broker Domain */
+            broker_domain: string;
+            /** Latency Days */
+            latency_days: number | null;
+        };
+        /** ForgetContactIn */
+        ForgetContactIn: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+        };
+        /** ForgetContactOut */
+        ForgetContactOut: {
+            /** Ok */
+            ok: boolean;
+            /** Email */
+            email?: string | null;
+            /**
+             * Messages Deleted
+             * @default 0
+             */
+            messages_deleted: number;
+            /**
+             * Insights Deleted
+             * @default 0
+             */
+            insights_deleted: number;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** GmailConnectorIn */
+        GmailConnectorIn: {
+            /** Sa Json */
+            sa_json: string;
+            /**
+             * Impersonate
+             * @default
+             */
+            impersonate: string;
+        };
+        /** GmailConnectorOut */
+        GmailConnectorOut: {
+            /** Ok */
+            ok: boolean;
+            /** Fingerprint */
+            fingerprint?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1453,6 +2074,13 @@ export interface components {
             /** Job Id */
             job_id?: number | null;
         };
+        /** IntentCountOut */
+        IntentCountOut: {
+            /** Intent */
+            intent: string;
+            /** Count */
+            count: number;
+        };
         /** JobOut */
         JobOut: {
             /** Id */
@@ -1501,6 +2129,43 @@ export interface components {
         JobsListOut: {
             /** Items */
             items: components["schemas"]["JobOut"][];
+        };
+        /** KPIsOut */
+        KPIsOut: {
+            /** Volume 7D */
+            volume_7d: number;
+            /** Open Threads */
+            open_threads: number;
+            /** Urgent */
+            urgent: number;
+            /** Negative */
+            negative: number;
+        };
+        /** LanePredictionOut */
+        LanePredictionOut: {
+            /** Origin */
+            origin: string;
+            /** Dest */
+            dest: string;
+            /** Equipment */
+            equipment: string | null;
+            /** Price P50 */
+            price_p50: number | null;
+            /** Price P75 */
+            price_p75: number | null;
+            /** Price P90 */
+            price_p90: number | null;
+            /** Season Hint */
+            season_hint: {
+                [key: string]: unknown;
+            };
+            /** Sample Size */
+            sample_size: number;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
         };
         /** LastCallOut */
         LastCallOut: {
@@ -1703,6 +2368,22 @@ export interface components {
              */
             ok: boolean;
         };
+        /** LookalikeOut */
+        LookalikeOut: {
+            /** Broker Domain */
+            broker_domain: string;
+            /** Peer Domain */
+            peer_domain: string;
+            /** Score */
+            score: number;
+        };
+        /** LossReasonOut */
+        LossReasonOut: {
+            /** Reason */
+            reason: string;
+            /** Count */
+            count: number;
+        };
         /** MailStatusOut */
         MailStatusOut: {
             /**
@@ -1806,6 +2487,37 @@ export interface components {
             /** Due At */
             due_at?: string | null;
         };
+        /** NoReplyOut */
+        NoReplyOut: {
+            /** Thread Id */
+            thread_id: string;
+            /** Mailbox */
+            mailbox: string;
+            /** To Email */
+            to_email: string;
+            /** Subject */
+            subject: string;
+            /**
+             * We Sent At
+             * Format: date-time
+             */
+            we_sent_at: string;
+            /** Days Waiting */
+            days_waiting: number;
+            /** Suggested Nudge */
+            suggested_nudge: string;
+        };
+        /** ObjectionOut */
+        ObjectionOut: {
+            /** Broker Domain */
+            broker_domain: string;
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+            /** Exemplar */
+            exemplar: string | null;
+        };
         /** OutcomeHistoryOut */
         OutcomeHistoryOut: {
             /** Lead Id */
@@ -1848,6 +2560,26 @@ export interface components {
             do_next: (components["schemas"]["DoNextCall"] | components["schemas"]["DoNextCapacityMatch"] | components["schemas"]["DoNextNewLead"])[];
             booked_vs_rejected: components["schemas"]["BookedVsRejected"];
             header: components["schemas"]["HeaderActions"];
+        };
+        /** OwnerSwitchIn */
+        OwnerSwitchIn: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Confirm
+             * @description Must equal 'CONFIRM' to flip ON
+             * @default
+             */
+            confirm: string;
+        };
+        /** OwnerSwitchOut */
+        OwnerSwitchOut: {
+            /** Ok */
+            ok: boolean;
+            /** Flag */
+            flag: string;
+            /** Value */
+            value: boolean;
         };
         /** PostIn */
         PostIn: {
@@ -1917,6 +2649,23 @@ export interface components {
             /** Created At */
             created_at: string;
         };
+        /** PredictionsPageOut */
+        PredictionsPageOut: {
+            /** Brokers */
+            brokers: components["schemas"]["BrokerPredictionOut"][];
+            /** Lanes */
+            lanes: components["schemas"]["LanePredictionOut"][];
+            /** Objections */
+            objections: components["schemas"]["ObjectionOut"][];
+            /** Workload */
+            workload: components["schemas"]["WorkloadCellOut"][];
+            /** Thread Age */
+            thread_age: components["schemas"]["ThreadAgeOut"][];
+            /** Loss Reasons */
+            loss_reasons: components["schemas"]["LossReasonOut"][];
+            /** First Touch */
+            first_touch: components["schemas"]["FirstTouchOut"][];
+        };
         /** PromoteIn */
         PromoteIn: {
             /** Candidate Id */
@@ -1982,6 +2731,61 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /** RelationshipOut */
+        RelationshipOut: {
+            /** Broker Domain */
+            broker_domain: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Health Score */
+            health_score: number;
+            /** Inbound */
+            inbound: number;
+            /** Outbound */
+            outbound: number;
+            /** Avg Sentiment */
+            avg_sentiment: number;
+            /** Last Contact At */
+            last_contact_at: string | null;
+            /** Complaints */
+            complaints: number;
+            /** Praise */
+            praise: number;
+        };
+        /** ReplyIn */
+        ReplyIn: {
+            /** Body Text */
+            body_text: string;
+            /**
+             * Body Html
+             * @default
+             */
+            body_html: string;
+        };
+        /** ReplyOut */
+        ReplyOut: {
+            /** Ok */
+            ok: boolean;
+            /** Mode */
+            mode?: string | null;
+            /** Message Id */
+            message_id?: string | null;
+            /** To */
+            to?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ResponseTimeOut */
+        ResponseTimeOut: {
+            /** Ours Median Minutes */
+            ours_median_minutes: number | null;
+            /** Theirs Median Minutes */
+            theirs_median_minutes: number | null;
+            /** Ours Count */
+            ours_count: number;
+            /** Theirs Count */
+            theirs_count: number;
+        };
         /** RetryOut */
         RetryOut: {
             /** Ok */
@@ -2026,6 +2830,17 @@ export interface components {
             thread_id: string | null;
             /** Reason */
             reason?: string | null;
+        };
+        /** SentimentOut */
+        SentimentOut: {
+            /** Positive */
+            positive: number;
+            /** Neutral */
+            neutral: number;
+            /** Negative */
+            negative: number;
+            /** Inbound Total */
+            inbound_total: number;
         };
         /** SettingsOut */
         SettingsOut: {
@@ -2194,6 +3009,44 @@ export interface components {
             /** Items */
             items: components["schemas"]["SourceOut"][];
         };
+        /** StaffOut */
+        StaffOut: {
+            /** Mailbox */
+            mailbox: string;
+            /** Inbound */
+            inbound: number;
+            /** Outbound */
+            outbound: number;
+            /** Reply Speed Minutes */
+            reply_speed_minutes: number | null;
+            /** Dropped Threads */
+            dropped_threads: number;
+        };
+        /** StatusBoardRowOut */
+        StatusBoardRowOut: {
+            /** Thread Id */
+            thread_id: string;
+            /** Mailbox */
+            mailbox: string;
+            /** Subject */
+            subject: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Counterparty */
+            counterparty: string;
+            /** Last Direction */
+            last_direction: string;
+            /** Last Sent At */
+            last_sent_at: string | null;
+            /** Owner User Id */
+            owner_user_id: string | null;
+            /** Stage */
+            stage: string;
+            /** Next Step */
+            next_step: string;
+            /** Message Count */
+            message_count: number;
+        };
         /** SuggestionList */
         SuggestionList: {
             post: components["schemas"]["PostOut"];
@@ -2259,6 +3112,26 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** ThreadAgeOut */
+        ThreadAgeOut: {
+            /** Intent */
+            intent: string;
+            /** Median Minutes */
+            median_minutes: number;
+            /** P90 Minutes */
+            p90_minutes: number;
+            /** Count */
+            count: number;
+        };
+        /** ThreadOut */
+        ThreadOut: {
+            /** Thread Id */
+            thread_id: string;
+            /** Subject */
+            subject: string;
+            /** Messages */
+            messages: components["schemas"]["EmailListItem"][];
+        };
         /** TileCount */
         TileCount: {
             /** Value */
@@ -2271,6 +3144,36 @@ export interface components {
             to_call_today: components["schemas"]["TileCount"];
             new_leads_since_last_crawl: components["schemas"]["NewLeadsTile"];
             loads_booked_90d: components["schemas"]["LoadsBookedTile"];
+        };
+        /** TriageOut */
+        TriageOut: {
+            /** Thread Id */
+            thread_id: string;
+            /** Message Id */
+            message_id: string;
+            /** Mailbox */
+            mailbox: string;
+            /** Subject */
+            subject: string;
+            /** From Addr */
+            from_addr: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Intent */
+            intent: string;
+            /** Urgency */
+            urgency: string;
+            /** Sentiment */
+            sentiment: number;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+            /** Waiting Minutes */
+            waiting_minutes: number;
+            /** Snippet */
+            snippet: string;
         };
         /** UnsubscribeOut */
         UnsubscribeOut: {
@@ -2374,6 +3277,15 @@ export interface components {
             last_verified_at: string | null;
             /** Pipeline Status */
             pipeline_status: string;
+        };
+        /** WorkloadCellOut */
+        WorkloadCellOut: {
+            /** Day */
+            day: number;
+            /** Hour */
+            hour: number;
+            /** Count */
+            count: number;
         };
     };
     responses: never;
@@ -2830,6 +3742,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_gmail_settings_connectors_gmail_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GmailConnectorIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_gmail_settings_connectors_gmail_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GmailConnectorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_switch_settings_connectors_gmail_send_switch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnerSwitchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerSwitchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inbox_source_switch_settings_connectors_gmail_inbox_source_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OwnerSwitchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnerSwitchOut"];
                 };
             };
             /** @description Validation Error */
@@ -3717,6 +4765,737 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MailboxesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_emails_endpoint_inbox_emails_get: {
+        parameters: {
+            query?: {
+                intent?: string | null;
+                q?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailsPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    triage_endpoint_inbox_triage_get: {
+        parameters: {
+            query?: {
+                urgent_only?: boolean;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    no_reply_endpoint_inbox_no_reply_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoReplyOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    response_time_endpoint_inbox_response_time_get: {
+        parameters: {
+            query?: {
+                broker_domain?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponseTimeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    staff_endpoint_inbox_staff_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_kpis_endpoint_inbox_overview_kpis_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KPIsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relationship_endpoint_inbox_relationship__broker_domain__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                broker_domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelationshipOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_endpoint_inbox_threads__thread_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_board_endpoint_inbox_status_board_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusBoardRowOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_draft_endpoint_inbox_threads__thread_id__ai_draft_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiDraftOutModel"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reply_endpoint_inbox_threads__thread_id__reply_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compose_endpoint_inbox_compose_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComposeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_contact_endpoint_inbox_forget_contact_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForgetContactIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForgetContactOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    predictions_endpoint_analysis_predictions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PredictionsPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    broker_predictions_endpoint_analysis_broker_predictions_get: {
+        parameters: {
+            query?: {
+                broker_domain?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrokerPredictionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lane_predictions_endpoint_analysis_lane_predictions_get: {
+        parameters: {
+            query?: {
+                origin?: string | null;
+                dest?: string | null;
+                equipment?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanePredictionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lookalikes_endpoint_analysis_lookalikes__broker_domain__get: {
+        parameters: {
+            query?: {
+                top_n?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                broker_domain: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookalikeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    objections_endpoint_analysis_objections_get: {
+        parameters: {
+            query?: {
+                broker_domain?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObjectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workload_heatmap_endpoint_analysis_workload_heatmap_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkloadCellOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    thread_age_endpoint_analysis_thread_age_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ThreadAgeOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    loss_reasons_endpoint_analysis_loss_reasons_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LossReasonOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    first_touch_endpoint_analysis_first_touch_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirstTouchOut"][];
                 };
             };
             /** @description Validation Error */

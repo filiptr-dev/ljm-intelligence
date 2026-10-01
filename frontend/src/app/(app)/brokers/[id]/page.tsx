@@ -26,6 +26,7 @@ import {
 import { Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { InboxCards } from "./inbox-cards"
 import {
   getBroker,
   getBrokerActivity,
@@ -266,6 +267,7 @@ export default function BrokerDetailPage() {
       >
         <ArrowLeft className="size-4" /> All brokers
       </Link>
+      <InboxCards email={b.primary_email?.value ?? null} />
 
       <div className="mb-5 flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">

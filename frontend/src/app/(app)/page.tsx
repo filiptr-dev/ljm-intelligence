@@ -20,6 +20,7 @@ import { PageHeader, Panel, StatTile } from "@/components/app/ui"
 import { OutcomeColumns } from "@/components/charts/charts"
 import { buttonVariants } from "@/components/ui/button"
 import { getToday, type DoNextRow, type OverviewToday } from "@/lib/api/overview"
+import * as inbox from "@/lib/api/inbox"
 import { cn } from "@/lib/utils"
 import { OverviewRetryButton } from "./overview-retry"
 
@@ -100,6 +101,7 @@ export default async function OverviewPage() {
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
+  const inboxKpis = await inbox.overviewKpis().catch(() => null)
 
   const tiles = data?.tiles
   const doNext = data?.do_next ?? []
@@ -174,6 +176,15 @@ export default async function OverviewPage() {
           }
         />
       </div>
+
+      {inboxKpis ? (
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile label="Volume 7d" value={inboxKpis.volume_7d} sub={<Link href="/emails" className="hover:underline">Open inbox</Link>} />
+          <StatTile label="Open threads" value={inboxKpis.open_threads} sub={<Link href="/messages" className="hover:underline">Status board</Link>} />
+          <StatTile label="Urgent" value={inboxKpis.urgent} sub={<Link href="/emails?intent=urgent_truck" className="hover:underline">Triage</Link>} />
+          <StatTile label="Negative tone" value={inboxKpis.negative} sub={<Link href="/intelligence" className="hover:underline">Analyze</Link>} />
+        </div>
+      ) : null}
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
         <Panel
