@@ -13,8 +13,15 @@ export interface paths {
         };
         /**
          * Health
-         * @description Readiness: process + database. Cold Neon wakes are tolerated by db.ping() (one retry) and
-         *     the generous `db_health_timeout`. Never 500 — return `db:'down'` so the frontend can decide.
+         * @description Readiness: process + database only. Cheap by default.
+         *
+         *     Earlier revisions always ran the ``jobs_health`` aggregate over
+         *     ``procrastinate_jobs`` on every call — a second DB round-trip that
+         *     on Neon cold-wake would blow Render's health-probe window and mark
+         *     the service unhealthy under load. Jobs stats are now opt-in via
+         *     ``?include=jobs`` (the ``/admin/jobs`` page requests them); the
+         *     Render probe just hits the no-param form and gets ``{ok, db}``.
+         *     Never 500 — return ``db:'down'`` so the frontend can decide.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -375,6 +382,26 @@ export interface paths {
         /** Log Outcome */
         post: operations["log_outcome_tools_call_list_outcome_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tools/call-list/outcome/{outcome_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Outcome
+         * @description Undo a just-logged outcome. 404 if the row is already gone (second click).
+         */
+        delete: operations["delete_outcome_tools_call_list_outcome__outcome_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1555,6 +1582,8 @@ export interface components {
             date: string;
             /** Items */
             items: components["schemas"]["CallRowOut"][];
+            /** Logged Outcome Id */
+            logged_outcome_id?: number | null;
         };
         /** CallRowOut */
         CallRowOut: {
@@ -3298,7 +3327,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     health_health_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3312,6 +3343,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4042,6 +4082,40 @@ export interface operations {
                 "application/json": components["schemas"]["OutcomeIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_outcome_tools_call_list_outcome__outcome_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description The CallOutcome.id to undo. */
+                outcome_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

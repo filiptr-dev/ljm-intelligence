@@ -14,15 +14,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CallOutcome, CapacityPost, Lead, SentLog
 from app.pipeline.call_rank import CALLBACK_DEFAULT_OFFSET_DAYS, CallRow, rank_call_list
 
-
 ALLOWED_OUTCOMES = ("booked", "callback", "not_interested", "no_answer")
+
+# Bound the outcomes read window. The ranker only needs recent history
+# (last-call freshness) + any still-open callbacks; older rows don't change
+# today's queue, so pulling the full table was a growing-blob.
+OUTCOMES_LOOKBACK_DAYS = 90
+
+# The operator team runs on US Eastern. UTC "today" rolls at 8pm ET and
+# makes evening calls look like they belong to tomorrow's queue. All call-list
+# dates are now ET.
+_ET = ZoneInfo("America/New_York")
 
 
 class LeadNotFoundError(Exception):
@@ -55,11 +65,20 @@ async def load_and_rank(sessionmaker: Any, today: date, limit: int) -> list[Call
     function is a dumb data pump so all interesting logic stays testable in
     isolation.
     """
+    cutoff = datetime.now(UTC) - timedelta(days=OUTCOMES_LOOKBACK_DAYS)
     async with sessionmaker() as s:
         leads = (
             await s.execute(select(Lead).where(Lead.phone.isnot(None)).where(Lead.phone != ""))
         ).scalars().all()
-        outcomes = (await s.execute(select(CallOutcome))).scalars().all()
+        # Only outcomes the ranker can actually act on: recent history, OR
+        # still-pending callbacks (which can be scheduled further out).
+        outcomes = (
+            await s.execute(
+                select(CallOutcome).where(
+                    or_(CallOutcome.logged_at >= cutoff, CallOutcome.callback_at >= today)
+                )
+            )
+        ).scalars().all()
         posts = (
             await s.execute(select(CapacityPost).where(CapacityPost.status == "open"))
         ).scalars().all()
@@ -86,12 +105,30 @@ async def load_and_rank(sessionmaker: Any, today: date, limit: int) -> list[Call
 
 
 def today_utc() -> date:
-    """UTC today — isolated so tests can monkeypatch.
+    """Today in the operator's working timezone (America/New_York).
 
-    Kept UTC (not ET) because ``logged_at`` is stored as timestamptz; the
-    overview surface uses ET on its own schedule.
+    Name kept for backwards compatibility — call sites that import
+    ``today_utc`` keep working — but the semantics are now ET so the queue
+    does not roll over at 8pm local during EST. ``logged_at`` is still
+    stored as timestamptz; only the "which day is this" boundary moved.
     """
-    return datetime.now(UTC).date()
+    return datetime.now(_ET).date()
+
+
+# Clearer alias for new call sites.
+today_et = today_utc
+
+
+@dataclass
+class LogOutcomeResult:
+    """Return pair for :func:`log_outcome` — the fresh list + the new row's id.
+
+    The id lets the FE show an "Undo" toast that targets the row deterministically
+    (vs. a "latest for this lead" guess that races with another concurrent click).
+    """
+
+    outcome_id: int
+    rows: list[CallRow]
 
 
 async def log_outcome(
@@ -102,8 +139,8 @@ async def log_outcome(
     callback_at: date | None,
     note: str | None,
     today: date,
-) -> list[CallRow]:
-    """Insert a CallOutcome row and return the freshly ranked list (top 25).
+) -> LogOutcomeResult:
+    """Insert a CallOutcome row and return (new id, freshly ranked list of 25).
 
     If the client omitted ``callback_at`` for a ``callback`` outcome, we
     default to ``today + CALLBACK_DEFAULT_OFFSET_DAYS`` so the ranker's
@@ -128,6 +165,34 @@ async def log_outcome(
             logged_at=datetime.now(UTC),
         )
         s.add(row)
+        await s.commit()
+        await s.refresh(row)
+        new_id = int(row.id)
+
+    rows = await load_and_rank(sessionmaker, today, 25)
+    return LogOutcomeResult(outcome_id=new_id, rows=rows)
+
+
+class OutcomeNotFoundError(Exception):
+    """Raised when an outcome id does not exist (undo of a stale/already-deleted row)."""
+
+
+async def delete_outcome(
+    sessionmaker: Any, *, outcome_id: int, today: date
+) -> list[CallRow]:
+    """Delete one CallOutcome row (undo). Returns the freshly ranked list.
+
+    Idempotent in the "already gone" direction — a missing row raises
+    :class:`OutcomeNotFoundError` so the route can lift it to 404; callers
+    that treat 404 as success (second-click undo) still get a consistent view.
+    """
+    async with sessionmaker() as s:
+        row = (
+            await s.execute(select(CallOutcome).where(CallOutcome.id == outcome_id))
+        ).scalar_one_or_none()
+        if row is None:
+            raise OutcomeNotFoundError(str(outcome_id))
+        await s.delete(row)
         await s.commit()
 
     return await load_and_rank(sessionmaker, today, 25)

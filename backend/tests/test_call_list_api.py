@@ -272,3 +272,71 @@ async def test_history_unknown_lead_returns_404(client: AsyncClient):
 async def test_history_missing_lead_id_is_422(client: AsyncClient):
     r = await client.get("/tools/call-list/history")
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /outcome returns the new id; DELETE /outcome/{id} truly undoes
+# ---------------------------------------------------------------------------
+
+
+async def test_post_outcome_returns_logged_outcome_id(client: AsyncClient):
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="MC-UNDO-1")
+    r = await client.post(
+        "/tools/call-list/outcome",
+        json={"lead_id": "MC-UNDO-1", "outcome": "no_answer"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body.get("logged_outcome_id"), int) and body["logged_outcome_id"] >= 1
+
+
+async def test_delete_outcome_undoes_the_row(client: AsyncClient):
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="MC-UNDO-2")
+    posted = await client.post(
+        "/tools/call-list/outcome",
+        json={"lead_id": "MC-UNDO-2", "outcome": "booked"},
+    )
+    oid = posted.json()["logged_outcome_id"]
+
+    r = await client.delete(f"/tools/call-list/outcome/{oid}")
+    assert r.status_code == 200
+    # Second DELETE on the same id → 404 (idempotent-from-caller: nothing to undo).
+    r2 = await client.delete(f"/tools/call-list/outcome/{oid}")
+    assert r2.status_code == 404
+
+    # And the history for the lead is empty again.
+    hist = await client.get("/tools/call-list/history?lead_id=MC-UNDO-2")
+    assert hist.status_code == 200 and hist.json()["items"] == []
+
+
+async def test_outcomes_query_is_bounded_by_lookback(client: AsyncClient, monkeypatch):
+    """A very old outcome outside the 90-day window must not reach the ranker."""
+    from app.prospecting import call_list_service as svc
+
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="MC-OLD")
+    # 400 days ago — comfortably outside the 90d lookback.
+    await _seed_outcome(
+        sm,
+        lead_id="MC-OLD",
+        outcome="booked",
+        logged_at=datetime.now(UTC) - timedelta(days=400),
+    )
+
+    rows = await svc.load_and_rank(sm, TODAY, 25)
+    # Ancient booked rows must not keep the lead off today's list via the
+    # suppression rule — if the bound is working, this lead appears.
+    assert any(r.lead_id == "MC-OLD" for r in rows)
+
+
+def test_today_et_follows_eastern_timezone():
+    """At 23:59 UTC on day D, ET is already 19:59 D (EST) or 19:59 D (EDT) — still D."""
+    from app.prospecting.call_list_service import today_et
+
+    # Smoke: calling it works and returns a date in the operator-local day.
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+
+    assert today_et() == _dt.now(_Z("America/New_York")).date()

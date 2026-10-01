@@ -63,7 +63,13 @@ export type CallRow = {
   last_outcome: LastOutcome | null
 }
 
-export type CallListEnvelope = { date: string; items: CallRow[] }
+export type CallListEnvelope = {
+  date: string
+  items: CallRow[]
+  // Only present on POST /outcome responses — the id of the row we just
+  // inserted. The toast's Undo action calls DELETE /outcome/{id}.
+  logged_outcome_id?: number | null
+}
 
 type OutcomeKind = "booked" | "callback" | "not_interested" | "no_answer"
 
@@ -208,11 +214,32 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
       const stillThere = j.items.some((x) => x.lead_id === selected.lead_id)
       setSelectedId(stillThere ? selected.lead_id : (j.items[0]?.lead_id ?? null))
       setNote("")
+      // Undo action — if the backend handed us the row id, offer a one-click
+      // undo that calls DELETE /outcome/{id}. If the undo fails (already gone,
+      // etc.) we toast an error and leave the list as-is; the user can refresh.
+      const undoableId = j.logged_outcome_id ?? null
       toast.success(`Logged: ${OUTCOME_LABEL[kind]}`, {
         description:
           kind === "callback"
             ? `Returns on ${body.callback_at as string}`
             : `${selected.name} — ${selected.phone}`,
+        action: undoableId
+          ? {
+              label: "Undo",
+              onClick: async () => {
+                try {
+                  const res = await api.DELETE("/tools/call-list/outcome/{outcome_id}", {
+                    params: { path: { outcome_id: undoableId } },
+                  })
+                  if (!res.response.ok || !res.data) throw new Error(`undo ${res.response.status}`)
+                  setEnvelope(res.data as unknown as CallListEnvelope)
+                  toast.success("Undone")
+                } catch (e) {
+                  toast.error("Couldn't undo", { description: String(e) })
+                }
+              },
+            }
+          : undefined,
       })
     } catch (e) {
       toast.error("Couldn't log the outcome", { description: String(e) })

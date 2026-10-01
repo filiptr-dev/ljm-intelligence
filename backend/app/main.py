@@ -152,9 +152,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     router = APIRouter()
 
     @router.get("/health", response_model=Health)
-    async def health(request: Request) -> Health:
-        """Readiness: process + database. Cold Neon wakes are tolerated by db.ping() (one retry) and
-        the generous `db_health_timeout`. Never 500 — return `db:'down'` so the frontend can decide."""
+    async def health(request: Request, include: str | None = None) -> Health:
+        """Readiness: process + database only. Cheap by default.
+
+        Earlier revisions always ran the ``jobs_health`` aggregate over
+        ``procrastinate_jobs`` on every call — a second DB round-trip that
+        on Neon cold-wake would blow Render's health-probe window and mark
+        the service unhealthy under load. Jobs stats are now opt-in via
+        ``?include=jobs`` (the ``/admin/jobs`` page requests them); the
+        Render probe just hits the no-param form and gets ``{ok, db}``.
+        Never 500 — return ``db:'down'`` so the frontend can decide.
+        """
         s: Settings = request.app.state.settings
         db_ok = False
         try:
@@ -163,12 +171,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db_ok = True
         except Exception as exc:  # noqa: BLE001
             log.warning("health: db unreachable: %s", exc)
-        # Queue snapshot (never fails the health check — zeros when the
-        # queue schema isn't installed, e.g. SQLite dev path).
         jobs: JobsHealth | None = None
-        if db_ok:
+        if db_ok and include and "jobs" in include.split(","):
             try:
                 from app.shared.queue import jobs_health
+
                 async with request.app.state.sessionmaker() as sess:
                     j = await jobs_health(sess)
                 jobs = JobsHealth(**j)
@@ -180,6 +187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from fastapi import Depends
 
+    from app.analysis.router import router as analysis_router
     from app.api.ai import router as ai_router
     from app.api.auth import router as auth_router
     from app.api.brokers import router as brokers_router
@@ -190,8 +198,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.enrichment import router as enrichment_router
     from app.api.enrichment import unsub_router as unsubscribe_router
     from app.api.leads import router as leads_router
-    from app.analysis.router import router as analysis_router
-    from app.inbox.router import router as inbox_router
     from app.api.loads import router as loads_router
     from app.api.mail import cron_router as mail_cron_router
     from app.api.mail import router as mail_router
@@ -221,6 +227,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # already run under the admin sentinel in `uow_admin()` and bind the
     # tenant inside the service when they need it.
     from app.identity.dependencies import current_tenant
+    from app.inbox.router import router as inbox_router
 
     user_or_cron = [Depends(require_user_or_cron)]
     user_only = [Depends(current_user), Depends(current_tenant)]

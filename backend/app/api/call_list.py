@@ -14,18 +14,28 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
+from app.pipeline.call_rank import CallRow
 from app.prospecting.call_list_service import (
     ALLOWED_OUTCOMES,
     LeadNotFoundError,
-    get_history as svc_get_history,
-    load_and_rank as svc_load_and_rank,
-    log_outcome as svc_log_outcome,
+    OutcomeNotFoundError,
     today_utc,
 )
-from app.pipeline.call_rank import CallRow
+from app.prospecting.call_list_service import (
+    delete_outcome as svc_delete_outcome,
+)
+from app.prospecting.call_list_service import (
+    get_history as svc_get_history,
+)
+from app.prospecting.call_list_service import (
+    load_and_rank as svc_load_and_rank,
+)
+from app.prospecting.call_list_service import (
+    log_outcome as svc_log_outcome,
+)
 
 # Backwards-compat alias: ``app/api/overview.py`` imported ``_load_and_rank`` from
 # here. Keep the name reachable so the overview route (and any ad-hoc importer)
@@ -59,6 +69,9 @@ class CallRowOut(BaseModel):
 class CallListOut(BaseModel):
     date: str  # today, ISO
     items: list[CallRowOut]
+    # Only present on POST /outcome responses — the id of the row we just
+    # inserted. The FE's undo toast uses it to call DELETE /outcome/{id}.
+    logged_outcome_id: int | None = None
 
 
 class OutcomeIn(BaseModel):
@@ -115,7 +128,7 @@ async def get_call_list(request: Request, limit: int = Query(25, ge=1, le=100)) 
 async def log_outcome(request: Request, body: OutcomeIn) -> CallListOut:
     today = today_utc()
     try:
-        rows = await svc_log_outcome(
+        result = await svc_log_outcome(
             request.app.state.sessionmaker,
             lead_id=body.lead_id,
             outcome=body.outcome,
@@ -125,6 +138,26 @@ async def log_outcome(request: Request, body: OutcomeIn) -> CallListOut:
         )
     except LeadNotFoundError as exc:
         raise HTTPException(404, "lead not found") from exc
+    return CallListOut(
+        date=today.isoformat(),
+        items=[_row_out(r) for r in result.rows],
+        logged_outcome_id=result.outcome_id,
+    )
+
+
+@router.delete("/outcome/{outcome_id}", response_model=CallListOut)
+async def delete_outcome(
+    request: Request,
+    outcome_id: int = Path(..., ge=1, description="The CallOutcome.id to undo."),
+) -> CallListOut:
+    """Undo a just-logged outcome. 404 if the row is already gone (second click)."""
+    today = today_utc()
+    try:
+        rows = await svc_delete_outcome(
+            request.app.state.sessionmaker, outcome_id=outcome_id, today=today
+        )
+    except OutcomeNotFoundError as exc:
+        raise HTTPException(404, "outcome not found") from exc
     return CallListOut(date=today.isoformat(), items=[_row_out(r) for r in rows])
 
 
