@@ -14,8 +14,10 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import AiUsageLog
 from app.integrations.adapters.ai.provider import ProviderCall
+from app.models import AiUsageLog
+from app.shared.orm import LJM_TENANT_ID
+from app.shared.tenant import ADMIN_SENTINEL, _tenant_ctx
 
 log = logging.getLogger(__name__)
 
@@ -34,9 +36,18 @@ async def record(
     input_hash: str | None = None,
     compare_id: str | None = None,
 ) -> None:
-    """Write one usage row. Never raises."""
+    """Write one usage row. Never raises.
+
+    `tenant_id` is set explicitly from the contextvar — the `TenantMixin`
+    event listener would stamp this anyway, but naming it on the row makes
+    the audit trail legible (and keeps the admin-sentinel / fresh-boot path
+    from relying on the DB default silently).
+    """
+    tenant = _tenant_ctx.get()
+    tenant_id = tenant if tenant and tenant != ADMIN_SENTINEL else LJM_TENANT_ID
     try:
         row = AiUsageLog(
+            tenant_id=tenant_id,
             feature=feature[:48],
             provider=(call.provider or "null")[:16],
             model=(call.model or "none")[:64],

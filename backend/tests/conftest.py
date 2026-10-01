@@ -118,10 +118,20 @@ _orig_create_app = _main_mod.create_app
 
 def _install_auth_bypass(app):
     from app.auth.deps import UserPrincipal, current_user, require_user_or_cron
+    from app.identity.dependencies import current_tenant
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.tenant import TenantId, set_tenant
 
     principal = UserPrincipal(id="01TEST000000000000000OWNER", email="test@ljm-demo.local", role="owner")
     app.dependency_overrides[current_user] = lambda: principal
     app.dependency_overrides[require_user_or_cron] = lambda: principal
+
+    def _test_current_tenant():
+        tenant = TenantId(LJM_TENANT_ID)
+        set_tenant(tenant)
+        return tenant
+
+    app.dependency_overrides[current_tenant] = _test_current_tenant
     return app
 
 

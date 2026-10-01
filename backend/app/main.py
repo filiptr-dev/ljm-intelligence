@@ -151,8 +151,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # shipper-finder, email, call-list, capacity, enrichment reads — requires
     # a bearer. ``/health`` is standalone. The unsubscribe router stays open
     # (recipients are never logged in).
+    # Attach `current_tenant` on every authenticated user route so RLS
+    # (`set_config('app.tenant_id', …, true)`) binds for the whole request
+    # before any handler query runs. The dep is additive — `current_user`
+    # already resolves the principal; `current_tenant` resolves the tenant
+    # from that principal and stamps the session.
+    #
+    # ``user_or_cron`` routes cannot use `current_tenant` as a router dep
+    # because `require_user_or_cron` returns None in the cron path. Those
+    # handlers (crawl, enrichment auto-send, mail cron, loads refresh)
+    # already run under the admin sentinel in `uow_admin()` and bind the
+    # tenant inside the service when they need it.
+    from app.identity.dependencies import current_tenant
+
     user_or_cron = [Depends(require_user_or_cron)]
-    user_only = [Depends(current_user)]
+    user_only = [Depends(current_user), Depends(current_tenant)]
 
     app.include_router(auth_router)
     app.include_router(crawl_router, dependencies=user_or_cron)

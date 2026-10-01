@@ -242,27 +242,20 @@ async def run_crawl(
         # is True (default False). Own try/except so a bad send-day never rolls
         # back enrichment. Loud status in `crawl_runs.counts`.
         try:
-            from app.api.enrichment import AutoSendIn, _auto_send_impl
             from app.models import SettingsRow
+            from app.outreach.service import auto_send
 
             async with sessionmaker() as _s:
                 cfg = (await _s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
             if cfg is None or not cfg.auto_outreach_enabled:
                 counts["auto_outreach_status"] = "disabled"
             else:
-                # Fake request object — _auto_send_impl reads only app.state.
-                class _AppState:
-                    def __init__(self):
-                        self.settings = settings
-                        self.sessionmaker = sessionmaker
-
-                class _App:
-                    state = _AppState()
-
-                class _Req:
-                    app = _App()
-
-                result = await _auto_send_impl(_Req(), AutoSendIn(dry_run=False))
+                # Direct service call — no more fake-request `_Req`/`_AppState`
+                # dance. The pipeline is not an HTTP route; it talks to the
+                # outreach service directly like any other in-process caller.
+                result = await auto_send(
+                    sessionmaker=sessionmaker, settings=settings, dry_run=False
+                )
                 counts["auto_outreach_status"] = result.status
                 counts["auto_outreach_sent"] = result.sent
                 counts["auto_outreach_skipped_suppressed"] = result.skipped_suppressed

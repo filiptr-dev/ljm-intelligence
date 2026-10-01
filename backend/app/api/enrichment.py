@@ -382,118 +382,31 @@ def _within_window(now_hour: int, start_h: int, end_h: int) -> bool:
 
 
 async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) -> AutoSendOut:
-    """Auto-outreach worker. Real send is done via `sender(to, subject, body)`;
-    tests pass a mock. Compliance rules (mandatory):
+    """Thin shim — delegates to `app.outreach.service.auto_send`.
 
-      * `outreach_postal_address` must be non-empty (CAN-SPAM footer).
-      * Every email ALWAYS gets the unsubscribe footer + List-Unsubscribe headers,
-        built from the fixed public base URL (never the request host). If the
-        link cannot be built (no secret), nothing sends: `no_unsub_config`.
-      * A contact in `suppression` (any reason) is skipped, not sent.
-      * Only contacts at `pipeline_status == settings.auto_outreach_status_filter` qualify.
-      * Daily cap counted from `sent_log.sent_at` today (UTC).
-      * Nothing sends if `auto_outreach_enabled` is False.
+    Kept so the test suite's existing patch surface (`_auto_send_impl`) and
+    the compliance-rule docstring stay reachable from the route; new callers
+    (the crawl pipeline, future queue jobs) should call the service directly.
     """
+    from app.outreach.service import auto_send as _service_auto_send
+
     settings: Settings = request.app.state.settings
     sessionmaker = request.app.state.sessionmaker
-    now = datetime.now(UTC)
-    async with sessionmaker() as s:
-        cfg = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
-    if cfg is None or not cfg.auto_outreach_enabled:
-        return AutoSendOut(status="disabled", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
-    if not (settings.outreach_postal_address or "").strip():
-        return AutoSendOut(status="no_footer", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
-    if cfg.auto_outreach_template_id is None:
-        return AutoSendOut(status="no_template", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
-    # Send-time fence: if the unsubscribe link cannot be built (no HMAC secret
-    # in env or DB, or a blanked base URL override), refuse. Zero writes, zero
-    # sender() calls.
-    unsub_secret, unsub_base = effective_unsub(settings, cfg)
-    if not unsub_secret or not unsub_base:
-        return AutoSendOut(status="no_unsub_config", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
+    result = await _service_auto_send(
+        sessionmaker=sessionmaker,
+        settings=settings,
+        dry_run=body.dry_run,
+        sender=sender,
+        now_hour_override=body.now_hour_override,
+    )
+    return AutoSendOut(
+        status=result.status,
+        sent=result.sent,
+        skipped_suppressed=result.skipped_suppressed,
+        skipped_cap=result.skipped_cap,
+        dry_run=result.dry_run,
+    )
 
-    now_hour = body.now_hour_override if body.now_hour_override is not None else now.hour
-    if not _within_window(now_hour, cfg.auto_outreach_window_start_h, cfg.auto_outreach_window_end_h):
-        return AutoSendOut(status="outside_window", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
-
-    async with sessionmaker() as s:
-        # Today's send count.
-        today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
-        sent_today = (
-            await s.execute(select(func.count()).select_from(SentLog).where(SentLog.sent_at >= today_start))
-        ).scalar_one()
-        remaining = max(0, cfg.auto_outreach_daily_cap - int(sent_today or 0))
-        if remaining == 0:
-            return AutoSendOut(status="ok", sent=0, skipped_suppressed=0, skipped_cap=0, dry_run=body.dry_run)
-
-        # Candidate contacts. Join to the lead so we can filter/order by
-        # `fit_score`: unscored leads (`NULL`) are dropped, and the daily cap
-        # goes to the highest-fit contacts first. This is what makes the
-        # Settings panel's "high-fit leads are contacted automatically" claim
-        # actually true — the fit-weight sliders now change *who* gets emailed.
-        stmt = (
-            select(LeadContact)
-            .join(Lead, Lead.id == LeadContact.lead_id)
-            .where(LeadContact.pipeline_status == cfg.auto_outreach_status_filter)
-            .where(LeadContact.email.is_not(None))
-            .where(Lead.fit_score.is_not(None))
-            .where(Lead.fit_score >= cfg.auto_outreach_min_fit)
-            .order_by(Lead.fit_score.desc(), LeadContact.id)
-        )
-        candidates = (await s.execute(stmt)).scalars().all()
-
-        # Suppression set (any reason).
-        supp = (await s.execute(select(Suppression.email))).scalars().all()
-        suppressed = {e.lower() for e in supp if e}
-
-        sent = 0
-        skipped_supp = 0
-        skipped_cap = 0
-        for c in candidates:
-            email = (c.email or "").lower()
-            if not email or email in suppressed:
-                skipped_supp += 1
-                continue
-            if sent >= remaining:
-                skipped_cap += 1
-                continue
-
-            # Render body — kept trivial; a fuller renderer would fetch the template
-            # row and render tokens. For this build, tests exercise send-decisions,
-            # not template body content.
-            subject = "Trucking capacity"
-            # Footer + RFC 8058 headers are unconditional — not a setting.
-            unsub = build_unsub_link(unsub_secret, unsub_base, c.id)
-            body_text = with_unsub_footer(
-                "Hello,\n\nLJM International runs dry vans across the eastern US. "
-                "Reply if you have freight moving in the next couple of weeks.",
-                postal_address=settings.outreach_postal_address,
-                unsub_url=unsub,
-            )
-            headers = unsub_headers(unsub)
-
-            if not body.dry_run:
-                if sender is not None:
-                    await sender(email, subject, body_text, headers=headers)
-                s.add(
-                    SentLog(
-                        lead_id=c.lead_id,
-                        template_id=cfg.auto_outreach_template_id,
-                        mode="real" if not settings.simulated_delivery else "simulated",
-                        to_email=email,
-                        subject=subject,
-                        body=body_text,
-                        contact_id=c.id,
-                    )
-                )
-                await mark_contact_contacted(s, c.id, now=now)
-            sent += 1
-
-        if not body.dry_run:
-            await s.commit()
-        return AutoSendOut(
-            status="ok", sent=sent, skipped_suppressed=skipped_supp, skipped_cap=skipped_cap, dry_run=body.dry_run
-        )
 
 
 @router.post("/auto-send", response_model=AutoSendOut)

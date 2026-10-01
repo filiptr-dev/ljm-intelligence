@@ -34,10 +34,16 @@ async def current_tenant(
     tenant = TenantId(value)
     set_tenant(tenant)
     # Bind for RLS inside this transaction (bound param — no f-string).
-    await session.execute(
-        text("SELECT set_config('app.tenant_id', :tid, true)"),
-        {"tid": str(tenant)},
-    )
+    # `set_config` is PG-only; the sqlite test harness has no such function.
+    # RLS policies only apply on Postgres anyway, so skipping on sqlite is
+    # a no-op loss.
+    bind = session.get_bind() if hasattr(session, "get_bind") else None
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect_name == "postgresql":
+        await session.execute(
+            text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant)},
+        )
     return tenant
 
 
