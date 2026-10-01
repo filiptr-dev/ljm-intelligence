@@ -14,10 +14,10 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.lib.circuit_breaker import CircuitBreaker
-from app.sources.loads.chr import ChrSource
-from app.sources.loads.dat import DatSource
-from app.sources.loads.loadboard123 import LoadBoard123Source
-from app.sources.loads.truckstop import TruckstopSource
+from app.integrations.adapters.loadboard.chr import ChrSource
+from app.integrations.adapters.loadboard.dat import DatSource
+from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source
+from app.integrations.adapters.loadboard.truckstop import TruckstopSource
 
 
 def test_fresh_breaker_is_closed() -> None:
@@ -151,10 +151,10 @@ def _enabled_settings() -> Settings:
 @pytest.mark.parametrize(
     "cls, module_path",
     [
-        (DatSource, "app.sources.loads.dat"),
-        (ChrSource, "app.sources.loads.chr"),
-        (LoadBoard123Source, "app.sources.loads.loadboard123"),
-        (TruckstopSource, "app.sources.loads.truckstop"),
+        (DatSource, "app.integrations.adapters.loadboard.dat"),
+        (ChrSource, "app.integrations.adapters.loadboard.chr"),
+        (LoadBoard123Source, "app.integrations.adapters.loadboard.loadboard123"),
+        (TruckstopSource, "app.integrations.adapters.loadboard.truckstop"),
     ],
 )
 async def test_adapter_fetch_short_circuits_when_breaker_open(

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from app.sources.loads.ai_page import AiPageSource
-from app.sources.loads.base import LoadSource
-from app.sources.loads.chr import ChrSource
-from app.sources.loads.dat import DatSource
-from app.sources.loads.loadboard123 import LoadBoard123Source
-from app.sources.loads.paste import PasteSource
-from app.sources.loads.truckstop import TruckstopSource
+from app.integrations.adapters.loadboard.ai_page import AiPageSource
+from app.integrations.adapters.loadboard.base import LoadSource
+from app.integrations.adapters.loadboard.chr import ChrSource
+from app.integrations.adapters.loadboard.dat import DatSource
+from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source
+from app.integrations.adapters.loadboard.paste import PasteSource
+from app.integrations.adapters.loadboard.truckstop import TruckstopSource
 
 
 def all_sources(settings) -> list[LoadSource]:

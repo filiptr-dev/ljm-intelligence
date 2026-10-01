@@ -31,7 +31,7 @@ from app.models import CrawlRun, Lead
 from app.pipeline import gemini_stage as gemini_stage_mod
 from app.pipeline import run as run_mod
 from app.pipeline.run import run_crawl
-from app.sources.fmcsa import DiscoveredLead
+from app.integrations.adapters.enrichment.fmcsa import DiscoveredLead
 
 # ---------- fixtures / helpers ------------------------------------------------
 

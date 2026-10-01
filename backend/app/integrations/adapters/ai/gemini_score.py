@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from pydantic import SecretStr
 
-from app.sources.provider import LLMProvider, NullProvider, get_for
+from app.integrations.adapters.ai.provider import LLMProvider, NullProvider, get_for
 
 log = logging.getLogger(__name__)
 

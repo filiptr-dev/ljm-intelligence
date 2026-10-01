@@ -18,8 +18,8 @@ from sqlalchemy.exc import IntegrityError
 from app.api._auth import check_secret
 from app.config import Settings
 from app.models import Load, SettingsRow
-from app.sources.loads.base import ConnectionTest, RawLoad
-from app.sources.loads.registry import all_sources, by_kind, enabled_sources
+from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
+from app.integrations.adapters.loadboard.registry import all_sources, by_kind, enabled_sources
 
 log = logging.getLogger(__name__)
 

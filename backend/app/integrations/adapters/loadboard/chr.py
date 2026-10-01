@@ -1,8 +1,6 @@
-"""DAT One API adapter — service-account two-step token exchange.
+"""C.H. Robinson Navisphere Carrier adapter — OAuth2 client-credentials.
 
-Field names marked (verify at access day) — DAT's dev-portal OpenAPI is gated
-behind the service-account mail. The ``map_dat_row`` function is the one place
-to adjust when the live spec lands.
+Field mapping marked (verify at access day) — CHR portal docs are gated.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from datetime import datetime
 import httpx
 
 from app.lib.circuit_breaker import CircuitBreaker
-from app.sources.loads.base import ConnectionTest, RawLoad
+from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
 
@@ -28,46 +26,41 @@ def _parse_dt(value) -> datetime | None:
         return None
 
 
-def map_dat_row(row: dict) -> RawLoad:
+def map_chr_row(row: dict) -> RawLoad:
     origin = row.get("origin") or {}
     dest = row.get("destination") or {}
     contact = row.get("contact") or {}
-    posters = row.get("postersCompany") or {}
-    rate_info = row.get("rateInfo") or {}
-    trip = row.get("tripDistance") or {}
-    avail = row.get("availability") or {}
-    miles = trip.get("miles")
     return RawLoad(
-        source="dat",
-        source_ref=str(row.get("matchId") or row.get("id") or ""),
-        broker_name=str(posters.get("name") or ""),
+        source="chr",
+        source_ref=str(row.get("load_id") or row.get("id") or ""),
+        broker_name="C.H. Robinson",
         broker_email=contact.get("email"),
         broker_phone=contact.get("phone"),
         origin_city=origin.get("city"),
-        origin_state=origin.get("stateProv"),
+        origin_state=origin.get("state"),
         dest_city=dest.get("city"),
-        dest_state=dest.get("stateProv"),
-        pickup_date=_parse_dt(avail.get("earliestWhen")),
-        equipment=row.get("equipmentType"),
-        rate_usd=rate_info.get("rateUsd"),
-        miles=int(miles) if isinstance(miles, (int, float)) else None,
-        posted_at=_parse_dt(row.get("postedWhen")),
+        dest_state=dest.get("state"),
+        pickup_date=_parse_dt(row.get("pickup_date")),
+        equipment=row.get("equipment"),
+        rate_usd=row.get("rate_usd"),
+        miles=row.get("miles"),
+        posted_at=_parse_dt(row.get("posted_at")),
         raw=row,
     )
 
 
-class DatSource:
-    kind: str = "dat"
+class ChrSource:
+    kind: str = "chr"
 
     def __init__(self, settings) -> None:
         self.settings = settings
-        self._org_token: tuple[str, float] | None = None  # (token, expires_monotonic)
+        self._token: tuple[str, float] | None = None
         self._breaker = CircuitBreaker()
 
     @property
     def enabled(self) -> bool:
         s = self.settings
-        return bool(s.dat_service_account_email and s.dat_service_account_password and s.dat_org_id)
+        return bool(s.chr_client_id and s.chr_client_secret and s.chr_carrier_code)
 
     def reason(self) -> str | None:
         if self._breaker.is_open():
@@ -76,31 +69,34 @@ class DatSource:
             return None
         missing = []
         s = self.settings
-        if not s.dat_service_account_email:
-            missing.append("DAT_SERVICE_ACCOUNT_EMAIL")
-        if not s.dat_service_account_password:
-            missing.append("DAT_SERVICE_ACCOUNT_PASSWORD")
-        if not s.dat_org_id:
-            missing.append("DAT_ORG_ID")
+        if not s.chr_client_id:
+            missing.append("CHR_CLIENT_ID")
+        if not s.chr_client_secret:
+            missing.append("CHR_CLIENT_SECRET")
+        if not s.chr_carrier_code:
+            missing.append("CHR_CARRIER_CODE")
         return f"missing_env:{','.join(missing)}"
 
-    async def _org_token_get(self, client: httpx.AsyncClient) -> str:
+    async def _token_get(self, client: httpx.AsyncClient) -> str:
         now = time.monotonic()
-        if self._org_token and self._org_token[1] > now + 60:
-            return self._org_token[0]
+        if self._token and self._token[1] > now + 60:
+            return self._token[0]
         s = self.settings
         resp = await client.post(
-            f"{s.dat_base_url}/auth/v2/token/organization",
-            json={
-                "username": s.dat_service_account_email,
-                "password": s.dat_service_account_password.get_secret_value(),
-                "organizationId": s.dat_org_id,
+            f"{s.chr_base_url}/oauth2/v2.0/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": s.chr_client_id,
+                "client_secret": s.chr_client_secret.get_secret_value(),
+                "scope": s.chr_scope,
             },
             timeout=httpx.Timeout(10.0, read=20.0),
         )
         resp.raise_for_status()
-        token = str(resp.json().get("accessToken") or resp.json().get("token") or "")
-        self._org_token = (token, now + 23 * 3600)
+        body = resp.json()
+        token = str(body.get("access_token") or "")
+        expires_in = int(body.get("expires_in") or 1800)
+        self._token = (token, now + expires_in - 60)
         return token
 
     async def fetch(self, settings) -> list[RawLoad]:
@@ -110,16 +106,16 @@ class DatSource:
             return []
         try:
             async with httpx.AsyncClient() as client:
-                _ = await self._org_token_get(client)
+                _ = await self._token_get(client)
                 self._breaker.record_success()
-                return []  # live search body goes here on access day
+                return []
         except httpx.HTTPStatusError as exc:
             self._breaker.record_failure(exc.response.status_code)
-            log.warning("dat/fetch: %s", exc)
+            log.warning("chr/fetch: %s", exc)
             return []
         except Exception as exc:  # noqa: BLE001 — network / timeout / parse
             self._breaker.record_failure(None)
-            log.warning("dat/fetch: %s", exc)
+            log.warning("chr/fetch: %s", exc)
             return []
 
     async def test_connection(self, settings) -> ConnectionTest:
@@ -128,10 +124,10 @@ class DatSource:
         t0 = time.monotonic()
         try:
             async with httpx.AsyncClient() as client:
-                await self._org_token_get(client)
+                await self._token_get(client)
             return ConnectionTest(ok=True, latency_ms=int((time.monotonic() - t0) * 1000), sample_count=0)
         except Exception as exc:  # noqa: BLE001
             return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=str(exc))
 
 
-__all__ = ["DatSource", "map_dat_row"]
+__all__ = ["ChrSource", "map_chr_row"]

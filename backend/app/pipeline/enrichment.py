@@ -55,7 +55,7 @@ from app.sources.linkedin_search import (
     find_company_page,
     find_decision_makers,
 )
-from app.sources.provider import LLMProvider, NullProvider, get_for
+from app.integrations.adapters.ai.provider import LLMProvider, NullProvider, get_for
 from app.sources.site_scraper import scrape_site
 
 log = logging.getLogger(__name__)

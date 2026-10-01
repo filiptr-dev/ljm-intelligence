@@ -51,7 +51,7 @@ async def test_email_draft_uses_gemini_when_key_present() -> None:
     from pydantic import SecretStr
 
     from app.config import Settings
-    from app.sources.provider import ProviderCall
+    from app.integrations.adapters.ai.provider import ProviderCall
 
     settings = Settings().model_copy(
         update={"gemini_api_key": SecretStr("fake-key"), "anthropic_api_key": SecretStr("fake-key")}
@@ -75,7 +75,7 @@ async def test_email_draft_uses_gemini_when_key_present() -> None:
         )
 
     # email_drafts defaults to Gemini; patch Gemini's seam.
-    with patch("app.sources.provider.GeminiProvider.generate_json", new=fake_generate_json):
+    with patch("app.integrations.adapters.ai.provider.GeminiProvider.generate_json", new=fake_generate_json):
         async with app.router.lifespan_context(app):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -103,7 +103,7 @@ async def test_email_draft_falls_back_on_gemini_error() -> None:
     from pydantic import SecretStr
 
     from app.config import Settings
-    from app.sources.provider import ProviderCall
+    from app.integrations.adapters.ai.provider import ProviderCall
 
     settings = Settings().model_copy(
         update={"gemini_api_key": SecretStr("fake-key"), "anthropic_api_key": SecretStr("fake-key")}
@@ -124,7 +124,7 @@ async def test_email_draft_falls_back_on_gemini_error() -> None:
             error="upstream 429",
         )
 
-    with patch("app.sources.provider.GeminiProvider.generate_json", new=boom):
+    with patch("app.integrations.adapters.ai.provider.GeminiProvider.generate_json", new=boom):
         async with app.router.lifespan_context(app):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as c:

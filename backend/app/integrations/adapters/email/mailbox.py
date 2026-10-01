@@ -15,8 +15,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from app.config import Settings
-from app.mail.credentials import build_delegated_credentials, load_sa_info
-from app.mail.ratelimit import MailboxLimiter
+from app.integrations.adapters.email.credentials import build_delegated_credentials, load_sa_info
+from app.integrations.adapters.email.ratelimit import MailboxLimiter
 
 log = logging.getLogger(__name__)
 

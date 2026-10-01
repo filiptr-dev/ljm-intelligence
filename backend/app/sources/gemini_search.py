@@ -20,7 +20,7 @@ from pydantic import SecretStr
 
 from app.region import IN_REGION_STATES
 from app.sources.emails import normalize_email
-from app.sources.provider import GeminiProvider, LLMProvider, NullProvider
+from app.integrations.adapters.ai.provider import GeminiProvider, LLMProvider, NullProvider
 
 log = logging.getLogger(__name__)
 

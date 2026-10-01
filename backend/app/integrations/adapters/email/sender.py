@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 import anyio
 
 from app.config import Settings
-from app.mail.credentials import build_delegated_credentials, load_sa_info, test_refresh
+from app.integrations.adapters.email.credentials import build_delegated_credentials, load_sa_info, test_refresh
 
 log = logging.getLogger(__name__)
 

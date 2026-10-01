@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.mail.mailbox import MailboxSource, RawMessage
+from app.integrations.adapters.email.mailbox import MailboxSource, RawMessage
 from app.models import MailCursor, MailMessage
 
 log = logging.getLogger(__name__)

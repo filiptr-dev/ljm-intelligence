@@ -1,6 +1,6 @@
-"""C.H. Robinson Navisphere Carrier adapter — OAuth2 client-credentials.
+"""Truckstop Load Board Pro adapter — IntegrationId/User/Password headers.
 
-Field mapping marked (verify at access day) — CHR portal docs are gated.
+(Verify at access day — Truckstop ships per-tenant docs after the SIA.)
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from datetime import datetime
 import httpx
 
 from app.lib.circuit_breaker import CircuitBreaker
-from app.sources.loads.base import ConnectionTest, RawLoad
+from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
 
@@ -26,41 +26,39 @@ def _parse_dt(value) -> datetime | None:
         return None
 
 
-def map_chr_row(row: dict) -> RawLoad:
+def map_truckstop_row(row: dict) -> RawLoad:
     origin = row.get("origin") or {}
     dest = row.get("destination") or {}
-    contact = row.get("contact") or {}
     return RawLoad(
-        source="chr",
-        source_ref=str(row.get("load_id") or row.get("id") or ""),
-        broker_name="C.H. Robinson",
-        broker_email=contact.get("email"),
-        broker_phone=contact.get("phone"),
+        source="truckstop",
+        source_ref=str(row.get("loadId") or row.get("id") or ""),
+        broker_name=str(row.get("postersCompanyName") or ""),
+        broker_email=row.get("contactEmail"),
+        broker_phone=row.get("contactPhone"),
         origin_city=origin.get("city"),
-        origin_state=origin.get("state"),
+        origin_state=origin.get("stateProvince"),
         dest_city=dest.get("city"),
-        dest_state=dest.get("state"),
-        pickup_date=_parse_dt(row.get("pickup_date")),
+        dest_state=dest.get("stateProvince"),
+        pickup_date=_parse_dt(row.get("pickupDate")),
         equipment=row.get("equipment"),
-        rate_usd=row.get("rate_usd"),
+        rate_usd=row.get("rate"),
         miles=row.get("miles"),
-        posted_at=_parse_dt(row.get("posted_at")),
+        posted_at=_parse_dt(row.get("postedAt")),
         raw=row,
     )
 
 
-class ChrSource:
-    kind: str = "chr"
+class TruckstopSource:
+    kind: str = "truckstop"
 
     def __init__(self, settings) -> None:
         self.settings = settings
-        self._token: tuple[str, float] | None = None
         self._breaker = CircuitBreaker()
 
     @property
     def enabled(self) -> bool:
         s = self.settings
-        return bool(s.chr_client_id and s.chr_client_secret and s.chr_carrier_code)
+        return bool(s.truckstop_integration_id and s.truckstop_username and s.truckstop_password)
 
     def reason(self) -> str | None:
         if self._breaker.is_open():
@@ -69,35 +67,21 @@ class ChrSource:
             return None
         missing = []
         s = self.settings
-        if not s.chr_client_id:
-            missing.append("CHR_CLIENT_ID")
-        if not s.chr_client_secret:
-            missing.append("CHR_CLIENT_SECRET")
-        if not s.chr_carrier_code:
-            missing.append("CHR_CARRIER_CODE")
+        if not s.truckstop_integration_id:
+            missing.append("TRUCKSTOP_INTEGRATION_ID")
+        if not s.truckstop_username:
+            missing.append("TRUCKSTOP_USERNAME")
+        if not s.truckstop_password:
+            missing.append("TRUCKSTOP_PASSWORD")
         return f"missing_env:{','.join(missing)}"
 
-    async def _token_get(self, client: httpx.AsyncClient) -> str:
-        now = time.monotonic()
-        if self._token and self._token[1] > now + 60:
-            return self._token[0]
+    def _headers(self) -> dict:
         s = self.settings
-        resp = await client.post(
-            f"{s.chr_base_url}/oauth2/v2.0/token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": s.chr_client_id,
-                "client_secret": s.chr_client_secret.get_secret_value(),
-                "scope": s.chr_scope,
-            },
-            timeout=httpx.Timeout(10.0, read=20.0),
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        token = str(body.get("access_token") or "")
-        expires_in = int(body.get("expires_in") or 1800)
-        self._token = (token, now + expires_in - 60)
-        return token
+        return {
+            "IntegrationId": s.truckstop_integration_id.get_secret_value(),
+            "User": s.truckstop_username or "",
+            "Password": s.truckstop_password.get_secret_value(),
+        }
 
     async def fetch(self, settings) -> list[RawLoad]:
         if not self.enabled:
@@ -106,16 +90,22 @@ class ChrSource:
             return []
         try:
             async with httpx.AsyncClient() as client:
-                _ = await self._token_get(client)
+                resp = await client.get(
+                    f"{self.settings.truckstop_base_url}/loads/search",
+                    params={"limit": 0},
+                    headers=self._headers(),
+                    timeout=httpx.Timeout(10.0, read=20.0),
+                )
+                resp.raise_for_status()
                 self._breaker.record_success()
                 return []
         except httpx.HTTPStatusError as exc:
             self._breaker.record_failure(exc.response.status_code)
-            log.warning("chr/fetch: %s", exc)
+            log.warning("truckstop/fetch: %s", exc)
             return []
         except Exception as exc:  # noqa: BLE001 — network / timeout / parse
             self._breaker.record_failure(None)
-            log.warning("chr/fetch: %s", exc)
+            log.warning("truckstop/fetch: %s", exc)
             return []
 
     async def test_connection(self, settings) -> ConnectionTest:
@@ -124,10 +114,16 @@ class ChrSource:
         t0 = time.monotonic()
         try:
             async with httpx.AsyncClient() as client:
-                await self._token_get(client)
+                resp = await client.get(
+                    f"{self.settings.truckstop_base_url}/loads/search",
+                    params={"limit": 1},
+                    headers=self._headers(),
+                    timeout=httpx.Timeout(10.0, read=20.0),
+                )
+                resp.raise_for_status()
             return ConnectionTest(ok=True, latency_ms=int((time.monotonic() - t0) * 1000), sample_count=0)
         except Exception as exc:  # noqa: BLE001
             return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=str(exc))
 
 
-__all__ = ["ChrSource", "map_chr_row"]
+__all__ = ["TruckstopSource", "map_truckstop_row"]

@@ -21,7 +21,7 @@ from pydantic import SecretStr
 from app.config import Settings
 from app.main import create_app
 from app.services.ai_usage import record
-from app.sources.provider import (
+from app.integrations.adapters.ai.provider import (
     ALLOWED_MODELS,
     DEFAULT_FEATURES,
     CapabilityUnavailable,
@@ -149,7 +149,7 @@ async def test_gemini_adapter_generate_json_mocked() -> None:
         async def post(self, url, params=None, json=None):
             return FakeResp()
 
-    with patch("app.sources.provider.httpx.AsyncClient", FakeClient):
+    with patch("app.integrations.adapters.ai.provider.httpx.AsyncClient", FakeClient):
         call = await p.generate_json("score this")
 
     assert call.status == "ok"

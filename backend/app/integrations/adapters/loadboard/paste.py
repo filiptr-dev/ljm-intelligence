@@ -6,7 +6,7 @@ v1 just reports enabled + empty; the owner UI drops rows directly into
 
 from __future__ import annotations
 
-from app.sources.loads.base import ConnectionTest, RawLoad
+from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 
 class PasteSource:

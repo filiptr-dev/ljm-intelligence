@@ -19,7 +19,7 @@ from app.config import Settings
 from app.models import Lead, SettingsRow
 from app.outreach.brand import render_branded_email
 from app.services.ai_usage import hash_prompt, record
-from app.sources.provider import NullProvider, get_for
+from app.integrations.adapters.ai.provider import NullProvider, get_for
 
 log = logging.getLogger(__name__)
 
@@ -318,7 +318,7 @@ async def draft_email(payload: DraftIn, request: Request) -> DraftOut:
 
 from pydantic import EmailStr
 
-from app.mail.sender import get_mail_sender
+from app.integrations.adapters.email.sender import get_mail_sender
 from app.models import SentLog
 
 

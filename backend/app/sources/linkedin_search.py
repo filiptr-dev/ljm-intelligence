@@ -29,7 +29,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.sources.provider import LLMProvider, NullProvider
+from app.integrations.adapters.ai.provider import LLMProvider, NullProvider
 
 log = logging.getLogger(__name__)
 

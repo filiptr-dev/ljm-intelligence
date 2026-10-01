@@ -51,7 +51,7 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     plan: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'standard'"))
-    settings: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'::json"))
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -82,7 +82,7 @@ class TenantCredential(Base):
     connector: Mapped[str] = mapped_column(String(64), nullable=False)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     secret_enc: Mapped[bytes] = mapped_column(LargeBinary(), nullable=False)
-    meta: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'::json"))
+    meta: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -117,7 +117,7 @@ class PlatformSettings(Base):
     __tablename__ = "platform_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    data: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'::json"))
+    data: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -130,7 +130,7 @@ class TenantSettings(Base):
     tenant_id: Mapped[str] = mapped_column(
         String(26), ForeignKey("organizations.id"), nullable=False, unique=True
     )
-    data: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'::json"))
+    data: Mapped[dict] = mapped_column(JSONType, nullable=False, server_default=text("'{}'"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -190,7 +190,7 @@ class SettingsRow(Base):
     # `effective_auth_jwt_secret` so ops can rotate without a DB write.
     auth_jwt_secret: Mapped[str | None] = mapped_column(String(128))
     # AI provider matrix (migration 0009). JSONB blob of
-    # ``{feature: {provider, model}}``. See ``app.sources.provider.DEFAULT_FEATURES``
+    # ``{feature: {provider, model}}``. See ``app.integrations.adapters.ai.provider.DEFAULT_FEATURES``
     # for the fallback shape — missing keys resolve against the code default.
     ai_features: Mapped[dict | None] = mapped_column(JSONType)
     # Mail connector mode override (migration 0013). Env > this > default.

@@ -12,11 +12,11 @@ import pytest
 from pydantic import SecretStr
 
 from app.config import Settings
-from app.sources.loads.chr import ChrSource, map_chr_row
-from app.sources.loads.dat import DatSource, map_dat_row
-from app.sources.loads.loadboard123 import LoadBoard123Source, map_lb123_row
-from app.sources.loads.registry import all_sources, by_kind, enabled_sources
-from app.sources.loads.truckstop import TruckstopSource, map_truckstop_row
+from app.integrations.adapters.loadboard.chr import ChrSource, map_chr_row
+from app.integrations.adapters.loadboard.dat import DatSource, map_dat_row
+from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source, map_lb123_row
+from app.integrations.adapters.loadboard.registry import all_sources, by_kind, enabled_sources
+from app.integrations.adapters.loadboard.truckstop import TruckstopSource, map_truckstop_row
 
 
 def _s(**overrides) -> Settings:

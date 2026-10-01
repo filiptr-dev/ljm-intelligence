@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db import Base
-from app.mail.ingest import ingest_backfill, ingest_incremental
-from app.mail.mailbox import RawMessage, SimulatedMailbox
+from app.integrations.adapters.email.ingest import ingest_backfill, ingest_incremental
+from app.integrations.adapters.email.mailbox import RawMessage, SimulatedMailbox
 from app.models import MailCursor, MailMessage
 
 

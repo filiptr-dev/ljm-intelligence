@@ -58,7 +58,7 @@ from app.sources.linkedin_search import (
     _normalize_url,
     find_decision_makers,
 )
-from app.sources.provider import GeminiProvider, NullProvider
+from app.integrations.adapters.ai.provider import GeminiProvider, NullProvider
 
 # =========================================================================
 # Fixtures / mocks

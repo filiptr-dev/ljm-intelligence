@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, select
 
 from app.models import AiUsageLog, SettingsRow
-from app.sources.provider import (
+from app.integrations.adapters.ai.provider import (
     ALLOWED_MODELS,
     DEFAULT_FEATURES,
 )

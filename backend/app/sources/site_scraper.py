@@ -30,7 +30,7 @@ from urllib.parse import urljoin, urlsplit
 
 from app.sources.fetcher import LJM_USER_AGENT, Fetcher, FetchResult
 from app.sources.gemini_extractor import Extraction, extract_contacts
-from app.sources.provider import LLMProvider
+from app.integrations.adapters.ai.provider import LLMProvider
 from app.sources.robots import is_allowed
 
 log = logging.getLogger(__name__)

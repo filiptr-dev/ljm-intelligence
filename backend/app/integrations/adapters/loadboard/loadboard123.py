@@ -12,7 +12,7 @@ from datetime import datetime
 import httpx
 
 from app.lib.circuit_breaker import CircuitBreaker
-from app.sources.loads.base import ConnectionTest, RawLoad
+from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
 

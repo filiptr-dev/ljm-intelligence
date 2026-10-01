@@ -15,7 +15,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import AiUsageLog
-from app.sources.provider import ProviderCall
+from app.integrations.adapters.ai.provider import ProviderCall
 
 log = logging.getLogger(__name__)
 

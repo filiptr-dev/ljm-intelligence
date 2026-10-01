@@ -26,10 +26,10 @@ from sqlalchemy import func, select
 
 from app.api._auth import check_secret
 from app.config import Settings
-from app.mail.credentials import load_sa_info, sa_fingerprint
-from app.mail.ingest import ingest_backfill, ingest_incremental
-from app.mail.mailbox import get_mailbox_source
-from app.mail.sender import get_mail_sender
+from app.integrations.adapters.email.credentials import load_sa_info, sa_fingerprint
+from app.integrations.adapters.email.ingest import ingest_backfill, ingest_incremental
+from app.integrations.adapters.email.mailbox import get_mailbox_source
+from app.integrations.adapters.email.sender import get_mail_sender
 from app.models import MailCursor, SentLog, SettingsRow
 
 log = logging.getLogger(__name__)

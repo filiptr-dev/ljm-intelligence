@@ -6,7 +6,7 @@ v1 is a placeholder — always enabled, always returns []. The real extractor
 
 from __future__ import annotations
 
-from app.sources.loads.base import ConnectionTest, RawLoad
+from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 
 class AiPageSource:

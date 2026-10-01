@@ -15,7 +15,7 @@ import pytest
 from pydantic import SecretStr
 
 from app.config import Settings
-from app.mail.sender import GmailSender, SimulatedSender, get_mail_sender
+from app.integrations.adapters.email.sender import GmailSender, SimulatedSender, get_mail_sender
 
 
 def _settings(**overrides) -> Settings:
@@ -43,8 +43,8 @@ def test_factory_returns_gmail_when_env_and_refresh_ok() -> None:
     )
     s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json))
     with (
-        patch("app.mail.sender.build_delegated_credentials", return_value=object()),
-        patch("app.mail.sender.test_refresh", return_value=(True, None)),
+        patch("app.integrations.adapters.email.sender.build_delegated_credentials", return_value=object()),
+        patch("app.integrations.adapters.email.sender.test_refresh", return_value=(True, None)),
     ):
         sender = get_mail_sender(s)
     assert isinstance(sender, GmailSender)
@@ -58,8 +58,8 @@ def test_factory_fallback_when_refresh_fails() -> None:
     )
     s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json))
     with (
-        patch("app.mail.sender.build_delegated_credentials", return_value=object()),
-        patch("app.mail.sender.test_refresh", return_value=(False, "boom")),
+        patch("app.integrations.adapters.email.sender.build_delegated_credentials", return_value=object()),
+        patch("app.integrations.adapters.email.sender.test_refresh", return_value=(False, "boom")),
     ):
         sender = get_mail_sender(s)
     assert isinstance(sender, SimulatedSender)
