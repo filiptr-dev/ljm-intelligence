@@ -155,6 +155,11 @@ services:
         value: "20"
       - key: GMAIL_BACKOFF_MAX_SECONDS
         value: "60"
+      # Symmetric key used by the per-tenant credential vault
+      # (`app.identity.credential_vault`). Absent → vault stays locked and
+      # the mail connector falls back to simulated — never a 500.
+      - key: TENANT_CRED_KEY
+        sync: false
       # ---- Load-board connectors (plan 2026-10-01-load-board-connectors)
       # All env-gated; absent = disabled.
       - key: DAT_SERVICE_ACCOUNT_EMAIL
