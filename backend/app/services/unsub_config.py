@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.api._auth import sign_unsubscribe_token
 from app.config import Settings
+from app.lib.tokens import sign_unsubscribe_token
 
 
 class _HasSecret(Protocol):

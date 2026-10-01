@@ -68,12 +68,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # of which port Next picked. The AI providers panel + shipper-finder both
     # go direct-to-:8765 and need this allowlist to include the frontend
     # origin, otherwise the browser's OPTIONS preflight 400s.
-    _finder_origins = [
-        "http://localhost:3000",
-        "http://localhost:3030",
-        "http://localhost:3100",
-        "https://ljm-intelligence.vercel.app",
-    ]
+    # Gate the localhost trio behind a dev/test env — in production we never
+    # want a page served on localhost to pass CORS preflight (reviewer finding,
+    # 2026-10-01). ``Settings.app_env`` is a Literal of ("development", "test",
+    # "production"), so this exhausts the non-prod set.
+    _finder_origins: list[str] = ["https://ljm-intelligence.vercel.app"]
+    if settings.app_env in ("development", "test"):
+        _finder_origins = [
+            "http://localhost:3000",
+            "http://localhost:3030",
+            "http://localhost:3100",
+            *_finder_origins,
+        ]
     _merged_origins = list(settings.cors_allowed_origins) + [
         o for o in _finder_origins if o not in settings.cors_allowed_origins
     ]
@@ -115,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.enrichment import router as enrichment_router
     from app.api.enrichment import unsub_router as unsubscribe_router
     from app.api.leads import router as leads_router
+    from app.api.overview import router as overview_router
     from app.api.settings import router as settings_router
     from app.api.shipper_finder import router as shipper_finder_router
     from app.auth.deps import current_user, require_user_or_cron
@@ -141,5 +148,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(shipper_finder_router, dependencies=user_only)
     app.include_router(enrichment_router, dependencies=user_or_cron)
     app.include_router(ai_router, dependencies=user_only)
+    app.include_router(overview_router, dependencies=user_only)
     app.include_router(unsubscribe_router)
     return app

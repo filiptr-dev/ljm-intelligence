@@ -54,6 +54,18 @@ type Suggestion = {
 const EQUIPMENT = ["Dry Van", "Reefer", "Flatbed", "Step Deck", "Power Only"]
 
 export default function CapacityPage() {
+  // Overview's "New post" button links here with ?new=1 — scroll the New
+  // post panel into view so operators coming from the Today desk land on
+  // the form, not the top of the list.
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("new") === "1") {
+      const el = document.getElementById("new-post")
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+  }, [])
+
   const [kind, setKind] = React.useState<"truck" | "load">("truck")
   const [equipment, setEquipment] = React.useState("Dry Van")
   const [originCity, setOriginCity] = React.useState("")
@@ -162,7 +174,7 @@ export default function CapacityPage() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,460px)]">
         <div className="space-y-5">
-          <Panel title="New post" description="Store the post — the ranked broker list appears on the right the moment it's saved.">
+          <Panel id="new-post" title="New post" description="Store the post — the ranked broker list appears on the right the moment it's saved.">
             <div className="mb-4">
               <Segmented
                 value={kind}

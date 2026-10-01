@@ -446,23 +446,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ai/compare": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Compare */
-        post: operations["compare_ai_compare_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/ai/usage": {
         parameters: {
             query?: never;
@@ -472,6 +455,23 @@ export interface paths {
         };
         /** Usage */
         get: operations["usage_ai_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/overview/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Today */
+        get: operations["get_today_overview_today_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -540,6 +540,13 @@ export interface components {
             skipped_cap: number;
             /** Dry Run */
             dry_run: boolean;
+        };
+        /** BookedVsRejected */
+        BookedVsRejected: {
+            /** Demo */
+            demo: boolean;
+            /** Series */
+            series: components["schemas"]["MonthPoint"][];
         };
         /** CallListOut */
         CallListOut: {
@@ -619,6 +626,82 @@ export interface components {
             last_verified_at: string | null;
             /** Pipeline Status */
             pipeline_status: string;
+        };
+        /** DoNextCall */
+        DoNextCall: {
+            /**
+             * Kind
+             * @default call
+             * @constant
+             */
+            kind: "call";
+            /** Lead Id */
+            lead_id: string;
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** Phone */
+            phone: string;
+            /** Score */
+            score: number;
+            /** Reason */
+            reason: string;
+            /**
+             * Href
+             * @default /call-list
+             */
+            href: string;
+        };
+        /** DoNextCapacityMatch */
+        DoNextCapacityMatch: {
+            /**
+             * Kind
+             * @default capacity_match
+             * @constant
+             */
+            kind: "capacity_match";
+            /** Post Id */
+            post_id: string;
+            /** Equipment */
+            equipment: string;
+            /** Origin State */
+            origin_state: string;
+            /** Lead Id */
+            lead_id: string;
+            /** Lead Name */
+            lead_name: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Href
+             * @default /capacity
+             */
+            href: string;
+        };
+        /** DoNextNewLead */
+        DoNextNewLead: {
+            /**
+             * Kind
+             * @default new_lead
+             * @constant
+             */
+            kind: "new_lead";
+            /** Lead Id */
+            lead_id: string;
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** Kind Label */
+            kind_label: string;
+            /** First Seen At */
+            first_seen_at: string;
+            /**
+             * Href
+             * @default /leads
+             */
+            href: string;
         };
         /** DraftIn */
         DraftIn: {
@@ -746,6 +829,19 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HeaderActions */
+        HeaderActions: {
+            /**
+             * Crawl Now Href
+             * @default /leads
+             */
+            crawl_now_href: string;
+            /**
+             * New Post Href
+             * @default /capacity?new=1
+             */
+            new_post_href: string;
+        };
         /** Health */
         Health: {
             /** Ok */
@@ -871,6 +967,15 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** LoadsBookedTile */
+        LoadsBookedTile: {
+            /** Value */
+            value: number;
+            /** Demo */
+            demo: boolean;
+            /** Href */
+            href: string;
+        };
         /** LoginIn */
         LoginIn: {
             /** Email */
@@ -901,6 +1006,24 @@ export interface components {
              * @default true
              */
             ok: boolean;
+        };
+        /** MonthPoint */
+        MonthPoint: {
+            /** Month */
+            month: string;
+            /** Booked */
+            booked: number;
+            /** Rejected */
+            rejected: number;
+        };
+        /** NewLeadsTile */
+        NewLeadsTile: {
+            /** Value */
+            value: number;
+            /** Since */
+            since: string | null;
+            /** Href */
+            href: string;
         };
         /** OutcomeHistoryOut */
         OutcomeHistoryOut: {
@@ -934,6 +1057,16 @@ export interface components {
             callback_at?: string | null;
             /** Note */
             note?: string | null;
+        };
+        /** OverviewTodayOut */
+        OverviewTodayOut: {
+            /** Date */
+            date: string;
+            tiles: components["schemas"]["Tiles"];
+            /** Do Next */
+            do_next: (components["schemas"]["DoNextCall"] | components["schemas"]["DoNextCapacityMatch"] | components["schemas"]["DoNextNewLead"])[];
+            booked_vs_rejected: components["schemas"]["BookedVsRejected"];
+            header: components["schemas"]["HeaderActions"];
         };
         /** PostIn */
         PostIn: {
@@ -1037,33 +1170,6 @@ export interface components {
             phone: string | null;
             /** Primary Email */
             primary_email: string | null;
-        };
-        /** ProviderCallResponse */
-        ProviderCallResponse: {
-            /** Provider */
-            provider: string;
-            /** Model */
-            model: string;
-            /** Status */
-            status: string;
-            /** Text */
-            text: string;
-            /** Parsed */
-            parsed: unknown | null;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Latency Ms */
-            latency_ms: number;
-            /** Cost Usd */
-            cost_usd: string;
-            /** Error */
-            error: string | null;
-            /** Citations */
-            citations?: {
-                [key: string]: unknown;
-            }[];
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1238,6 +1344,19 @@ export interface components {
             score: number;
             /** Reason */
             reason: string;
+        };
+        /** TileCount */
+        TileCount: {
+            /** Value */
+            value: number;
+            /** Href */
+            href: string;
+        };
+        /** Tiles */
+        Tiles: {
+            to_call_today: components["schemas"]["TileCount"];
+            new_leads_since_last_crawl: components["schemas"]["NewLeadsTile"];
+            loads_booked_90d: components["schemas"]["LoadsBookedTile"];
         };
         /** UnsubscribeOut */
         UnsubscribeOut: {
@@ -2319,6 +2438,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_today_overview_today_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewTodayOut"];
                 };
             };
             /** @description Validation Error */
