@@ -9,8 +9,15 @@ from __future__ import annotations
 
 import logging
 import time
+import urllib.request
 from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
+
+# robots.txt fetches must never block the event loop forever. urllib's
+# default has no socket timeout — if the host is unreachable, parser.read()
+# will hang until the kernel gives up (minutes). Keep it short; failure is
+# fail-open per the module doctrine.
+_FETCH_TIMEOUT_S = 3.0
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +42,13 @@ def _fetch_parser(host: str, scheme: str) -> RobotFileParser | None:
     parser = RobotFileParser()
     parser.set_url(url)
     try:
-        parser.read()
-    except Exception as exc:  # noqa: BLE001
+        # Replace parser.read() so we can bound the socket timeout — the
+        # stdlib call has no default and will hang on an unreachable host.
+        req = urllib.request.Request(url, headers={"User-Agent": "LJM-robots/1.0"})
+        with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT_S) as resp:  # noqa: S310
+            raw = resp.read().decode("utf-8", errors="replace")
+        parser.parse(raw.splitlines())
+    except Exception as exc:  # noqa: BLE001 — network / timeout / parse
         log.info("robots: unreachable for %s: %s", host, exc)
         return None
     return parser

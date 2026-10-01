@@ -345,20 +345,17 @@ async def test_enrich_no_api_key(sm, monkeypatch):
     assert n == []
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing hang on c63fe8f (verified on a clean worktree before the "
-        "api-service extraction). The enrich_company happy-path call never "
-        "returns under the current fetcher/provider stubs. Not introduced by "
-        "the router thinning — same hang on the base commit. Needs a separate "
-        "investigation (likely an un-awaited background task or an un-mocked "
-        "sleep/HTTP in the enrichment pipeline after the recent adapter rehome)."
-    ),
-    run=False,
-    strict=False,
-)
 async def test_enrich_happy_path(sm, monkeypatch):
     """Site scraper + LinkedIn search both hit. Contacts dedupe by email; provenance recorded."""
+    # Earlier revision hung here: `robots.is_allowed` called urllib's
+    # `RobotFileParser.read()`, which has no socket timeout and blocked
+    # the event loop fetching acme.com/robots.txt. Fixed in robots.py with
+    # a bounded urlopen; also stubbed here so the test never leaves the box.
+    from app.sources import robots as _robots
+
+    monkeypatch.setattr(_robots, "is_allowed", lambda url, ua: True)
+    _robots.clear_cache()
+
     await _seed_lead(sm)
 
     # Stub grounded LinkedIn + company-page calls.
