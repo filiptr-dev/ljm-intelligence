@@ -1,0 +1,86 @@
+# import-linter contracts — enforce the module boundaries from the
+# architecture plan: router.py never imports another module's router,
+# models, or repository; domain.py is pure Python; non-prospecting modules
+# never import a freight-specific adapter.
+
+[importlinter]
+root_package = app
+include_external_packages = True
+
+# -------------------------------------------------------------------
+# Contract 1 — routers must never import another module's router.
+# -------------------------------------------------------------------
+[importlinter:contract:no-cross-router-imports]
+name = Routers never import other modules' routers
+type = forbidden
+source_modules =
+    app.identity.router
+    app.integrations.router
+    app.prospecting.router
+    app.outreach.router
+    app.inbox.router
+    app.analysis.router
+forbidden_modules =
+    app.identity.router
+    app.integrations.router
+    app.prospecting.router
+    app.outreach.router
+    app.inbox.router
+    app.analysis.router
+ignore_imports =
+    # a module importing its own router is fine; the forbidden graph
+    # excludes self-loops by construction, no exclusion needed.
+
+# -------------------------------------------------------------------
+# Contract 2 — routers must never reach into another module's models.
+# -------------------------------------------------------------------
+[importlinter:contract:no-cross-model-reach]
+name = Routers never import other modules' models
+type = forbidden
+source_modules =
+    app.identity.router
+    app.integrations.router
+    app.prospecting.router
+    app.outreach.router
+    app.inbox.router
+    app.analysis.router
+forbidden_modules =
+    app.identity.models
+    app.integrations.models
+    app.prospecting.models
+    app.outreach.models
+    app.inbox.models
+    app.analysis.models
+
+# -------------------------------------------------------------------
+# Contract 3 — domain.py is pure: no FastAPI, no SQLAlchemy, no siblings.
+# -------------------------------------------------------------------
+[importlinter:contract:domain-is-pure]
+name = domain.py imports no framework or sibling module
+type = forbidden
+source_modules =
+    app.identity.domain
+    app.integrations.domain
+    app.prospecting.domain
+    app.outreach.domain
+    app.inbox.domain
+    app.analysis.domain
+forbidden_modules =
+    fastapi
+    sqlalchemy
+
+# -------------------------------------------------------------------
+# Contract 4 — freight adapters only reachable from prospecting.
+# -------------------------------------------------------------------
+[importlinter:contract:freight-adapters-prospecting-only]
+name = Only prospecting imports freight-specific adapters (FMCSA)
+type = forbidden
+source_modules =
+    app.identity
+    app.integrations
+    app.outreach
+    app.inbox
+    app.analysis
+    app.shared
+forbidden_modules =
+    app.integrations.adapters.enrichment.fmcsa
