@@ -24,17 +24,28 @@ const SOURCE_LABEL: Record<string, string> = {
 export function LoadsBoard() {
   const [rows, setRows] = React.useState<LoadRow[]>([])
   const [sources, setSources] = React.useState<LoadSourceRow[]>([])
+  const [fetchError, setFetchError] = React.useState(false)
 
   React.useEffect(() => {
     void (async () => {
-      const [l, s] = await Promise.all([listLoads(50), listLoadSources()])
-      setRows(l)
-      setSources(s)
+      try {
+        const [l, s] = await Promise.all([listLoads(50), listLoadSources()])
+        setRows(l)
+        setSources(s)
+      } catch {
+        // Mirror connectors-panel's pattern: swallow + surface a one-line
+        // signal to the operator. Reloading the page is the current escape
+        // route — a retry button is deliberately out of scope for v1.
+        setFetchError(true)
+      }
     })()
   }, [])
 
   return (
     <div className="space-y-4">
+      {fetchError && (
+        <p className="text-sm text-red-600">Could not load sources</p>
+      )}
       <Panel title="Sources">
         <div className="flex flex-wrap gap-2">
           {sources.map((s) => (

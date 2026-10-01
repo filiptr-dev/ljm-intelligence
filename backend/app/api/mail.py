@@ -1,6 +1,17 @@
 """Mail connector routes — status, test send, backfill, incremental, disconnect.
 
-Owner-only (mounted under ``user_only`` from main.py).
+Two routers, same ``/mail`` prefix:
+
+* ``router`` — owner-only (``user_only``): /status, /test-send, /mailboxes,
+  /disconnect. A cron secret must never flip the owner's mail mode or trigger
+  a test send.
+* ``cron_router`` — user-or-cron: /backfill + /incremental. These are the
+  cron-driven ingest routes; the per-handler ``check_secret`` call stays as
+  the authoritative guard.
+
+FastAPI only applies one dependency stack per ``include_router`` call, so
+splitting is the cheapest way to express "most of this is owner-only; two of
+these also accept cron". The route paths are unchanged — no URL moves.
 """
 
 from __future__ import annotations
@@ -24,6 +35,7 @@ from app.models import MailCursor, SentLog, SettingsRow
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mail", tags=["mail"])
+cron_router = APIRouter(prefix="/mail", tags=["mail"])
 
 
 # ---------- shapes ----------------------------------------------------------
@@ -189,7 +201,7 @@ class _MailboxForm(BaseModel):
     mailbox: EmailStr
 
 
-@router.post("/backfill", response_model=IngestStatsOut)
+@cron_router.post("/backfill", response_model=IngestStatsOut)
 async def backfill(
     payload: BackfillIn,
     request: Request,
@@ -204,7 +216,7 @@ async def backfill(
     return IngestStatsOut(**stats.__dict__)
 
 
-@router.post("/incremental", response_model=IncrementalOut)
+@cron_router.post("/incremental", response_model=IncrementalOut)
 async def incremental(
     payload: IncrementalIn,
     request: Request,
@@ -256,4 +268,4 @@ async def mailboxes(request: Request) -> MailboxesOut:
     return MailboxesOut(items=items)
 
 
-__all__ = ["router"]
+__all__ = ["cron_router", "router"]

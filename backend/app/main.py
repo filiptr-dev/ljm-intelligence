@@ -123,6 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.enrichment import unsub_router as unsubscribe_router
     from app.api.leads import router as leads_router
     from app.api.loads import router as loads_router
+    from app.api.mail import cron_router as mail_cron_router
     from app.api.mail import router as mail_router
     from app.api.overview import router as overview_router
     from app.api.settings import router as settings_router
@@ -154,8 +155,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ai_router, dependencies=user_only)
     app.include_router(overview_router, dependencies=user_only)
     # Mail + loads connectors (plans 2026-10-01-google-workspace-mail-connector + load-board).
-    # ``user_or_cron`` so cron-secret headers can hit backfill/incremental/refresh-all.
-    app.include_router(mail_router, dependencies=user_or_cron)
+    # Mail is split: owner-only for /status, /test-send, /mailboxes, /disconnect;
+    # user-or-cron for /backfill + /incremental (the ingest routes the cron
+    # workflow hits). A cron secret must never flip owner-sensitive state like
+    # /disconnect or trigger a /test-send on the owner's Google Workspace.
+    # ``loads_router`` stays mixed because its /refresh-all is cron-driven and
+    # its reads are owner-facing — the per-handler check guards the cron path.
+    app.include_router(mail_router, dependencies=user_only)
+    app.include_router(mail_cron_router, dependencies=user_or_cron)
     app.include_router(loads_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)
     return app

@@ -11,6 +11,7 @@ from datetime import datetime
 
 import httpx
 
+from app.lib.circuit_breaker import CircuitBreaker
 from app.sources.loads.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class ChrSource:
     def __init__(self, settings) -> None:
         self.settings = settings
         self._token: tuple[str, float] | None = None
+        self._breaker = CircuitBreaker()
 
     @property
     def enabled(self) -> bool:
@@ -61,6 +63,8 @@ class ChrSource:
         return bool(s.chr_client_id and s.chr_client_secret and s.chr_carrier_code)
 
     def reason(self) -> str | None:
+        if self._breaker.is_open():
+            return "circuit_open"
         if self.enabled:
             return None
         missing = []
@@ -98,11 +102,19 @@ class ChrSource:
     async def fetch(self, settings) -> list[RawLoad]:
         if not self.enabled:
             return []
+        if self._breaker.is_open():
+            return []
         try:
             async with httpx.AsyncClient() as client:
                 _ = await self._token_get(client)
+                self._breaker.record_success()
                 return []
-        except Exception as exc:  # noqa: BLE001
+        except httpx.HTTPStatusError as exc:
+            self._breaker.record_failure(exc.response.status_code)
+            log.warning("chr/fetch: %s", exc)
+            return []
+        except Exception as exc:  # noqa: BLE001 — network / timeout / parse
+            self._breaker.record_failure(None)
             log.warning("chr/fetch: %s", exc)
             return []
 

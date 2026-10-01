@@ -13,6 +13,7 @@ from datetime import datetime
 
 import httpx
 
+from app.lib.circuit_breaker import CircuitBreaker
 from app.sources.loads.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class DatSource:
     def __init__(self, settings) -> None:
         self.settings = settings
         self._org_token: tuple[str, float] | None = None  # (token, expires_monotonic)
+        self._breaker = CircuitBreaker()
 
     @property
     def enabled(self) -> bool:
@@ -68,6 +70,8 @@ class DatSource:
         return bool(s.dat_service_account_email and s.dat_service_account_password and s.dat_org_id)
 
     def reason(self) -> str | None:
+        if self._breaker.is_open():
+            return "circuit_open"
         if self.enabled:
             return None
         missing = []
@@ -102,11 +106,19 @@ class DatSource:
     async def fetch(self, settings) -> list[RawLoad]:
         if not self.enabled:
             return []
+        if self._breaker.is_open():
+            return []
         try:
             async with httpx.AsyncClient() as client:
                 _ = await self._org_token_get(client)
+                self._breaker.record_success()
                 return []  # live search body goes here on access day
-        except Exception as exc:  # noqa: BLE001
+        except httpx.HTTPStatusError as exc:
+            self._breaker.record_failure(exc.response.status_code)
+            log.warning("dat/fetch: %s", exc)
+            return []
+        except Exception as exc:  # noqa: BLE001 — network / timeout / parse
+            self._breaker.record_failure(None)
             log.warning("dat/fetch: %s", exc)
             return []
 

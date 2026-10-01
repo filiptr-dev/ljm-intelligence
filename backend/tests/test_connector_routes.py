@@ -99,6 +99,75 @@ async def test_loads_sources_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mail_owner_routes_reject_cron_secret_alone(disable_auth_bypass) -> None:
+    """Owner-only endpoints must 401 when the caller presents only ``X-Cron-Secret``.
+
+    This is the AC1 regression lock: a cron secret must not flip owner state
+    (``/disconnect``) or trigger a test send on the owner's Google Workspace.
+    ``disable_auth_bypass`` strips the conftest's test-wide auth override so the
+    real ``current_user`` dep runs.
+    """
+    app = disable_auth_bypass(create_app(_settings()))
+    async with app.router.lifespan_context(app):
+        await _prep_db(app)
+        transport = ASGITransport(app=app)
+        headers = {"X-Cron-Secret": "secret"}
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            for method, path, body in (
+                ("GET", "/mail/status", None),
+                ("POST", "/mail/test-send", {"to": "x@example.com"}),
+                ("POST", "/mail/disconnect", None),
+                ("GET", "/mail/mailboxes", None),
+            ):
+                r = await c.request(method, path, headers=headers, json=body)
+                assert r.status_code == 401, f"{method} {path} should be 401, got {r.status_code}: {r.text}"
+
+            # Anonymous (no header at all) is also 401.
+            r = await c.get("/mail/status")
+            assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_mail_cron_routes_still_accept_cron_secret_alone(disable_auth_bypass) -> None:
+    """``/mail/backfill`` + ``/mail/incremental`` keep working with cron secret alone.
+
+    These are the cron-driven ingest routes — the GitHub Actions workflow hits
+    them with ``X-Cron-Secret`` and no bearer. The per-handler ``check_secret``
+    stays the authoritative guard; this test proves the router split did not
+    strip it.
+    """
+    app = disable_auth_bypass(create_app(_settings()))
+    async with app.router.lifespan_context(app):
+        await _prep_db(app)
+        transport = ASGITransport(app=app)
+        headers = {"X-Cron-Secret": "secret"}
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            # Mode is simulated (see _settings) → the simulated mailbox source
+            # has no mailboxes, so /backfill accepts the call and the handler
+            # returns IngestStats. The important bit here is the status code —
+            # 200/4xx-from-handler is proof the auth layer let it through.
+            r = await c.post(
+                "/mail/backfill",
+                headers=headers,
+                json={"mailbox": "owner@example.com", "months": 1},
+            )
+            assert r.status_code in (200, 422), r.text
+            assert r.status_code != 401
+
+            r = await c.post("/mail/incremental", headers=headers, json={})
+            assert r.status_code in (200, 422), r.text
+            assert r.status_code != 401
+
+            # Wrong secret → 401 (per-handler check still fires).
+            r = await c.post(
+                "/mail/backfill",
+                headers={"X-Cron-Secret": "wrong"},
+                json={"mailbox": "owner@example.com", "months": 1},
+            )
+            assert r.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_email_send_route_writes_sent_log() -> None:
     app = create_app(_settings())
     app.dependency_overrides[current_user] = _owner

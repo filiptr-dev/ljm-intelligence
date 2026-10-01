@@ -36,6 +36,23 @@ const SOURCE_LABELS: Record<string, string> = {
   truckstop: "Truckstop",
 }
 
+/**
+ * Translate the API's machine-readable ``reason`` string into a plain
+ * sentence for an operator. The raw string stays on ``title={s.reason}`` so
+ * support/logs can still see the exact env var or state. Keep this UI-side
+ * only — the API, runbook, and log search still want ``missing_env:FOO``.
+ */
+function prettyReason(reason: string | null | undefined): string {
+  if (!reason) return "Disabled."
+  if (reason.startsWith("missing_env:")) {
+    return "Needs credentials — see the connector runbook."
+  }
+  if (reason === "circuit_open") {
+    return "Paused — vendor had too many errors; retrying in a few minutes."
+  }
+  return "Disabled."
+}
+
 export function ConnectorsPanel() {
   const [mail, setMail] = React.useState<MailStatus | null>(null)
   const [sources, setSources] = React.useState<LoadSourceRow[]>([])
@@ -133,7 +150,7 @@ export function ConnectorsPanel() {
     <>
       <Panel
         title="Mail connection"
-        description="Default is simulated. Set GMAIL_SA_JSON + GMAIL_IMPERSONATE in Render, then click Test connection — mode flips to gmail once a token refresh succeeds."
+        description="Default is simulated. Add your Google Workspace credentials in Render, then click Test connection — it switches to live Gmail once the credentials verify."
       >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm">
@@ -156,10 +173,14 @@ export function ConnectorsPanel() {
           </span>
           {!mail?.postal_address_set && (
             <span className="text-xs text-red-600">
-              Postal address missing — set OUTREACH_POSTAL_ADDRESS
+              Postal address missing — add it in Render before sending real email.
             </span>
           )}
-          {mail?.reason && <span className="text-xs text-red-600">{mail.reason}</span>}
+          {mail?.reason && (
+            <span className="text-xs text-red-600" title={mail.reason}>
+              {prettyReason(mail.reason)}
+            </span>
+          )}
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-2">
           <div className="flex min-w-0 flex-col gap-1">
@@ -184,7 +205,7 @@ export function ConnectorsPanel() {
 
       <Panel
         title="Load sources"
-        description="Every connector is OFF until Render env is set. Click Test connection after you paste the vendor's credentials in Render. Credentials never enter this browser."
+        description="Every connector starts off. Add the vendor's credentials in Render, then click Test connection. We never collect credentials in the browser."
       >
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -206,8 +227,11 @@ export function ConnectorsPanel() {
                         <Check className="h-3 w-3" /> enabled
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 bg-muted">
-                        <X className="h-3 w-3" /> {s.reason ?? "disabled"}
+                      <span
+                        className="inline-flex items-center gap-1 rounded px-2 py-0.5 bg-muted"
+                        title={s.reason ?? ""}
+                      >
+                        <X className="h-3 w-3" /> {prettyReason(s.reason)}
                       </span>
                     )}
                   </td>

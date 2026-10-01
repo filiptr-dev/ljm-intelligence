@@ -11,6 +11,7 @@ from datetime import datetime
 
 import httpx
 
+from app.lib.circuit_breaker import CircuitBreaker
 from app.sources.loads.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class LoadBoard123Source:
     def __init__(self, settings) -> None:
         self.settings = settings
         self._session: tuple[str, float] | None = None
+        self._breaker = CircuitBreaker()
 
     @property
     def enabled(self) -> bool:
@@ -61,6 +63,8 @@ class LoadBoard123Source:
         return bool(s.lb123_api_key and s.lb123_carrier_username and s.lb123_carrier_password)
 
     def reason(self) -> str | None:
+        if self._breaker.is_open():
+            return "circuit_open"
         if self.enabled:
             return None
         missing = []
@@ -97,11 +101,19 @@ class LoadBoard123Source:
     async def fetch(self, settings) -> list[RawLoad]:
         if not self.enabled:
             return []
+        if self._breaker.is_open():
+            return []
         try:
             async with httpx.AsyncClient() as client:
                 _ = await self._login(client)
+                self._breaker.record_success()
                 return []
-        except Exception as exc:  # noqa: BLE001
+        except httpx.HTTPStatusError as exc:
+            self._breaker.record_failure(exc.response.status_code)
+            log.warning("loadboard123/fetch: %s", exc)
+            return []
+        except Exception as exc:  # noqa: BLE001 — network / timeout / parse
+            self._breaker.record_failure(None)
             log.warning("loadboard123/fetch: %s", exc)
             return []
 

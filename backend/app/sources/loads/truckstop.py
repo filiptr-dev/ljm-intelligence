@@ -11,6 +11,7 @@ from datetime import datetime
 
 import httpx
 
+from app.lib.circuit_breaker import CircuitBreaker
 from app.sources.loads.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ class TruckstopSource:
 
     def __init__(self, settings) -> None:
         self.settings = settings
+        self._breaker = CircuitBreaker()
 
     @property
     def enabled(self) -> bool:
@@ -59,6 +61,8 @@ class TruckstopSource:
         return bool(s.truckstop_integration_id and s.truckstop_username and s.truckstop_password)
 
     def reason(self) -> str | None:
+        if self._breaker.is_open():
+            return "circuit_open"
         if self.enabled:
             return None
         missing = []
@@ -82,6 +86,8 @@ class TruckstopSource:
     async def fetch(self, settings) -> list[RawLoad]:
         if not self.enabled:
             return []
+        if self._breaker.is_open():
+            return []
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
@@ -91,8 +97,14 @@ class TruckstopSource:
                     timeout=httpx.Timeout(10.0, read=20.0),
                 )
                 resp.raise_for_status()
+                self._breaker.record_success()
                 return []
-        except Exception as exc:  # noqa: BLE001
+        except httpx.HTTPStatusError as exc:
+            self._breaker.record_failure(exc.response.status_code)
+            log.warning("truckstop/fetch: %s", exc)
+            return []
+        except Exception as exc:  # noqa: BLE001 — network / timeout / parse
+            self._breaker.record_failure(None)
             log.warning("truckstop/fetch: %s", exc)
             return []
 
