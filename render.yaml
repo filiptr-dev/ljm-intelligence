@@ -20,6 +20,14 @@ services:
       # Neon pooled URL, keep sslmode=require & channel_binding=require.
       - key: DATABASE_URL
         sync: false
+      # Neon DIRECT (non-pooler) URL — the worker + Alembic use this
+      # because the pooler doesn't support LISTEN/NOTIFY. See docs/ops.md.
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      # S0.2 — seed owner password for migration 0008. Production refuses
+      # to run the migration without this env var set.
+      - key: SEED_OWNER_PASSWORD
+        sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: CORS_ALLOWED_ORIGIN_REGEX

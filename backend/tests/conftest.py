@@ -131,6 +131,11 @@ def _reset_pg16_schema(url: str) -> None:
 # in os.environ wins over whatever backend/.env holds. In sqlite mode we pin
 # to an in-memory URL; in PG16 mode we pin to the throwaway container's URL.
 if _PG_HARNESS:
+    # Match the historical seed value `test_pg16_boot_and_tenancy` asserts
+    # against. Production boots refuse to seed without an explicit value;
+    # the test harness is deliberately not production, so pin a stable
+    # default here. See migration 0008.
+    os.environ.setdefault("SEED_OWNER_PASSWORD", "password")
     _PG_TEST_URL = _ensure_pg16_container()
     _reset_pg16_schema(_PG_TEST_URL)
     _SAFE_DB_URL = _PG_TEST_URL
@@ -399,6 +404,18 @@ if _PG_HARNESS:
                     """,
                     (LJM_TENANT_ID,),
                 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_rate_limiter():
+    """Tests hammer `/auth/login` repeatedly; S0.5's in-process sliding
+    window would otherwise bleed state across tests and 429 the next one.
+    Clear it between tests to keep the suite deterministic.
+    """
+    from app.shared.rate_limit import LOGIN_LIMITER
+
+    LOGIN_LIMITER.reset()
+    yield
 
 
 @pytest.fixture

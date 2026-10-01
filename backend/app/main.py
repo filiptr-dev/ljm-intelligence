@@ -17,10 +17,18 @@ from app.db import create_engine, create_sessionmaker, ping
 log = logging.getLogger(__name__)
 
 
+class JobsHealth(BaseModel):
+    queued: int = 0
+    running: int = 0
+    failed_last_24h: int = 0
+    oldest_queued_age_s: int = 0
+
+
 class Health(BaseModel):
     ok: bool
     db: Literal["up", "down"]
     app_env: str
+    jobs: JobsHealth | None = None
 
 
 def _configure_logging(settings: Settings) -> None:
@@ -59,12 +67,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.http.aclose()
             await engine.dispose()
 
+    # S0.1 — close /docs + /openapi.json in production. The repo is public; a
+    # free route-map on a public URL is unnecessary attack surface. Dev + test
+    # keep them so the local workflow is unchanged.
+    _is_prod = settings.app_env == "production"
     app = FastAPI(
         title="LJM Intelligence API",
         version="0.1.0",
         summary="Real lead crawler + Gemini discovery/scoring for LJM International.",
         lifespan=lifespan,
-        docs_url="/docs",
+        docs_url=None if _is_prod else "/docs",
+        openapi_url=None if _is_prod else "/openapi.json",
         redoc_url=None,
     )
     app.state.settings = settings
@@ -125,7 +138,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db_ok = True
         except Exception as exc:  # noqa: BLE001
             log.warning("health: db unreachable: %s", exc)
-        return Health(ok=db_ok, db="up" if db_ok else "down", app_env=s.app_env)
+        # Queue snapshot (never fails the health check — zeros when the
+        # queue schema isn't installed, e.g. SQLite dev path).
+        jobs: JobsHealth | None = None
+        if db_ok:
+            try:
+                from app.shared.queue import jobs_health
+                async with request.app.state.sessionmaker() as sess:
+                    j = await jobs_health(sess)
+                jobs = JobsHealth(**j)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("health: jobs snapshot unavailable: %s", exc)
+        return Health(ok=db_ok, db="up" if db_ok else "down", app_env=s.app_env, jobs=jobs)
 
     app.include_router(router)
 
@@ -197,4 +221,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(mail_cron_router, dependencies=user_or_cron)
     app.include_router(loads_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)
+    # Jobs API — `/jobs/drain` is cron-callable, `/jobs/{id}` is user-only,
+    # `/admin/jobs` is user-only. The drain route also re-checks the cron
+    # secret inside its handler so a bare bearer-less request can't trigger
+    # a worker tick.
+    from app.api.jobs import admin_router as jobs_admin_router
+    from app.api.jobs import router as jobs_router
+
+    app.include_router(jobs_router, dependencies=user_or_cron)
+    app.include_router(jobs_admin_router, dependencies=user_only)
     return app

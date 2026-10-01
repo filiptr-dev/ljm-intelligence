@@ -26,6 +26,7 @@ from app.auth.deps import UserPrincipal, current_user
 from app.auth.passwords import verify_password
 from app.auth.tokens import effective_auth_jwt_secret, mint_access_token
 from app.models import User
+from app.shared.rate_limit import check_login_rate
 
 log = logging.getLogger(__name__)
 
@@ -64,8 +65,25 @@ class LogoutOut(BaseModel):
 @router.post("/login", response_model=LoginOut)
 async def login(request: Request, body: LoginIn) -> LoginOut:
     settings = request.app.state.settings
-    sessionmaker = request.app.state.sessionmaker
     email_lower = body.email.lower().strip()
+
+    # S0.5 — rate-limit per IP (5/min) + per email (10/hour). We check BEFORE
+    # the DB round-trip so a flood never hits argon2 verification. The 429
+    # body carries Retry-After seconds; the Next BFF surfaces it as "too many
+    # attempts, try again in N seconds" without leaking account existence.
+    client_ip = (request.client.host if request.client else "unknown") or "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip() or client_ip
+    retry_after = check_login_rate(client_ip, email_lower)
+    if retry_after > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many login attempts",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
+
+    sessionmaker = request.app.state.sessionmaker
 
     async with sessionmaker() as s:
         user = (await s.execute(select(User).where(User.email == email_lower))).scalar_one_or_none()
@@ -86,7 +104,12 @@ async def login(request: Request, body: LoginIn) -> LoginOut:
 
         secret = await effective_auth_jwt_secret(settings, s)
 
+    # S0.4 — in production, cap the access TTL at 1 day regardless of what
+    # the configured default is. 7 days was a demo value for v1; a long-lived
+    # bearer against a public BFF is not acceptable before real client use.
     ttl_days = int(getattr(settings, "auth_access_ttl_days", 7))
+    if settings.app_env == "production":
+        ttl_days = min(ttl_days, 1)
     token, expires_in = mint_access_token(
         secret=secret,
         user_id=user.id,
