@@ -275,6 +275,11 @@ class SettingsRow(Base):
     # Minimum lead fit_score for auto-outreach (migration 0007). Contacts on
     # leads scoring below this are skipped; unscored leads are always skipped.
     auto_outreach_min_fit: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default=text("60"))
+    # Auth JWT signing secret (migration 0008). Backfilled once at upgrade time
+    # — same durable-secret-in-DB pattern as `unsubscribe_secret` in 0007. An
+    # optional env override (`AUTH_JWT_SECRET`) wins at read time via
+    # `effective_auth_jwt_secret` so ops can rotate without a DB write.
+    auth_jwt_secret: Mapped[str | None] = mapped_column(String(128))
 
 
 class SentLog(Base):
@@ -507,3 +512,27 @@ class FitScoreHistory(Base):
     signals: Mapped[dict] = mapped_column(JSONType, default=dict)
     weights: Mapped[dict] = mapped_column(JSONType, default=dict)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    """App login account (migration 0008).
+
+    V1 is single-owner: migration 0008 seeds exactly one row
+    (``owner@ljm-demo.local``) and no UI adds more. The ``role`` column stays
+    for the seam when staff/Google-SSO lands later.
+
+    ``password_hash`` is nullable so a future Google-SSO user — who has no
+    local password — can live in the same table. Login refuses any row with
+    ``is_active=False`` or ``password_hash IS NULL``.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)  # ULID
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="owner", server_default=text("'owner'"))
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

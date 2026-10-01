@@ -27,6 +27,7 @@
  */
 
 import createClient from "openapi-fetch"
+import { getAccessToken } from "@/lib/auth/session"
 import type { paths } from "./schema"
 
 const RAW_BASE_URL =
@@ -46,13 +47,23 @@ const RETRY_STATUSES = new Set([502, 503, 504])
 async function apiFetch(req: Request): Promise<Response> {
   const isRetryable = req.method === "GET" || req.method === "HEAD"
 
+  // Inject `Authorization: Bearer <jwt>` from the session module. The token
+  // ref is populated by `SessionProvider` after `/api/auth/me` succeeds. If
+  // it's absent (server rendering or pre-auth), we just let the request go —
+  // the backend will answer 401 and the UI's session gate handles the
+  // redirect.
+  const token = typeof window !== "undefined" ? getAccessToken() : null
+  const headers = new Headers(req.headers)
+  if (token && !headers.has("authorization")) {
+    headers.set("authorization", `Bearer ${token}`)
+  }
+  const prepared = new Request(req, { headers })
+
   async function once(): Promise<Response> {
     const timeout = AbortSignal.timeout(TIMEOUT_MS)
-    const signal = req.signal
-      ? AbortSignal.any([req.signal, timeout])
-      : timeout
+    const signal = prepared.signal ? AbortSignal.any([prepared.signal, timeout]) : timeout
     // A Request body is a one-shot stream — clone before every attempt.
-    return fetch(req.clone(), { signal })
+    return fetch(prepared.clone(), { signal })
   }
 
   const first = await once()

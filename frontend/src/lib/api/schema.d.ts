@@ -25,6 +25,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crawl/run": {
         parameters: {
             query?: never;
@@ -747,6 +798,37 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** LoginIn */
+        LoginIn: {
+            /** Email */
+            email: string;
+            /**
+             * Password
+             * Format: password
+             */
+            password: string;
+        };
+        /** LoginOut */
+        LoginOut: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             */
+            token_type: string;
+            /** Expires In */
+            expires_in: number;
+            user: components["schemas"]["UserOut"];
+        };
+        /** LogoutOut */
+        LogoutOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+        };
         /** OutcomeHistoryOut */
         OutcomeHistoryOut: {
             /** Lead Id */
@@ -1062,6 +1144,17 @@ export interface components {
             /** Already */
             already: boolean;
         };
+        /** UserOut */
+        UserOut: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1127,6 +1220,101 @@ export interface operations {
             };
         };
     };
+    login_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogoutOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    me_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     start_run_crawl_run_post: {
         parameters: {
             query?: {
@@ -1135,6 +1323,7 @@ export interface operations {
             };
             header?: {
                 "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -1166,7 +1355,10 @@ export interface operations {
     show_run_crawl_runs__run_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path: {
                 run_id: string;
             };
@@ -1199,7 +1391,10 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1228,7 +1423,10 @@ export interface operations {
     latest_run_crawl_latest_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1243,6 +1441,15 @@ export interface operations {
                     "application/json": components["schemas"]["CrawlRunOut"] | null;
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     list_leads_leads_get: {
@@ -1255,7 +1462,9 @@ export interface operations {
                 offset?: number;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1284,7 +1493,9 @@ export interface operations {
     show_lead_leads__lead_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 lead_id: string;
             };
@@ -1315,7 +1526,9 @@ export interface operations {
     draft_email_email_draft_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1348,7 +1561,9 @@ export interface operations {
     get_settings_settings_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1363,12 +1578,23 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsOut"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     put_settings_settings_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1404,7 +1630,9 @@ export interface operations {
                 kind?: string | null;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1433,7 +1661,9 @@ export interface operations {
     create_post_capacity_posts_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1468,7 +1698,9 @@ export interface operations {
             query?: {
                 top?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 post_id: string;
             };
@@ -1501,7 +1733,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1530,7 +1764,9 @@ export interface operations {
     log_outcome_tools_call_list_outcome_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1566,7 +1802,9 @@ export interface operations {
                 lead_id: string;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1604,7 +1842,9 @@ export interface operations {
                 limit?: number;
                 sort?: "lane" | "fit";
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1633,7 +1873,9 @@ export interface operations {
     promote_tools_shipper_finder_promote_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1666,7 +1908,9 @@ export interface operations {
     get_shipper_tools_shipper_finder__candidate_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 candidate_id: string;
             };
@@ -1697,7 +1941,10 @@ export interface operations {
     get_lead_enrichment_enrichment_leads__lead_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path: {
                 lead_id: string;
             };
@@ -1730,7 +1977,10 @@ export interface operations {
             query?: {
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path: {
                 lead_id: string;
             };
@@ -1763,7 +2013,10 @@ export interface operations {
             query?: {
                 force?: boolean;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path: {
                 candidate_id: string;
             };
@@ -1796,7 +2049,10 @@ export interface operations {
             query?: {
                 kind?: "shipper" | "broker";
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1827,6 +2083,7 @@ export interface operations {
             query?: never;
             header?: {
                 "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
             };
             path?: never;
             cookie?: never;

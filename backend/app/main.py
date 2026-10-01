@@ -93,6 +93,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(router)
 
+    from fastapi import Depends
+
+    from app.api.auth import router as auth_router
     from app.api.call_list import router as call_list_router
     from app.api.capacity import router as capacity_router
     from app.api.crawl import router as crawl_router
@@ -102,14 +105,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.leads import router as leads_router
     from app.api.settings import router as settings_router
     from app.api.shipper_finder import router as shipper_finder_router
+    from app.auth.deps import current_user, require_user_or_cron
 
-    app.include_router(crawl_router)
-    app.include_router(leads_router)
-    app.include_router(email_router)
-    app.include_router(settings_router)
-    app.include_router(capacity_router)
-    app.include_router(call_list_router)
-    app.include_router(shipper_finder_router)
-    app.include_router(enrichment_router)
+    # ``require_user_or_cron`` fronts routers that mix user-facing GETs with
+    # the two cron-triggered writes (``/crawl/run``, ``/enrichment/auto-send``)
+    # so the GitHub Actions workflow (``.github/workflows/daily-crawl.yml``)
+    # can still hit those routes with its ``X-Cron-Secret`` header alone. The
+    # per-handler ``check_secret`` call inside each cron route remains the
+    # authoritative guard for THOSE routes. Everything else — leads, settings,
+    # shipper-finder, email, call-list, capacity, enrichment reads — requires
+    # a bearer. ``/health`` is standalone. The unsubscribe router stays open
+    # (recipients are never logged in).
+    user_or_cron = [Depends(require_user_or_cron)]
+    user_only = [Depends(current_user)]
+
+    app.include_router(auth_router)
+    app.include_router(crawl_router, dependencies=user_or_cron)
+    app.include_router(leads_router, dependencies=user_only)
+    app.include_router(email_router, dependencies=user_only)
+    app.include_router(settings_router, dependencies=user_only)
+    app.include_router(capacity_router, dependencies=user_only)
+    app.include_router(call_list_router, dependencies=user_only)
+    app.include_router(shipper_finder_router, dependencies=user_only)
+    app.include_router(enrichment_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)
     return app

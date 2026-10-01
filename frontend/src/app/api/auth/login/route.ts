@@ -1,0 +1,74 @@
+/**
+ * Login BFF — forwards credentials to the FastAPI `/auth/login`, then (on 200)
+ * sets a first-party HttpOnly session cookie on the Vercel origin so the
+ * browser carries session identity across reloads without ever persisting the
+ * JWT in `localStorage` (which is XSS-readable).
+ *
+ * Why BFF: the API is on `*.onrender.com` (different registrable domain), so
+ * a cross-site auth cookie there would be fragile (SameSite=None required,
+ * Safari ITP, public-suffix). A first-party cookie here owned by this
+ * origin is the simplest robust answer. We reuse `NEXT_PUBLIC_API_URL`
+ * server-side (readable in both contexts) — no new env var per plan
+ * amendment 1.
+ */
+
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
+const COOKIE = "ljm_session"
+const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7d — matches backend auth_access_ttl_days default.
+
+export const dynamic = "force-dynamic"
+
+export async function POST(req: Request) {
+  const body = await req.text()
+  let upstream: Response
+  try {
+    upstream = await fetch(`${BACKEND}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      cache: "no-store",
+    })
+  } catch (e) {
+    return Response.json({ detail: "backend unreachable", error: String(e) }, { status: 502 })
+  }
+
+  const text = await upstream.text()
+  if (!upstream.ok) {
+    return new Response(text, {
+      status: upstream.status,
+      headers: { "content-type": "application/json" },
+    })
+  }
+
+  let data: { access_token?: string; expires_in?: number } = {}
+  try {
+    data = JSON.parse(text)
+  } catch {
+    return Response.json({ detail: "bad backend response" }, { status: 502 })
+  }
+
+  if (!data.access_token) {
+    return Response.json({ detail: "no access_token in response" }, { status: 502 })
+  }
+
+  const maxAge = Math.min(data.expires_in ?? COOKIE_MAX_AGE_S, COOKIE_MAX_AGE_S)
+  // HttpOnly + Secure + SameSite=Lax: Lax allows top-level nav from external
+  // sites (so a bookmark to the dashboard still carries the cookie) but
+  // blocks CSRF on sensitive methods from third-party contexts.
+  const cookie = [
+    `${COOKIE}=${encodeURIComponent(data.access_token)}`,
+    "Path=/",
+    `Max-Age=${maxAge}`,
+    "HttpOnly",
+    "Secure",
+    "SameSite=Lax",
+  ].join("; ")
+
+  return new Response(text, {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "set-cookie": cookie,
+    },
+  })
+}

@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     # Cron shared secret — used from Slice 2 on.
     cron_secret: SecretStr | None = None
 
+    # Auth (migration 0008). The signing secret lives on the ``settings`` row
+    # — minted once by the migration, same pattern as ``unsubscribe_secret`` in
+    # 0007. Env override is optional (``AUTH_JWT_SECRET``) and wins at read
+    # time; see ``app.auth.tokens.effective_auth_jwt_secret``. TTL is in days
+    # because v1 has no refresh flow — just a long-lived access token cleared
+    # by the Vercel BFF cookie on logout.
+    auth_jwt_secret_override: SecretStr | None = Field(default=None, alias="AUTH_JWT_SECRET")
+    auth_access_ttl_days: int = Field(default=7, ge=1, le=30)
+
     # Demo safety net. Real outreach requires BOTH this=false AND settings.auto_send_enabled=true.
     simulated_delivery: bool = True
 

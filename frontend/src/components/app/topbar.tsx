@@ -1,13 +1,23 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Tire } from "@/components/brand/tire"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useSession } from "@/lib/auth/session"
 import { num } from "@/lib/format"
 import { useEngine } from "./engine"
 
 export function Topbar() {
   const { counters } = useEngine()
+  const { user, logout, status } = useSession()
+  const router = useRouter()
+
+  async function onLogout() {
+    await logout()
+    router.replace("/login")
+  }
+
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur md:px-8">
       <SidebarTrigger className="-ml-1" />
@@ -25,6 +35,18 @@ export function Topbar() {
         <Counter label="Emails sent today" value={counters.sent} />
         <Counter label="Replies today" value={counters.replies} />
       </dl>
+      {status === "authenticated" && user && (
+        <div className="ml-4 flex items-center gap-3 text-sm">
+          <span className="hidden text-muted-foreground md:inline">{user.email}</span>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-muted"
+          >
+            Log out
+          </button>
+        </div>
+      )}
     </header>
   )
 }

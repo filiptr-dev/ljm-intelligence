@@ -102,3 +102,55 @@ _db_mod._orig_create_engine = _orig_create_engine
 import app.main as _main_mod
 
 _main_mod.create_engine = _test_create_engine
+
+
+# --- 6. Install an auth override on every create_app() the tests build. -----
+# The feature/simple-password-login build added bearer-JWT auth to every
+# non-cron, non-health, non-unsubscribe route. Existing tests build their own
+# ``AsyncClient(app=create_app())`` without a token and we deliberately do NOT
+# weaken the real auth deps — instead, we wrap ``create_app`` to install a
+# ``dependency_overrides`` entry that resolves ``current_user`` /
+# ``require_user_or_cron`` to a fixed test principal. Auth-specific tests
+# (``test_auth.py``) clear this override on the app they own so the real deps
+# run end-to-end.
+_orig_create_app = _main_mod.create_app
+
+
+def _install_auth_bypass(app):
+    from app.auth.deps import UserPrincipal, current_user, require_user_or_cron
+
+    principal = UserPrincipal(id="01TEST000000000000000OWNER", email="test@ljm-demo.local", role="owner")
+    app.dependency_overrides[current_user] = lambda: principal
+    app.dependency_overrides[require_user_or_cron] = lambda: principal
+    return app
+
+
+def _test_create_app(settings=None):
+    app = _orig_create_app(settings) if settings is not None else _orig_create_app()
+    return _install_auth_bypass(app)
+
+
+_main_mod.create_app = _test_create_app
+
+
+import pytest
+
+
+@pytest.fixture
+def auth_bypass():
+    """Expose the installer so a test that builds its own app can opt in."""
+    return _install_auth_bypass
+
+
+@pytest.fixture
+def disable_auth_bypass():
+    """Context-ish helper: tests that need the REAL auth deps call this on their app."""
+
+    def _clear(app):
+        from app.auth.deps import current_user, require_user_or_cron
+
+        app.dependency_overrides.pop(current_user, None)
+        app.dependency_overrides.pop(require_user_or_cron, None)
+        return app
+
+    return _clear

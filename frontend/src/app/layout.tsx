@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { getStore } from "@/lib/data/store"
 import { DEMO_NOW, LEAD_KIND_LABEL } from "@/lib/data/types"
+import { SessionProvider } from "@/lib/auth/session"
 import "./globals.css"
 
 const sans = Barlow({ variable: "--font-barlow", subsets: ["latin", "latin-ext"], weight: ["400", "500", "600", "700"] })
@@ -37,18 +38,20 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${sans.variable} ${heading.variable} ${mono.variable} h-full antialiased`}>
       <body className="min-h-full bg-background">
-        <TooltipProvider>
-          <EngineProvider profile={store.profile} knownNames={store.knownNames} baseline={baseline} seed={seed}>
-            <SidebarProvider>
-              <AppSidebar />
-              <SidebarInset className="min-w-0 bg-background">
-                <Topbar />
-                <main className="mx-auto w-full max-w-[1440px] min-w-0 px-4 pt-5 pb-16 md:px-8">{children}</main>
-              </SidebarInset>
-            </SidebarProvider>
-          </EngineProvider>
-          <Toaster position="bottom-right" theme="light" />
-        </TooltipProvider>
+        <SessionProvider>
+          <TooltipProvider>
+            <EngineProvider profile={store.profile} knownNames={store.knownNames} baseline={baseline} seed={seed}>
+              <SidebarProvider>
+                <AppSidebar />
+                <SidebarInset className="min-w-0 bg-background">
+                  <Topbar />
+                  <main className="mx-auto w-full max-w-[1440px] min-w-0 px-4 pt-5 pb-16 md:px-8">{children}</main>
+                </SidebarInset>
+              </SidebarProvider>
+            </EngineProvider>
+            <Toaster position="bottom-right" theme="light" />
+          </TooltipProvider>
+        </SessionProvider>
       </body>
     </html>
   )
