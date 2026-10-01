@@ -154,6 +154,13 @@ class Settings(BaseSettings):
     # Cron shared secret — used from Slice 2 on.
     cron_secret: SecretStr | None = None
 
+    # Sentry — optional. When unset the SDK is not initialised, so dev runs
+    # clean (no network, no DSN probe). In prod set via ``SENTRY_DSN`` on
+    # Render; events are tagged with ``tenant_id`` + ``request_id`` pulled
+    # from the shared contextvars (see ``app/shared/sentry.py``).
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+
     # Auth (migration 0008). The signing secret lives on the ``settings`` row
     # — minted once by the migration, same pattern as ``unsubscribe_secret`` in
     # 0007. Env override is optional (``AUTH_JWT_SECRET``) and wins at read

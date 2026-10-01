@@ -68,6 +68,12 @@ services:
       # Shared secret with the GitHub Actions cron.
       - key: CRON_SECRET
         sync: false
+      # Sentry — optional. Unset = SDK not initialised (dev/CI stay offline).
+      # Events are tagged with tenant_id + request_id from the shared contextvars.
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.0"
       - key: FRONTEND_ORIGIN
         sync: false
       # Demo safety net — flip to false only when real send is deliberately enabled.

@@ -267,6 +267,12 @@ async def run_crawl(
 
     except Exception as exc:
         log.exception("run_crawl failed")
+        # Report to Sentry when wired. The ``before_send`` hook stamps
+        # tenant_id/request_id/job_id from the shared contextvars so the
+        # background-job path lands tagged the same way HTTP errors do.
+        from app.shared.sentry import capture_exception
+
+        capture_exception(exc)
         error = str(exc)
 
     finished = datetime.now(UTC)

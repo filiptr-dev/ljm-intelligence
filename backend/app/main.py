@@ -36,6 +36,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     _configure_logging(settings)
 
+    # Sentry — no-op when `SENTRY_DSN` is unset. Init before the app is
+    # built so framework integrations (FastAPI/Starlette) attach correctly.
+    # Dev + CI run clean without the DSN; prod sets it on Render.
+    from app.shared.sentry import init_sentry
+
+    init_sentry(settings)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings)
