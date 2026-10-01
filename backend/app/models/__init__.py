@@ -8,7 +8,15 @@ module (e.g. `app.prospecting.models.Lead`); callers that already used
 
 from __future__ import annotations
 
-from app.analysis.models import AiUsageLog  # noqa: F401
+from app.analysis.models import (  # noqa: F401
+    AiUsageLog,
+    BrokerLookalike,
+    BrokerPrediction,
+    ForgetContactAudit,
+    LanePrediction,
+    ObjectionCluster,
+    PredictionRun,
+)
 from app.identity.models import (  # noqa: F401
     Organization,
     OrganizationMember,
@@ -42,7 +50,13 @@ from app.prospecting.models import (  # noqa: F401
 
 __all__ = [
     "AiUsageLog",
+    "BrokerLookalike",
+    "BrokerPrediction",
     "CallOutcome",
+    "ForgetContactAudit",
+    "LanePrediction",
+    "ObjectionCluster",
+    "PredictionRun",
     "CapacityPost",
     "CrawlRun",
     "EmailTemplate",

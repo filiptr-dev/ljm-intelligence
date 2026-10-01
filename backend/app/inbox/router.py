@@ -219,3 +219,116 @@ async def thread_endpoint(session: Session, thread_id: str) -> ThreadOut:
         subject=msgs[-1].subject,
         messages=[EmailListItem(**m.__dict__) for m in msgs],
     )
+
+
+# ---- status board + compose/reply + forget-contact (plan Step 4/5/8) -----
+
+
+from fastapi import Body, Request
+from pydantic import EmailStr, constr
+
+
+class StatusBoardRowOut(BaseModel):
+    thread_id: str
+    mailbox: str
+    subject: str
+    broker_name: str | None
+    counterparty: str
+    last_direction: str
+    last_sent_at: datetime | None
+    owner_user_id: str | None
+    stage: str
+    next_step: str
+    message_count: int
+
+
+class ReplyIn(BaseModel):
+    body_text: constr(min_length=1, max_length=50_000)
+    body_html: constr(min_length=0, max_length=200_000) = ""
+
+
+class ReplyOut(BaseModel):
+    ok: bool
+    mode: str | None = None
+    message_id: str | None = None
+    to: str | None = None
+    reason: str | None = None
+
+
+class ComposeIn(BaseModel):
+    to: EmailStr
+    subject: constr(min_length=1, max_length=255)
+    body_text: constr(min_length=1, max_length=50_000)
+    body_html: constr(min_length=0, max_length=200_000) = ""
+
+
+class ComposeOut(BaseModel):
+    ok: bool
+    mode: str | None = None
+    message_id: str | None = None
+    thread_id: str | None = None
+
+
+class AiDraftOutModel(BaseModel):
+    subject: str
+    body_text: str
+    body_html: str
+
+
+class ForgetContactIn(BaseModel):
+    email: EmailStr
+
+
+class ForgetContactOut(BaseModel):
+    ok: bool
+    email: str | None = None
+    messages_deleted: int = 0
+    insights_deleted: int = 0
+    reason: str | None = None
+
+
+@router.get("/status-board", response_model=list[StatusBoardRowOut])
+async def status_board_endpoint(
+    session: Session, limit: int = Query(default=200, ge=1, le=1000),
+) -> list[StatusBoardRowOut]:
+    rows = await svc.status_board(session, limit=limit)
+    return [StatusBoardRowOut(**r.__dict__) for r in rows]
+
+
+@router.get("/threads/{thread_id}/ai-draft", response_model=AiDraftOutModel | None)
+async def ai_draft_endpoint(session: Session, thread_id: str):
+    draft = await svc.ai_draft_reply(session, thread_id)
+    if draft is None:
+        return None
+    return AiDraftOutModel(**draft.__dict__)
+
+
+@router.post("/threads/{thread_id}/reply", response_model=ReplyOut)
+async def reply_endpoint(session: Session, thread_id: str, payload: ReplyIn, request: Request) -> ReplyOut:
+    settings = request.app.state.settings
+    result = await svc.send_reply(
+        session, thread_id=thread_id,
+        body_text=payload.body_text, body_html=payload.body_html or payload.body_text,
+        settings=settings,
+    )
+    await session.commit()
+    return ReplyOut(**result)
+
+
+@router.post("/compose", response_model=ComposeOut)
+async def compose_endpoint(session: Session, payload: ComposeIn, request: Request) -> ComposeOut:
+    settings = request.app.state.settings
+    result = await svc.send_new_email(
+        session, to=str(payload.to), subject=payload.subject,
+        body_text=payload.body_text, body_html=payload.body_html or payload.body_text,
+        settings=settings,
+    )
+    await session.commit()
+    return ComposeOut(**result)
+
+
+@router.post("/forget-contact", response_model=ForgetContactOut)
+async def forget_contact_endpoint(session: Session, payload: ForgetContactIn) -> ForgetContactOut:
+    result = await svc.forget_contact(session, email=str(payload.email))
+    await session.commit()
+    return ForgetContactOut(**result)

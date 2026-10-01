@@ -19,6 +19,24 @@ log = logging.getLogger(__name__)
 
 @app.task(name="analysis.nightly", queue="default", pass_context=False)
 async def analysis_nightly(tenant_id: str) -> None:
-    """Reserved — fan-out owned by analysis plan. No-op until that lands."""
+    """Nightly fan-out: compute broker/lane predictions + lookalikes + objections.
+
+    One session, one transaction — the service's snapshot write (DELETE
+    previous rows + INSERT fresh ones) is atomic per table. Running twice
+    in a row is harmless: the second run replaces the first's rows.
+    """
     set_tenant(TenantId(tenant_id))
-    log.info("analysis.nightly: scheduled (bodies owned by analysis plan)")
+    from app.analysis.service import run_nightly
+    from app.config import get_settings
+    from app.db import create_engine, create_sessionmaker
+
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        sm = create_sessionmaker(engine)
+        async with sm() as session:
+            stats = await run_nightly(session)
+            await session.commit()
+        log.info("analysis.nightly: done %s", stats)
+    finally:
+        await engine.dispose()

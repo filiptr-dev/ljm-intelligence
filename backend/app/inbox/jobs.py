@@ -66,12 +66,24 @@ async def mail_incremental(tenant_id: str, mailbox: str | None = None) -> None:
 async def retention_sweep(tenant_id: str) -> None:
     """Nightly delete of `mail_messages` past `retention_until`.
 
-    The column is owned by the inbox-analysis migration (0018). Until that
-    lands this task is a safe no-op: the SELECT returns zero rows and the
-    DELETE is a no-op.
+    The column is stamped by ingest (``now() + 18 months`` default). The
+    delete is naturally idempotent — running twice removes nothing extra.
     """
     _bind(tenant_id)
-    log.info("inbox.retention_sweep: scheduled (bodies owned by inbox-analysis plan)")
+    from app.config import get_settings
+    from app.db import create_engine, create_sessionmaker
+    from app.inbox.service import retention_sweep as svc_sweep
+
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        sm = create_sessionmaker(engine)
+        async with sm() as session:
+            result = await svc_sweep(session)
+            await session.commit()
+        log.info("inbox.retention_sweep: done %s", result)
+    finally:
+        await engine.dispose()
 
 
 @app.task(name="inbox.extract_load_from_message", queue="default", pass_context=False)

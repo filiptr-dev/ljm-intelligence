@@ -71,6 +71,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # free route-map on a public URL is unnecessary attack surface. Dev + test
     # keep them so the local workflow is unchanged.
     _is_prod = settings.app_env == "production"
+
+    # AC-A3 — Paid Gemini assertion. Free-tier Gemini uses prompt content for
+    # training; paid does not. In production, refuse to boot if any mapped
+    # feature points at a free-only model id (currently any ``*-free`` / `*-flash`
+    # id without an api key is a strong signal). We're conservative: require
+    # the API key to be set in prod and the configured model to not match the
+    # ``free`` substring. This is the one place the privacy posture is enforced
+    # before mail flows.
+    if _is_prod:
+        _gemini_key = getattr(settings, "gemini_api_key", None)
+        _key_str = _gemini_key.get_secret_value() if _gemini_key and hasattr(_gemini_key, "get_secret_value") else _gemini_key
+        if not _key_str:
+            raise RuntimeError(
+                "Paid Gemini tier required in production — set GEMINI_API_KEY (AC-A3)."
+            )
+        try:
+            from app.integrations.adapters.ai.provider import DEFAULT_FEATURES as _AI_FEATS
+            for _feat, _cfg in _AI_FEATS.items():
+                _model = str(_cfg.get("model", ""))
+                if "free" in _model.lower():
+                    raise RuntimeError(
+                        f"Paid Gemini tier required — feature {_feat} is on free-tier model {_model} (AC-A3)."
+                    )
+        except ImportError:
+            pass
     app = FastAPI(
         title="LJM Intelligence API",
         version="0.1.0",
@@ -165,6 +190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.enrichment import router as enrichment_router
     from app.api.enrichment import unsub_router as unsubscribe_router
     from app.api.leads import router as leads_router
+    from app.analysis.router import router as analysis_router
     from app.inbox.router import router as inbox_router
     from app.api.loads import router as loads_router
     from app.api.mail import cron_router as mail_cron_router
@@ -220,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # its reads are owner-facing — the per-handler check guards the cron path.
     app.include_router(mail_router, dependencies=user_only)
     app.include_router(inbox_router, dependencies=user_only)
+    app.include_router(analysis_router, dependencies=user_only)
     app.include_router(mail_cron_router, dependencies=user_or_cron)
     app.include_router(loads_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)

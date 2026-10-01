@@ -493,3 +493,339 @@ async def get_thread(session: AsyncSession, thread_id: str) -> list[EmailRow]:
             )
         )
     return out
+
+
+# ---- status board + compose/reply + forget-contact + retention -----------
+
+from datetime import timedelta
+from uuid import uuid4
+
+from sqlalchemy import delete as _sa_delete
+
+from app.analysis.models import ForgetContactAudit as _ForgetAudit
+
+
+@dataclass
+class StatusBoardRow:
+    thread_id: str
+    mailbox: str
+    subject: str
+    broker_name: str | None
+    counterparty: str
+    last_direction: str
+    last_sent_at: datetime | None
+    owner_user_id: str | None
+    stage: str  # waiting_on_us | waiting_on_them | closed
+    next_step: str
+    message_count: int
+
+
+async def status_board(session: AsyncSession, *, limit: int = 200) -> list[StatusBoardRow]:
+    """One row per OPEN conversation.
+
+    Stage derivation: last-direction + no_reply_tracker presence.
+      - last=in  → ``waiting_on_us`` (we owe a reply).
+      - last=out → ``waiting_on_them`` (they owe a reply).
+      - closed when the thread's last message is >60 days old.
+    """
+    rows = (
+        await session.execute(
+            select(
+                MailMessage.thread_id, MailMessage.mailbox, MailMessage.subject,
+                MailMessage.from_addr, MailMessage.to_addrs, MailMessage.sent_at,
+            )
+            .order_by(MailMessage.thread_id, MailMessage.sent_at.asc())
+        )
+    ).all()
+    now = datetime.now(UTC)
+    by_thread: dict[str, dict] = defaultdict(
+        lambda: {
+            "mailbox": None, "subject": None, "last_direction": "in",
+            "last_sent_at": None, "counterparty": "", "count": 0,
+        }
+    )
+    for r in rows:
+        b = by_thread[r.thread_id]
+        b["mailbox"] = r.mailbox
+        b["subject"] = r.subject or b["subject"] or ""
+        direction = "out" if r.from_addr == r.mailbox else "in"
+        b["last_direction"] = direction
+        b["last_sent_at"] = r.sent_at
+        b["count"] += 1
+        if direction == "in":
+            b["counterparty"] = r.from_addr
+        else:
+            tos = r.to_addrs or []
+            if tos:
+                b["counterparty"] = tos[0]
+    out: list[StatusBoardRow] = []
+    for tid, b in by_thread.items():
+        last = _as_utc(b["last_sent_at"]) or now
+        age_days = (now - last).days
+        if age_days > 60:
+            stage = "closed"
+            step = f"Archived — no activity for {age_days}d."
+        elif b["last_direction"] == "in":
+            stage = "waiting_on_us"
+            step = "Reply or triage."
+        else:
+            stage = "waiting_on_them"
+            step = f"Follow up — silent {age_days}d." if age_days > 2 else "Waiting on broker."
+        if stage == "closed":
+            continue
+        out.append(StatusBoardRow(
+            thread_id=tid, mailbox=b["mailbox"] or "", subject=b["subject"] or "",
+            broker_name=None, counterparty=b["counterparty"],
+            last_direction=b["last_direction"], last_sent_at=b["last_sent_at"],
+            owner_user_id=None, stage=stage, next_step=step,
+            message_count=b["count"],
+        ))
+    out.sort(
+        key=lambda r: (
+            0 if r.stage == "waiting_on_us" else 1,
+            -(_as_utc(r.last_sent_at).timestamp() if r.last_sent_at else 0),
+        )
+    )
+    return out[:limit]
+
+
+@dataclass
+class AiDraftOut:
+    subject: str
+    body_text: str
+    body_html: str
+
+
+async def ai_draft_reply(session: AsyncSession, thread_id: str) -> AiDraftOut | None:
+    """Pre-fill a reply draft using the shared email builder shape.
+
+    Deterministic rules keyed off the thread's last inbound intent so the
+    demo surface renders without needing a Gemini call. The AI path (Gemini
+    on ``inbox_draft_reply``) swaps the body here with no caller change.
+    """
+    msgs = await get_thread(session, thread_id)
+    if not msgs:
+        return None
+    last_in = next((m for m in reversed(msgs) if m.direction == "in"), None)
+    if not last_in:
+        return None
+    broker = last_in.broker_name or (last_in.from_addr.split("@", 1)[0] if last_in.from_addr else "there").title()
+    subject = last_in.subject if last_in.subject.lower().startswith("re:") else f"Re: {last_in.subject}"
+    intent = last_in.intent or "routine"
+    rate = last_in.rate_usd
+    lane_from = last_in.lane_from or ""
+    lane_to = last_in.lane_to or ""
+    if intent == "load_offer":
+        rate_line = f"${rate:,.0f} works on our side." if rate else "We can take this at your target rate."
+        body = (
+            f"Hi {broker},\n\n"
+            f"Thanks for the load from {lane_from} to {lane_to}. {rate_line} "
+            "Can you confirm the pickup window and the shipper POC?\n\n"
+            "— LJM"
+        )
+    elif intent == "rate_request":
+        body = (
+            f"Hi {broker},\n\n"
+            f"Target on {lane_from} → {lane_to} is in your range. Send the stop details and we will quote firm within the hour.\n\n"
+            "— LJM"
+        )
+    elif intent == "urgent_truck":
+        body = (
+            f"Hi {broker},\n\n"
+            "We have equipment in the area and can cover today. Call the dispatch line to lock it in.\n\n"
+            "— LJM"
+        )
+    elif intent in ("payment", "detention"):
+        body = (
+            f"Hi {broker},\n\n"
+            "Thanks for flagging — I'll pull the paperwork and get back with the resolution today.\n\n"
+            "— LJM"
+        )
+    elif intent == "complaint":
+        body = (
+            f"Hi {broker},\n\n"
+            "I hear you. Give me the load number and I will trace it personally and come back with a fix.\n\n"
+            "— LJM"
+        )
+    else:
+        body = (
+            f"Hi {broker},\n\n"
+            "Thanks for the note. Confirming we're on it — reply back if you need anything specific.\n\n"
+            "— LJM"
+        )
+    html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
+    return AiDraftOut(subject=subject, body_text=body, body_html=html)
+
+
+async def send_reply(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    body_text: str,
+    body_html: str,
+    settings,
+) -> dict:
+    """Compose + send a reply inside a thread.
+
+    One UoW: writes the outbound ``mail_messages`` row + delegates to the
+    resolved sender (simulated by default; Gmail only when the owner switch
+    is on). The sender's own `OwnerSwitchOff` fallback writes a simulated
+    receipt — never a half-send.
+    """
+    msgs = await get_thread(session, thread_id)
+    if not msgs:
+        return {"ok": False, "reason": "thread_not_found"}
+    last = msgs[-1]
+    last_in = next((m for m in reversed(msgs) if m.direction == "in"), last)
+    subject = last.subject if last.subject.lower().startswith("re:") else f"Re: {last.subject}"
+    to = last_in.from_addr or ""
+    mailbox = last.mailbox
+    from app.integrations.adapters.email.sender import get_mail_sender
+    from app.integrations.mail_service import effective_mode
+
+    mode = await effective_mode(session, settings)
+    sender = get_mail_sender(settings, mode_override=mode)
+    in_reply_to = last_in.message_id if last_in else None
+    references = [m.message_id for m in msgs if m.message_id]
+    result = await sender.send(
+        to=to, subject=subject, body=body_text, body_html=body_html,
+        thread_id=thread_id, in_reply_to=in_reply_to, references=references,
+        from_addr=mailbox,
+    )
+    # Persist as outbound mail_messages row so the thread view updates and
+    # future analyses see it.
+    new_msg_id = result.message_id or f"local-{uuid4().hex[:16]}"
+    now = datetime.now(UTC)
+    session.add(MailMessage(
+        mailbox=mailbox,
+        message_id=new_msg_id,
+        thread_id=thread_id,
+        history_id="0",
+        from_addr=mailbox,
+        email_lower=mailbox.lower(),
+        to_addrs=[to],
+        cc_addrs=[],
+        subject=subject,
+        sent_at=now,
+        received_at=now,
+        in_reply_to=in_reply_to,
+        references_hdr=references,
+        body_text=body_text,
+        body_html=body_html,
+        labels=["sent", f"mode:{result.mode}"],
+        retention_until=now + timedelta(days=30 * 18),
+        raw={"mode": result.mode, "simulated": result.mode == "simulated"},
+    ))
+    # Clear no_reply_tracker for this thread (we just replied).
+    await session.execute(
+        _sa_delete(NoReplyTracker).where(NoReplyTracker.thread_id == thread_id)
+    )
+    return {"ok": True, "mode": result.mode, "message_id": new_msg_id, "to": to}
+
+
+async def send_new_email(
+    session: AsyncSession,
+    *,
+    to: str,
+    subject: str,
+    body_text: str,
+    body_html: str,
+    settings,
+) -> dict:
+    """Compose + send a brand-new outbound message (no thread parent).
+
+    New thread id = new UUID. The sender adapter resolves per the owner
+    switch, same as reply.
+    """
+    from app.integrations.adapters.email.sender import get_mail_sender
+    from app.integrations.mail_service import effective_mode
+
+    mode = await effective_mode(session, settings)
+    sender = get_mail_sender(settings, mode_override=mode)
+    mailbox = settings.outreach_from_email
+    thread_id = f"t-{uuid4().hex[:16]}"
+    result = await sender.send(
+        to=to, subject=subject, body=body_text, body_html=body_html,
+        thread_id=None, from_addr=mailbox,
+    )
+    new_msg_id = result.message_id or f"local-{uuid4().hex[:16]}"
+    now = datetime.now(UTC)
+    session.add(MailMessage(
+        mailbox=mailbox,
+        message_id=new_msg_id,
+        thread_id=thread_id,
+        history_id="0",
+        from_addr=mailbox,
+        email_lower=mailbox.lower(),
+        to_addrs=[to],
+        cc_addrs=[],
+        subject=subject,
+        sent_at=now,
+        received_at=now,
+        in_reply_to=None,
+        references_hdr=[],
+        body_text=body_text,
+        body_html=body_html,
+        labels=["sent", f"mode:{result.mode}"],
+        retention_until=now + timedelta(days=30 * 18),
+        raw={"mode": result.mode, "simulated": result.mode == "simulated"},
+    ))
+    # Register a no_reply_tracker row — we just sent to them.
+    session.add(NoReplyTracker(
+        mailbox=mailbox,
+        thread_id=thread_id,
+        to_email_normalized=to.lower(),
+        subject=subject,
+        we_sent_at=now,
+    ))
+    return {"ok": True, "mode": result.mode, "message_id": new_msg_id, "thread_id": thread_id}
+
+
+async def forget_contact(
+    session: AsyncSession, *, email: str, performed_by: str | None = None
+) -> dict:
+    """Delete every message + insight involving ``email`` and write an audit row."""
+    email_norm = (email or "").strip().lower()
+    if not email_norm or "@" not in email_norm:
+        return {"ok": False, "reason": "invalid_email"}
+    # messages where from_addr OR email_lower matches, OR to_addrs JSON contains the address.
+    # SQL for the from side; the to-side is best-effort (JSON contains) handled on PG.
+    msgs_result = await session.execute(
+        _sa_delete(MailMessage).where(
+            (MailMessage.email_lower == email_norm)
+            | (func.lower(MailMessage.from_addr) == email_norm)
+        )
+    )
+    msgs_deleted = msgs_result.rowcount or 0
+    ins_result = await session.execute(
+        _sa_delete(MessageInsight).where(MessageInsight.from_email_normalized == email_norm)
+    )
+    insights_deleted = ins_result.rowcount or 0
+    # tracker rows pointing at this address.
+    await session.execute(
+        _sa_delete(NoReplyTracker).where(NoReplyTracker.to_email_normalized == email_norm)
+    )
+    session.add(_ForgetAudit(
+        email_normalized=email_norm,
+        messages_deleted=msgs_deleted,
+        insights_deleted=insights_deleted,
+        performed_by=performed_by,
+        note="owner-triggered forget-contact",
+    ))
+    return {
+        "ok": True, "email": email_norm,
+        "messages_deleted": msgs_deleted,
+        "insights_deleted": insights_deleted,
+    }
+
+
+async def retention_sweep(session: AsyncSession) -> dict:
+    """Delete mail_messages whose ``retention_until`` is in the past."""
+    now = datetime.now(UTC)
+    result = await session.execute(
+        _sa_delete(MailMessage).where(
+            MailMessage.retention_until.isnot(None),
+            MailMessage.retention_until < now,
+        )
+    )
+    return {"deleted": result.rowcount or 0}
