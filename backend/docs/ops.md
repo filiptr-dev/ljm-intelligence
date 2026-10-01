@@ -17,8 +17,11 @@ No code change in between.
 | Env var | Purpose | Where |
 |---|---|---|
 | `SEED_OWNER_PASSWORD` | Password hashed into the seed owner account on migration 0008. Production refuses to run without it. | Render dashboard + GitHub Actions migration jobs |
-| `DATABASE_URL_DIRECT` | Neon **direct (non-pooler)** URL. The worker + Alembic use this. The pooler doesn't support `LISTEN/NOTIFY`. | Render dashboard (worker service), local Compose `.env` |
+| `DATABASE_URL_DIRECT` | Neon **direct (non-pooler)** URL. The worker + Alembic read it. **Set it on Render for the API service too** so Alembic migrations use the direct branch — if unset, both Alembic and the worker's connector fall back to `DATABASE_URL` (the pooled branch). The pooled URL handles DDL correctly, but it does **not** support `LISTEN/NOTIFY` or `SET LOCAL`, so the worker degrades (polling only, broader session scope). Treat the fallback as "functional but not recommended"; set the direct URL in prod. | Render dashboard (API + worker), local Compose `.env` |
 | `CRON_SECRET` | Already defined. Now also fronts `POST /jobs/drain`. | Render + GitHub Actions `queue-drain.yml` |
+| `JOBS_IN_PROCESS_KICK_ENABLED` | `true` on free Render (no persistent worker, cron every 5 min) — after a user-triggered dispatch, the API process runs one bounded worker tick as a background task so "Crawl now" starts in seconds, not minutes. Flip to `false` on the user's infra once an always-on `worker` container runs. | Render env |
+| `TRUSTED_PROXY_SECRET` | Shared with the Next BFF (`LJM_PROXY_SECRET` on Vercel). Lets the backend trust a Vercel-forwarded `X-LJM-Client-IP` so the per-IP login rate limiter sees real browser IPs, not Vercel's egress address collapsed into one bucket. | Render + Vercel env |
+| `TRUSTED_PROXY_HOPS` | Default `1` (Render alone). `2` behind Cloudflare → Render. Determines which entry of `X-Forwarded-For` is trusted (`[-hops]`, counted from the right). | Render env |
 
 The queue layer adds **no other secrets**.
 

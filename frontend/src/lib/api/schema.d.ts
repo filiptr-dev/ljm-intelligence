@@ -784,9 +784,10 @@ export interface paths {
          * Drain
          * @description Run the worker for ``seconds`` and return a summary.
          *
-         *     Protected by CRON_SECRET so the GitHub Actions workflow is the only
-         *     external caller. Owners can also hit it from an authenticated session
-         *     (the router mount uses ``require_user_or_cron``).
+         *     Protected by ``CRON_SECRET`` and only callable by the GitHub Actions
+         *     ``queue-drain.yml`` workflow. The router-level ``require_user_or_cron``
+         *     dep accepts a bearer token too, but the per-handler ``check_secret``
+         *     call fences the actual work: a user with only a bearer gets 401 here.
          */
         post: operations["drain_jobs_drain_post"];
         delete?: never;

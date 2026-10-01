@@ -20,17 +20,45 @@
 import { SESSION_COOKIE } from "@/lib/auth/bff"
 
 const BACKEND = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
+// MF2 — shared secret between this BFF and FastAPI's rate-limiter trust layer.
+// On a BFF every request to the backend arrives from Vercel's IP pool; a
+// 5/min per-IP limit on that IP would lock every user out globally. The
+// backend only trusts the forwarded ``X-LJM-Client-IP`` header when this
+// secret matches, so an attacker who guesses the header name alone can't
+// bypass the per-IP guard. Server-only env var — never exposed to the
+// browser.
+const PROXY_SECRET = process.env.LJM_PROXY_SECRET || ""
 const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7d — matches backend auth_access_ttl_days default.
+
+function clientIpFrom(req: Request): string {
+  // Vercel's edge adds ``x-forwarded-for`` with the real client IP as the
+  // leftmost entry (one hop upstream from this server). We prefer the
+  // more explicit ``x-real-ip`` when present.
+  const real = req.headers.get("x-real-ip")
+  if (real) return real.trim()
+  const xff = req.headers.get("x-forwarded-for")
+  if (xff) {
+    const first = xff.split(",")[0]?.trim()
+    if (first) return first
+  }
+  return ""
+}
 
 export const dynamic = "force-dynamic"
 
 export async function POST(req: Request) {
   const body = await req.text()
+  const headers: Record<string, string> = { "content-type": "application/json" }
+  const clientIp = clientIpFrom(req)
+  if (PROXY_SECRET && clientIp) {
+    headers["x-ljm-client-ip"] = clientIp
+    headers["x-ljm-proxy-secret"] = PROXY_SECRET
+  }
   let upstream: Response
   try {
     upstream = await fetch(`${BACKEND}/auth/login`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body,
       cache: "no-store",
     })

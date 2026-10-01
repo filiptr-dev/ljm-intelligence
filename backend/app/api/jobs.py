@@ -77,35 +77,18 @@ async def _queue_installed(sessionmaker) -> bool:
         return False
 
 
-@router.post("/drain", response_model=DrainOut)
-async def drain(
-    request: Request,
-    seconds: int = Query(default=25, ge=1, le=55),
-    x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
-) -> DrainOut:
-    """Run the worker for ``seconds`` and return a summary.
+async def _drain_once(sessionmaker, *, seconds: int) -> DrainOut:
+    """Bounded in-process drain. Reused by `/jobs/drain` AND by on-demand
+    HTTP routes that need the worker to pick up their fresh job within
+    seconds (not up to 5 min when waiting for the cron drain).
 
-    Protected by CRON_SECRET so the GitHub Actions workflow is the only
-    external caller. Owners can also hit it from an authenticated session
-    (the router mount uses ``require_user_or_cron``).
+    The advisory lock on ``hashtext('jobs.drain')`` is the single
+    serialising point: a background kick that fires in the same instant
+    as a GitHub Actions cron tick sees ``got_lock=False`` and no-ops.
     """
-    settings: Settings = request.app.state.settings
-    # Belt-and-braces: the router dep is `require_user_or_cron`, but the
-    # cron secret is the authoritative guard for the cron caller — a bare
-    # bearer-less request from the public internet must not drain.
-    check_secret(settings, x_cron_secret)
-
-    sessionmaker = request.app.state.sessionmaker
     if not await _queue_installed(sessionmaker):
         return DrainOut(ran=0, succeeded=0, failed=0, remaining=0, reason="queue schema not installed")
 
-    # Overlap guard — write an advisory lock-like sentinel row. Two
-    # concurrent GH Actions ticks: the second sees it and no-ops.
-    #
-    # We use pg_try_advisory_lock keyed on a stable hash of "jobs.drain".
-    # Advisory locks are process-level; procrastinate's own `SKIP LOCKED`
-    # protects actual job rows, so this just prevents the useless work
-    # of two drain loops competing.
     async with sessionmaker() as s:
         lock_row = (
             await s.execute(text("SELECT pg_try_advisory_lock(hashtext('jobs.drain'))"))
@@ -122,7 +105,6 @@ async def drain(
     try:
         from app.shared.queue import app as queue_app
 
-        # Snapshot counts BEFORE the drain so we can report what moved.
         before = await _status_counts(sessionmaker)
 
         async with queue_app.open_async():
@@ -133,8 +115,6 @@ async def drain(
             except Exception:  # noqa: BLE001 — older/newer procrastinate paths
                 pass
 
-            # Bounded worker: pass `wait=False` so empty queue returns fast,
-            # and let asyncio.wait_for enforce the wall-clock budget.
             try:
                 await asyncio.wait_for(
                     queue_app.run_worker_async(
@@ -161,6 +141,48 @@ async def drain(
         async with sessionmaker() as s:
             await s.execute(text("SELECT pg_advisory_unlock(hashtext('jobs.drain'))"))
             await s.commit()
+
+
+async def kick_in_process_drain(sessionmaker, settings, *, seconds: int = 10) -> None:
+    """Fire-and-forget drain used by on-demand routes.
+
+    Guarded by ``settings.jobs_in_process_kick_enabled`` — on the user's
+    own infra where an always-on worker container exists, this is set to
+    False so the API process doesn't duplicate the worker's work. On
+    Render free (no worker service, cron every 5 min) it's True by
+    default so "Crawl now" doesn't wait minutes.
+
+    Catches every exception — the HTTP response has already been sent;
+    a failure to drain is logged and the next cron tick picks the job up
+    anyway. We never re-raise into the background task scheduler.
+    """
+    if not getattr(settings, "jobs_in_process_kick_enabled", True):
+        return
+    try:
+        await _drain_once(sessionmaker, seconds=seconds)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("kick_in_process_drain failed (next cron tick will retry): %s", exc)
+
+
+@router.post("/drain", response_model=DrainOut)
+async def drain(
+    request: Request,
+    seconds: int = Query(default=25, ge=1, le=55),
+    x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
+) -> DrainOut:
+    """Run the worker for ``seconds`` and return a summary.
+
+    Protected by ``CRON_SECRET`` and only callable by the GitHub Actions
+    ``queue-drain.yml`` workflow. The router-level ``require_user_or_cron``
+    dep accepts a bearer token too, but the per-handler ``check_secret``
+    call fences the actual work: a user with only a bearer gets 401 here.
+    """
+    settings: Settings = request.app.state.settings
+    # The cron secret is the authoritative guard — a bearer without it
+    # cannot drain. (The router dep is there for routing-table symmetry.)
+    check_secret(settings, x_cron_secret)
+
+    return await _drain_once(request.app.state.sessionmaker, seconds=seconds)
 
 
 async def _status_counts(sessionmaker) -> dict[str, int]:

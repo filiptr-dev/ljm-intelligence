@@ -26,7 +26,7 @@ from app.auth.deps import UserPrincipal, current_user
 from app.auth.passwords import verify_password
 from app.auth.tokens import effective_auth_jwt_secret, mint_access_token
 from app.models import User
-from app.shared.rate_limit import check_login_rate
+from app.shared.rate_limit import check_login_rate, resolve_client_ip
 
 log = logging.getLogger(__name__)
 
@@ -71,10 +71,27 @@ async def login(request: Request, body: LoginIn) -> LoginOut:
     # the DB round-trip so a flood never hits argon2 verification. The 429
     # body carries Retry-After seconds; the Next BFF surfaces it as "too many
     # attempts, try again in N seconds" without leaking account existence.
-    client_ip = (request.client.host if request.client else "unknown") or "unknown"
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip() or client_ip
+    #
+    # MF2 — the IP is resolved by ``resolve_client_ip`` which handles two
+    # calling patterns: (a) BFF path, where the Next route forwards the real
+    # browser IP in ``X-LJM-Client-IP`` under a shared secret so Vercel's
+    # single egress IP doesn't collapse all users into one 5/min bucket;
+    # (b) direct path, where ``X-Forwarded-For`` is parsed with
+    # ``trusted_proxy_hops`` so an attacker-controlled leftmost entry can
+    # never spoof the identity Render actually appended.
+    trusted_proxy_secret = (
+        settings.trusted_proxy_secret.get_secret_value()
+        if settings.trusted_proxy_secret
+        else None
+    )
+    client_ip = resolve_client_ip(
+        xff_header=request.headers.get("x-forwarded-for"),
+        client_host=request.client.host if request.client else None,
+        client_ip_header=request.headers.get("x-ljm-client-ip"),
+        proxy_secret_header=request.headers.get("x-ljm-proxy-secret"),
+        trusted_proxy_secret=trusted_proxy_secret,
+        trusted_proxy_hops=settings.trusted_proxy_hops,
+    )
     retry_after = check_login_rate(client_ip, email_lower)
     if retry_after > 0:
         raise HTTPException(

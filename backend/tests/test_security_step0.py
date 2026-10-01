@@ -84,3 +84,86 @@ async def test_s05_email_window_hits_429_across_ips():
         assert check_login_rate(f"10.0.0.{i}", "x@y.co") == 0.0
     retry = check_login_rate("10.0.0.99", "x@y.co")
     assert retry > 0
+
+
+# ---------- MF2 — X-Forwarded-For / BFF-secret resolution -------------------
+
+
+def test_mf2_spoofed_leftmost_xff_is_ignored():
+    """Attacker sends ``X-Forwarded-For: 1.2.3.4, <real-render-ip>``.
+
+    With trusted_proxy_hops=1 (Render alone), the rightmost entry wins.
+    Taking [0] would let the attacker spoof per-IP limits for free; the
+    N-th-from-right rule is what makes the limiter actually bite.
+    """
+    from app.shared.rate_limit import resolve_client_ip
+
+    ip = resolve_client_ip(
+        xff_header="1.2.3.4, 10.0.0.5",
+        client_host="10.0.0.5",
+        client_ip_header=None,
+        proxy_secret_header=None,
+        trusted_proxy_secret=None,
+        trusted_proxy_hops=1,
+    )
+    assert ip == "10.0.0.5"
+
+
+def test_mf2_two_hops_takes_second_from_right():
+    """Cloudflare → Render chain: trusted_proxy_hops=2."""
+    from app.shared.rate_limit import resolve_client_ip
+
+    ip = resolve_client_ip(
+        xff_header="attacker, real-client, cloudflare-edge, render-proxy",
+        client_host="render-proxy",
+        client_ip_header=None,
+        proxy_secret_header=None,
+        trusted_proxy_secret=None,
+        trusted_proxy_hops=2,
+    )
+    assert ip == "cloudflare-edge"
+
+
+def test_mf2_bff_shared_secret_uses_client_ip_header():
+    """BFF path: Vercel proxies, so Render sees Vercel's IP for everyone.
+    The Next route forwards the real browser IP under a shared secret;
+    the backend trusts it only when the secret matches.
+    """
+    from app.shared.rate_limit import resolve_client_ip
+
+    ip = resolve_client_ip(
+        xff_header="76.76.21.21",  # vercel egress — would collapse all users
+        client_host="76.76.21.21",
+        client_ip_header="203.0.113.42",
+        proxy_secret_header="correct-shared-secret",
+        trusted_proxy_secret="correct-shared-secret",
+        trusted_proxy_hops=1,
+    )
+    assert ip == "203.0.113.42"
+
+
+def test_mf2_bff_wrong_secret_rejects_header_falls_through_to_xff():
+    """Attacker sends ``X-LJM-Client-IP: 1.2.3.4`` without the secret.
+    The forwarded header is ignored; we fall through to the XFF rule."""
+    from app.shared.rate_limit import resolve_client_ip
+
+    ip = resolve_client_ip(
+        xff_header="attacker, 10.0.0.5",
+        client_host="10.0.0.5",
+        client_ip_header="1.2.3.4",
+        proxy_secret_header="not-the-right-secret",
+        trusted_proxy_secret="correct-shared-secret",
+        trusted_proxy_hops=1,
+    )
+    assert ip == "10.0.0.5"
+
+
+def test_mf2_fallback_to_client_host_when_no_xff():
+    from app.shared.rate_limit import resolve_client_ip
+
+    ip = resolve_client_ip(
+        xff_header=None, client_host="5.6.7.8",
+        client_ip_header=None, proxy_secret_header=None,
+        trusted_proxy_secret=None, trusted_proxy_hops=1,
+    )
+    assert ip == "5.6.7.8"

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { BadgeCheck, Mail, MapPin, RefreshCw, Search, Send, Sparkles, Zap } from "lucide-react"
 import { useBackendLeads } from "@/lib/backend-leads"
-import { useLatestRun } from "@/lib/use-backend"
+import { useJobStatus, useLatestRun } from "@/lib/use-backend"
 import { Plate } from "@/components/brand/marks"
 import { Tire } from "@/components/brand/tire"
 import { Button } from "@/components/ui/button"
@@ -58,6 +58,22 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   const liveIds = React.useMemo(() => new Set(liveLeads.map((l) => l.id)), [liveLeads])
   const { real: realLeads, live: backendLive, reload: reloadRealLeads } = useBackendLeads(200)
   const { run: latestRun, running: triggering, trigger: triggerCrawl } = useLatestRun()
+  // MF3 — poll the procrastinate job directly so a worker-side failure
+  // surfaces as a toast + a cleared "Crawling…" state, instead of the
+  // button spinning forever while CrawlRun stays queued. The CrawlRun
+  // row polling (useLatestRun) still drives the primary live state; this
+  // hook is the escape hatch for failures that never reach the row.
+  const [crawlJobId, setCrawlJobId] = React.useState<number | null>(null)
+  useJobStatus(crawlJobId, {
+    onDone: () => {
+      setCrawlJobId(null)
+      void reloadRealLeads()
+    },
+    onFail: (err) => {
+      setCrawlJobId(null)
+      toast.error("Crawl failed", { description: err ?? "worker error" })
+    },
+  })
 
   const all = React.useMemo(
     () => [...realLeads, ...liveLeads, ...pool],
@@ -122,7 +138,8 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
           latest={latestRun}
           triggering={triggering}
           onCrawl={async () => {
-            await triggerCrawl(20)
+            const jid = await triggerCrawl(20)
+            if (jid != null) setCrawlJobId(jid)
             // Refresh the real-leads panel after a short wait so the freshly-persisted rows show up.
             setTimeout(reloadRealLeads, 4000)
           }}

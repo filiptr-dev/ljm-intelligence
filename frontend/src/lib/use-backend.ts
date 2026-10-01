@@ -65,31 +65,27 @@ export function useLatestRun(pollMs = 4000) {
     return () => clearInterval(id)
   }, [fetchLatest, pollMs, run?.status])
 
-  const trigger = React.useCallback(async (limit = 25) => {
+  const trigger = React.useCallback(async (limit = 25): Promise<number | null> => {
     setRunning(true)
     try {
       // The proxy injects `X-Cron-Secret` for POST /crawl/run from a server-
       // only env var; the browser never learns the secret. See
       // `app/api/proxy/[...path]/route.ts`.
       //
-      // Backend may now return `{run_id, status, job_id}` when the queue is
+      // Backend may return `{run_id, status, job_id}` when the queue is
       // installed — the pipeline runs in the worker, not inside this request.
       // Either way the `CrawlRun` row progresses queued → running → done,
-      // and `useLatestRun` keeps polling `/crawl/latest` to reflect it, so
-      // the UI continues to show live state. The optional `job_id` is
-      // surfaced on `window.__ljm_last_job_id` for the Jobs admin page.
+      // and `useLatestRun` keeps polling `/crawl/latest`. The `job_id` is
+      // handed to the caller so they can wire `useJobStatus` for the
+      // procrastinate-level failure signal (job stuck in failed before the
+      // CrawlRun row got an update).
       const resp = await api.POST(
         "/crawl/run",
         { params: { query: { trigger: "on_demand", limit } } },
       )
-      // Shape differs between queued and inline paths; both are compatible.
-      if (resp.data && typeof window !== "undefined") {
-        const anyData = resp.data as { job_id?: number | null }
-        if (anyData.job_id) {
-          ;(window as unknown as { __ljm_last_job_id?: number }).__ljm_last_job_id = anyData.job_id
-        }
-      }
       await fetchLatest()
+      const data = resp.data as { job_id?: number | null } | undefined
+      return data?.job_id ?? null
     } finally {
       setRunning(false)
     }

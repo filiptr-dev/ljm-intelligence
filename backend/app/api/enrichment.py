@@ -21,7 +21,7 @@ import logging
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -258,12 +258,15 @@ async def _auto_send_impl(request: Request, body: AutoSendIn, *, sender=None) ->
 async def auto_send(
     request: Request,
     body: AutoSendIn,
+    background: BackgroundTasks,
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
 ) -> AutoSendOut:
     """Route-level auth (BLOCKING-2 fix). Application-level
     ``auto_outreach_enabled`` is a *what*, not a *who* — this guard ensures
     only the cron caller can ask."""
     check_secret(request.app.state.settings, x_cron_secret)
+
+    settings = request.app.state.settings
 
     from app.shared.orm import LJM_TENANT_ID
     from app.shared.queue_dispatch import maybe_dispatch
@@ -275,6 +278,11 @@ async def auto_send(
         dry_run=body.dry_run,
     )
     if job_id is not None:
+        from app.api.jobs import kick_in_process_drain
+        background.add_task(
+            kick_in_process_drain, request.app.state.sessionmaker, settings,
+            seconds=settings.jobs_in_process_kick_seconds,
+        )
         return AutoSendOut(
             status="queued", sent=0, skipped_suppressed=0, skipped_cap=0,
             dry_run=body.dry_run, job_id=job_id,

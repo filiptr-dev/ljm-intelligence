@@ -20,7 +20,7 @@ import logging
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, BackgroundTasks, Header, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api._auth import check_secret
@@ -133,6 +133,7 @@ async def test_send(payload: TestSendIn, request: Request) -> TestSendOut:
 async def backfill(
     payload: BackfillIn,
     request: Request,
+    background: BackgroundTasks,
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
 ) -> IngestStatsOut:
     settings: Settings = request.app.state.settings
@@ -140,7 +141,10 @@ async def backfill(
 
     # Whole-mailbox backfill would time out on Render free (web dynos die
     # mid-request on reclaim). Hand it to the worker when the queue exists;
-    # fall back to inline ingest on sqlite/tests.
+    # fall back to inline ingest on sqlite/tests. The worker runs one
+    # bounded slice per invocation — the ingest service's Gmail historyId
+    # cursor makes the job resumable; the 5-min cron drain picks it up
+    # again until the mailbox is fully backfilled.
     from app.shared.orm import LJM_TENANT_ID
     from app.shared.queue_dispatch import maybe_dispatch
 
@@ -152,6 +156,11 @@ async def backfill(
         months=payload.months,
     )
     if job_id is not None:
+        from app.api.jobs import kick_in_process_drain
+        background.add_task(
+            kick_in_process_drain, request.app.state.sessionmaker, settings,
+            seconds=settings.jobs_in_process_kick_seconds,
+        )
         return IngestStatsOut(
             mailbox=str(payload.mailbox), read=0, upserted=0, skipped=0,
             last_history_id=None, status="queued", job_id=job_id,
@@ -170,6 +179,7 @@ async def backfill(
 async def incremental(
     payload: IncrementalIn,
     request: Request,
+    background: BackgroundTasks,
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
 ) -> IncrementalOut:
     settings: Settings = request.app.state.settings
@@ -185,6 +195,11 @@ async def incremental(
         mailbox=str(payload.mailbox) if payload.mailbox else None,
     )
     if job_id is not None:
+        from app.api.jobs import kick_in_process_drain
+        background.add_task(
+            kick_in_process_drain, request.app.state.sessionmaker, settings,
+            seconds=settings.jobs_in_process_kick_seconds,
+        )
         return IncrementalOut(items=[], job_id=job_id)
 
     result = await svc_incremental(

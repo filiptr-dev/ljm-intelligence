@@ -28,6 +28,20 @@ services:
       # to run the migration without this env var set.
       - key: SEED_OWNER_PASSWORD
         sync: false
+      # MF2 — shared secret with the Vercel Next BFF (`LJM_PROXY_SECRET`
+      # on Vercel). Lets the backend trust the Vercel-forwarded real
+      # client IP so the per-IP login rate limiter doesn't collapse every
+      # user into one bucket.
+      - key: TRUSTED_PROXY_SECRET
+        sync: false
+      # 1 = Render alone. Bump to 2 behind Cloudflare → Render.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # MF1 — in-process bounded drain after on-demand user triggers.
+      # True on free Render (no worker service); False once an always-on
+      # worker container runs on the user's infra.
+      - key: JOBS_IN_PROCESS_KICK_ENABLED
+        value: "true"
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: CORS_ALLOWED_ORIGIN_REGEX

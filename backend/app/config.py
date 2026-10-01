@@ -158,6 +158,32 @@ class Settings(BaseSettings):
     # Cron shared secret — used from Slice 2 on.
     cron_secret: SecretStr | None = None
 
+    # Queue: in-process drain kick after on-demand user triggers (MF1).
+    # On Render free with no worker service, dispatching to the queue and
+    # waiting for the 5-minute cron tick is a user-visible regression —
+    # the "Crawl now" button would say "queued" for minutes. With this on,
+    # the API process runs one bounded (~10 s) worker tick as a FastAPI
+    # background task right after dispatch, picking the fresh job up in
+    # seconds instead of minutes. The advisory lock on hashtext('jobs.drain')
+    # keeps the kick + the cron drain from overlapping — the second caller
+    # no-ops. Flip to False on the user's own infra where an always-on
+    # ``worker`` container drains continuously, so the API doesn't duplicate
+    # work. See [[ljm-intelligence-production-server-architecture-plan]].
+    jobs_in_process_kick_enabled: bool = True
+    jobs_in_process_kick_seconds: int = Field(default=10, ge=1, le=30)
+
+    # Rate-limit proxy trust (MF2). On a Vercel BFF, requests to FastAPI
+    # arrive from Vercel's IP range — a 5/min per-IP limit would lock
+    # every user out. The Next route forwards the real client IP via
+    # ``X-LJM-Client-IP`` with a shared secret in ``X-LJM-Proxy-Secret``;
+    # the backend trusts that header only when the secret matches.
+    # For direct calls, ``trusted_proxy_hops`` says how many trusted
+    # reverse proxies append to X-Forwarded-For (default 1 = Render
+    # alone); the real client IP is the N-th-from-right entry. Never
+    # trust the leftmost value — it is attacker-controlled.
+    trusted_proxy_secret: SecretStr | None = None
+    trusted_proxy_hops: int = Field(default=1, ge=1, le=5)
+
     # Sentry — optional. When unset the SDK is not initialised, so dev runs
     # clean (no network, no DSN probe). In prod set via ``SENTRY_DSN`` on
     # Render; events are tagged with ``tenant_id`` + ``request_id`` pulled

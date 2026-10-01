@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api._auth import check_secret
@@ -119,6 +119,7 @@ async def refresh_source(kind: str, request: Request) -> RefreshStatsOut:
 @router.post("/sources/refresh-all", response_model=RefreshAllOut)
 async def refresh_all(
     request: Request,
+    background: BackgroundTasks,
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
 ) -> RefreshAllOut:
     settings: Settings = request.app.state.settings
@@ -134,6 +135,11 @@ async def refresh_all(
         source_kind=None,
     )
     if job_id is not None:
+        from app.api.jobs import kick_in_process_drain
+        background.add_task(
+            kick_in_process_drain, request.app.state.sessionmaker, settings,
+            seconds=settings.jobs_in_process_kick_seconds,
+        )
         return RefreshAllOut(items=[], job_id=job_id)
 
     result = await svc_refresh_all(request.app.state.sessionmaker, settings)

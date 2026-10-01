@@ -92,6 +92,15 @@ async def start_run(
         run_id=intake_id,
     )
     if job_id is not None:
+        # MF1 — bounded in-process drain so the fresh job starts in seconds,
+        # not minutes (the GH-Actions cron fires every 5 min). The advisory
+        # lock on hashtext('jobs.drain') serialises this with any concurrent
+        # cron tick; the loser no-ops.
+        from app.api.jobs import kick_in_process_drain
+        background.add_task(
+            kick_in_process_drain, sessionmaker, settings,
+            seconds=settings.jobs_in_process_kick_seconds,
+        )
         return {"run_id": intake_id, "status": "queued", "job_id": job_id}
 
     async def _work() -> None:
