@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Segmented } from "@/components/app/segmented"
 import { ScoreChip } from "@/components/app/live-feed"
+import { api } from "@/lib/api/client"
 
 type PostOut = {
   id: string
@@ -87,9 +88,8 @@ export default function CapacityPage() {
 
   const load = React.useCallback(async () => {
     try {
-      const r = await fetch("/api/capacity/posts?limit=50", { cache: "no-store" })
-      const j = (await r.json()) as { items?: PostOut[] }
-      setPosts(j.items ?? [])
+      const { data } = await api.GET("/capacity/posts", { params: { query: { limit: 50 } } })
+      setPosts(((data as { items?: PostOut[] } | undefined)?.items) ?? [])
     } catch {
       /* keep whatever we had */
     }
@@ -125,13 +125,10 @@ export default function CapacityPage() {
               rate_usd: rate ? Number(rate) : undefined,
               notes: notes || undefined,
             }
-      const r = await fetch("/api/capacity/posts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!r.ok) throw new Error(`create ${r.status}`)
-      const created = (await r.json()) as PostOut
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, response } = await api.POST("/capacity/posts", { body: body as any })
+      if (!response.ok || !data) throw new Error(`create ${response.status}`)
+      const created = data as unknown as PostOut
       toast.success(`${kind === "truck" ? "Truck" : "Load"} post created`, { description: `${created.origin_state} — ${created.equipment}` })
       await load()
       setSelected(created)
@@ -152,9 +149,10 @@ export default function CapacityPage() {
     ;(async () => {
       setLoadingSuggestions(true)
       try {
-        const r = await fetch(`/api/capacity/posts/${encodeURIComponent(selected.id)}/suggestions?top=20`, { cache: "no-store" })
-        const j = (await r.json()) as { items?: Suggestion[] }
-        if (!cancelled) setSuggestions(j.items ?? [])
+        const { data } = await api.GET("/capacity/posts/{post_id}/suggestions", {
+          params: { path: { post_id: selected.id }, query: { top: 20 } },
+        })
+        if (!cancelled) setSuggestions(((data as { items?: Suggestion[] } | undefined)?.items) ?? [])
       } finally {
         if (!cancelled) setLoadingSuggestions(false)
       }

@@ -59,6 +59,20 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
   headers.set("authorization", `Bearer ${token}`)
 
   const method = req.method.toUpperCase()
+
+  // Server-side secret injection — a tiny, well-known allowlist.
+  //
+  // `POST /crawl/run` on the FastAPI backend is gated by `X-Cron-Secret`
+  // (not the bearer) — it's the owner trigger that used to live in the
+  // deleted `/api/crawler/run` BFF route. The secret is a server-only env
+  // var; the browser session cookie proves the user is authenticated, and
+  // we attach the secret here so an island can call `api.POST("/crawl/run")`
+  // through the generic proxy without the UI ever learning the secret.
+  const joinedPath = (path || []).join("/")
+  if (joinedPath === "crawl/run" && method === "POST") {
+    const cronSecret = process.env.CRON_SECRET || ""
+    if (cronSecret) headers.set("x-cron-secret", cronSecret)
+  }
   const init: RequestInit = { method, headers, cache: "no-store" }
   if (method !== "GET" && method !== "HEAD") {
     // Pass the body through verbatim.

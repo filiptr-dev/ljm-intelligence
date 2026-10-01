@@ -41,6 +41,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { useBackendHealth } from "@/lib/use-backend"
+import { api } from "@/lib/api/client"
 import { cn } from "@/lib/utils"
 
 // ---- shapes -----------------------------------------------------------------
@@ -121,12 +122,13 @@ export default function CallListPage() {
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch("/api/call-list?limit=25", { cache: "no-store" })
-      const j = (await r.json()) as Partial<CallListEnvelope> & { error?: string }
-      if (!r.ok) {
-        setEnvelope({ date: j.date ?? "", items: [] })
+      // Typed client → /api/proxy/tools/call-list from the browser.
+      const { data, response } = await api.GET("/tools/call-list", { params: { query: { limit: 25 } } })
+      if (!response.ok || !data) {
+        setEnvelope({ date: "", items: [] })
         return
       }
+      const j = data as unknown as CallListEnvelope
       setEnvelope({ date: j.date ?? "", items: j.items ?? [] })
     } catch (e) {
       setEnvelope({ date: "", items: [] })
@@ -161,16 +163,14 @@ export default function CallListPage() {
     ;(async () => {
       setHistoryLoading(true)
       try {
-        const r = await fetch(
-          `/api/call-list/history?lead_id=${encodeURIComponent(selectedId)}&limit=20`,
-          { cache: "no-store" },
-        )
-        if (!r.ok) {
+        const { data, response } = await api.GET("/tools/call-list/history", {
+          params: { query: { lead_id: selectedId, limit: 20 } },
+        })
+        if (!response.ok || !data) {
           if (!cancelled) setHistory([])
           return
         }
-        const j = (await r.json()) as { items?: HistoryRow[] }
-        if (!cancelled) setHistory(j.items ?? [])
+        if (!cancelled) setHistory((data as { items?: HistoryRow[] }).items ?? [])
       } catch {
         if (!cancelled) setHistory([])
       } finally {
@@ -189,13 +189,10 @@ export default function CallListPage() {
       const body: Record<string, unknown> = { lead_id: selected.lead_id, outcome: kind }
       if (kind === "callback") body.callback_at = callbackAt || plusDaysISO(2)
       if (note.trim()) body.note = note.trim()
-      const r = await fetch("/api/call-list/outcome", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!r.ok) throw new Error(`outcome ${r.status}`)
-      const j = (await r.json()) as CallListEnvelope
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, response } = await api.POST("/tools/call-list/outcome", { body: body as any })
+      if (!response.ok || !data) throw new Error(`outcome ${response.status}`)
+      const j = data as unknown as CallListEnvelope
       setEnvelope(j)
       // Keep the same lead selected if it survived (e.g. callback in the future
       // drops it); otherwise pick the new top row.

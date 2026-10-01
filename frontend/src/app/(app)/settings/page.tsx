@@ -38,6 +38,7 @@ import {
   FIT_PANEL_INTRO,
   FIT_WEIGHT_META,
 } from "./fit-weight-meta"
+import { api } from "@/lib/api/client"
 import { AiProvidersPanel } from "./ai-providers-panel"
 import { ConnectorsPanel } from "./connectors-panel"
 
@@ -125,9 +126,9 @@ export default function SettingsPage() {
   React.useEffect(() => {
     ;(async () => {
       try {
-        const r = await fetch("/api/settings", { cache: "no-store" })
-        if (!r.ok) throw new Error(`settings ${r.status}`)
-        const s = (await r.json()) as SettingsOut
+        const { data, response } = await api.GET("/settings", {})
+        if (!response.ok || !data) throw new Error(`settings ${response.status}`)
+        const s = data as unknown as SettingsOut
         setEnabled(s.auto_send_enabled)
         setThreshold(s.threshold)
         setTone(s.tone)
@@ -153,10 +154,8 @@ export default function SettingsPage() {
   const save = async () => {
     setSaving(true)
     try {
-      const r = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const { data, response, error: errBody } = await api.PUT("/settings", {
+        body: {
           auto_send_enabled: enabled,
           threshold,
           tone,
@@ -168,20 +167,21 @@ export default function SettingsPage() {
           auto_outreach_status_filter: statusFilter,
           auto_outreach_min_fit: minFit,
           fit_weights: fitWeights,
-        }),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
       })
-      if (r.status === 409) {
+      if (response.status === 409) {
         // Belt-and-braces: server refuses an arm with a stale-cached ready flag.
         // Roll the local toggle back off and surface the server's message.
-        const detail = (await r.json())?.detail
+        const detail = (errBody as { detail?: { message?: string } } | undefined)?.detail
         setAutoOutreachEnabled(false)
         toast.error("Can't arm auto-outreach", {
           description: detail?.message ?? "Unsubscribe link unavailable.",
         })
         return
       }
-      if (!r.ok) throw new Error(`save ${r.status}`)
-      const s = (await r.json()) as SettingsOut
+      if (!response.ok || !data) throw new Error(`save ${response.status}`)
+      const s = data as unknown as SettingsOut
       setUpdatedAt(s.updated_at)
       setUnsubSecretSet(s.unsub_secret_set)
       setUnsubReady(s.unsub_config_ready)

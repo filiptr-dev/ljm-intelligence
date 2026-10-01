@@ -13,6 +13,7 @@
 import * as React from "react"
 import type { Lead, LeadKind } from "@/lib/data/types"
 import type { BackendLead } from "@/lib/backend"
+import { api } from "@/lib/api/client"
 
 const STATE_ZONE: Record<string, string> = {
   // Northeast
@@ -68,12 +69,13 @@ export function useBackendLeads(limit = 200): { real: Lead[]; live: boolean | nu
 
   const reload = React.useCallback(async () => {
     try {
-      const r = await fetch(`/api/crawler/leads?limit=${limit}`, { cache: "no-store" })
-      if (!r.ok) {
-        setLive(false); setError(`backend ${r.status}`); return
+      // Typed client → /api/proxy/leads from the browser; the HttpOnly session
+      // cookie carries the authority. No `/api/crawler/leads` proxy anymore.
+      const { data, response } = await api.GET("/leads", { params: { query: { limit } } })
+      if (!response.ok || !data) {
+        setLive(false); setError(`backend ${response.status}`); return
       }
-      const j = (await r.json()) as { items: BackendLead[] }
-      setReal((j.items ?? []).map(backendLeadToFrontend))
+      setReal((data.items ?? []).map((it) => backendLeadToFrontend(it as unknown as BackendLead)))
       setLive(true)
       setError(null)
     } catch (e) {
