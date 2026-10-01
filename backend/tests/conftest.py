@@ -23,15 +23,121 @@ Two belts and a pair of suspenders, in order:
 """
 
 import os
+import shutil
+import subprocess
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-# --- 1. Pin DATABASE_URL to an in-memory SQLite BEFORE .env / app import. ---
-# pydantic-settings resolves in the order: init kwargs > os.environ > .env file,
-# so a value present in os.environ shadows whatever backend/.env holds.
-_SAFE_DB_URL = "sqlite+aiosqlite:///:memory:"
+# --- 0. PG16 harness opt-in. Set TEST_HARNESS=pg16 (or DATABASE_URL_TEST_PG) --
+# to run the full suite against a session-scoped throwaway Postgres 16
+# container instead of in-memory sqlite. This is the architecture-foundation
+# target harness; the sqlite path stays as the easy local default.
+_PG_HARNESS = (
+    os.environ.get("TEST_HARNESS", "").lower() == "pg16"
+    or bool(os.environ.get("DATABASE_URL_TEST_PG"))
+)
+
+_PG_TEST_URL: str | None = None  # set after we spin up / connect to the container
+
+
+def _ensure_pg16_container() -> str:
+    """Return a `postgresql+psycopg://` URL pointing at a running PG16.
+
+    Reuses an already-running ``ljm-test-pg16`` container on port 5444 if
+    present (so repeated local runs are instant); otherwise starts one with
+    ``docker run`` and polls until ready. CI can pre-seed the URL via
+    ``DATABASE_URL_TEST_PG`` and skip the docker dance entirely.
+    """
+    env_url = os.environ.get("DATABASE_URL_TEST_PG")
+    if env_url:
+        return env_url
+    if shutil.which("docker") is None:
+        raise RuntimeError(
+            "TEST_HARNESS=pg16 requires docker on PATH or DATABASE_URL_TEST_PG set"
+        )
+    name = "ljm-test-pg16"
+    port = int(os.environ.get("LJM_TEST_PG_PORT", "5444"))
+    # Reuse if already running.
+    probe = subprocess.run(
+        ["docker", "ps", "--filter", f"name=^{name}$", "--format", "{{.Names}}"],
+        check=False, capture_output=True, text=True,
+    )
+    if probe.stdout.strip() != name:
+        subprocess.run(
+            [
+                "docker", "run", "-d", "--rm", "--name", name,
+                "-e", "POSTGRES_PASSWORD=pg", "-e", "POSTGRES_USER=pg",
+                "-e", "POSTGRES_DB=ljm_test",
+                "-p", f"{port}:5432", "postgres:16",
+            ],
+            check=True, capture_output=True,
+        )
+        # Poll pg_isready for up to 20s.
+        for _ in range(40):
+            ready = subprocess.run(
+                ["docker", "exec", name, "pg_isready", "-U", "pg", "-d", "ljm_test"],
+                check=False, capture_output=True,
+            )
+            if ready.returncode == 0:
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError(f"PG16 container {name} failed to become ready")
+    return f"postgresql+psycopg://pg:pg@localhost:{port}/ljm_test"
+
+
+def _reset_pg16_schema(url: str) -> None:
+    """Drop everything in `public` and the `app_user` role, then run alembic
+    upgrade head once. Session-scoped — called before any test engine spins up.
+    """
+    import psycopg
+
+    sync_url = url.replace("postgresql+psycopg://", "postgresql://")
+    with psycopg.connect(sync_url, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            # test_tenancy_isolation leaves app_user behind; drop OWNED first
+            # so DROP ROLE doesn't fail on dependent privileges.
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN
+                    EXECUTE 'DROP OWNED BY app_user CASCADE';
+                    EXECUTE 'DROP ROLE app_user';
+                  END IF;
+                END $$;
+                """
+            )
+            cur.execute("DROP SCHEMA public CASCADE")
+            cur.execute("CREATE SCHEMA public")
+            cur.execute("GRANT ALL ON SCHEMA public TO pg")
+
+    # Alembic upgrade head against the test URL.
+    backend_root = Path(__file__).resolve().parent.parent
+    env = os.environ.copy()
+    env["DATABASE_URL"] = url
+    env["DATABASE_URL_DIRECT"] = url
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        cwd=str(backend_root), env=env, check=True, capture_output=True,
+    )
+
+
+# --- 1. Pin DATABASE_URL BEFORE .env / app import. ---
+# pydantic-settings resolves init kwargs > os.environ > .env file, so a value
+# in os.environ wins over whatever backend/.env holds. In sqlite mode we pin
+# to an in-memory URL; in PG16 mode we pin to the throwaway container's URL.
+if _PG_HARNESS:
+    _PG_TEST_URL = _ensure_pg16_container()
+    _reset_pg16_schema(_PG_TEST_URL)
+    _SAFE_DB_URL = _PG_TEST_URL
+    # Expose for opt-in tests that read this var directly.
+    os.environ.setdefault("DATABASE_URL_TEST_PG", _PG_TEST_URL)
+else:
+    _SAFE_DB_URL = "sqlite+aiosqlite:///:memory:"
 os.environ["DATABASE_URL"] = _SAFE_DB_URL
 
 # --- 2. Load .env AFTER, with override=False, so it can't clobber us. ---
@@ -92,6 +198,81 @@ def _test_create_engine(settings):
     return _orig_create_engine(settings)
 
 
+# --- 5b. In PG16 mode, redirect test-local sqlite engines to the PG test DB. -
+# Existing per-test fixtures do `create_async_engine("sqlite+aiosqlite:///:memory:")`
+# directly. We shim the SQLAlchemy entry point so the sqlite URL silently
+# becomes the shared PG test DB; `Base.metadata.create_all` is a no-op because
+# alembic upgrade head already ran at session start.
+if _PG_HARNESS:
+    import sqlalchemy.ext.asyncio as _sa_async
+
+    _orig_create_async_engine = _sa_async.create_async_engine
+
+    def _pg_redirect_create_async_engine(url: str | object, **kwargs):
+        if isinstance(url, str) and url.startswith("sqlite"):
+            # Strip sqlite-only kwargs the caller may have passed.
+            kwargs.pop("connect_args", None)
+            kwargs.pop("poolclass", None)
+            kwargs.pop("future", None)
+            engine = _orig_create_async_engine(_PG_TEST_URL, **kwargs)
+            # SQLite tests ignore FK ordering (templates referenced before
+            # inserted, etc.). Replicate that laxity on PG with
+            # session_replication_role=replica so the test *behavioural*
+            # intent is preserved; real production uses the strict role.
+            from sqlalchemy import event
+
+            @event.listens_for(engine.sync_engine, "connect")
+            def _relax_fks(dbapi_conn, _):
+                with dbapi_conn.cursor() as cur:
+                    cur.execute("SET session_replication_role = 'replica'")
+
+            return engine
+        return _orig_create_async_engine(url, **kwargs)
+
+    _sa_async.create_async_engine = _pg_redirect_create_async_engine
+    # Also rebind the symbol tests may have imported.
+    import sqlalchemy.ext.asyncio
+    sqlalchemy.ext.asyncio.create_async_engine = _pg_redirect_create_async_engine
+
+    # Shim Base.metadata.create_all so tests that call it against the PG DB
+    # (where tables already exist from alembic) don't try to re-DDL.
+    from app.db import Base as _Base
+
+    _orig_metadata_create_all = _Base.metadata.create_all
+
+    def _noop_create_all(bind=None, *args, **kwargs):
+        return None
+
+    _Base.metadata.create_all = _noop_create_all  # type: ignore[method-assign]
+
+    # Snapshot migration-seeded users + settings so tests that depend on them
+    # (e.g. test_pg16_boot_and_tenancy's `/auth/login` flow) can restore them
+    # via the `_pg_restore_seeds` fixture after autouse TRUNCATE.
+    import psycopg as _psycopg
+
+    _snap_url = _PG_TEST_URL.replace("postgresql+psycopg://", "postgresql://")
+    _SEED_USERS: list[dict] = []
+    _SEED_SETTINGS: list[dict] = []
+    with _psycopg.connect(_snap_url) as _c, _c.cursor() as _cur:
+        _cur.execute(
+            "SELECT id, tenant_id, email, name, role, password_hash, is_active, "
+            "created_at, last_login_at FROM users"
+        )
+        for row in _cur.fetchall():
+            _SEED_USERS.append(dict(zip(
+                ("id","tenant_id","email","name","role","password_hash",
+                 "is_active","created_at","last_login_at"), row, strict=True
+            )))
+        _cur.execute(
+            "SELECT id, auth_jwt_secret, unsubscribe_secret FROM settings"
+        )
+        for row in _cur.fetchall():
+            _SEED_SETTINGS.append(dict(zip(
+                ("id","auth_jwt_secret","unsubscribe_secret"),
+                row, strict=True,
+            )))
+
+
 _db_mod.create_engine = _test_create_engine
 # Keep a handle to the un-shimmed builder so tests can exercise the real
 # create_engine() (e.g. verifying the sqlite backend branch) without loading
@@ -144,6 +325,86 @@ _main_mod.create_app = _test_create_app
 
 
 import pytest
+
+
+if _PG_HARNESS:
+    @pytest.fixture
+    def _pg_restore_seeds():
+        """Restore the migration-seeded users + settings rows. Tests that
+        depend on `owner@ljm-demo.local` or the migration JWT secret request
+        this fixture; it runs BEFORE the test body so the seeds exist when
+        the test touches the DB."""
+        import psycopg
+
+        sync_url = _PG_TEST_URL.replace("postgresql+psycopg://", "postgresql://")
+        with psycopg.connect(sync_url, autocommit=True) as conn, conn.cursor() as cur:
+            for u in _SEED_USERS:
+                cur.execute(
+                    """
+                    INSERT INTO users (id, tenant_id, email, name, role,
+                                       password_hash, is_active, created_at, last_login_at)
+                    VALUES (%(id)s, %(tenant_id)s, %(email)s, %(name)s, %(role)s,
+                            %(password_hash)s, %(is_active)s, %(created_at)s, %(last_login_at)s)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    u,
+                )
+            for s in _SEED_SETTINGS:
+                cur.execute(
+                    """
+                    INSERT INTO settings (id, auth_jwt_secret, unsubscribe_secret)
+                    VALUES (%(id)s, %(auth_jwt_secret)s, %(unsubscribe_secret)s)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    s,
+                )
+        yield
+
+
+    @pytest.fixture(autouse=True)
+    def _pg_truncate_between_tests():
+        """Clear all data between tests so the shared PG test DB behaves like
+        the sqlite in-memory DB (fresh per test). We TRUNCATE every user table
+        then re-seed the LJM tenant row the migration planted."""
+        yield
+        import psycopg
+
+        sync_url = _PG_TEST_URL.replace("postgresql+psycopg://", "postgresql://")
+        with psycopg.connect(sync_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                # NOTE: don't touch the app_user role here — tenancy-isolation
+                # tests create and reuse it across their own test cases.
+                # The session-start _reset_pg16_schema already dropped it once
+                # so stale privileges don't survive a prior test session.
+                # Grab every user table in public (skip alembic_version so
+                # upgrade state survives), truncate them all in one shot.
+                # Skip only the LJM organization row + alembic_version.
+                # Everything else — including users and settings — is cleared
+                # between tests; tests that need migration-seeded users/settings
+                # must re-seed inside their own fixture (we provide the
+                # `_pg_restore_seeds` fixture below for that).
+                cur.execute(
+                    """
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname='public'
+                      AND tablename NOT IN ('alembic_version', 'organizations')
+                    """
+                )
+                tables = [row[0] for row in cur.fetchall()]
+                if tables:
+                    joined = ", ".join(f'"{t}"' for t in tables)
+                    cur.execute(f"TRUNCATE {joined} RESTART IDENTITY CASCADE")
+                # Re-seed the LJM tenant row + demo owner identity so
+                # TenantMixin inserts have a valid FK target.
+                from app.shared.orm import LJM_TENANT_ID
+                cur.execute(
+                    """
+                    INSERT INTO organizations (id, slug, name, plan, settings, created_at)
+                    VALUES (%s, 'ljm', 'LJM International', 'standard', '{}', now())
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (LJM_TENANT_ID,),
+                )
 
 
 @pytest.fixture

@@ -31,7 +31,7 @@ pytestmark = [
 
 
 @pytest.fixture
-async def pg_app():
+async def pg_app(request):
     """Build a FastAPI app bound to PG16 and manually populate app.state.
 
     The conftest module monkey-patches `app.main.create_app` and
@@ -40,6 +40,15 @@ async def pg_app():
     ASGITransport (which doesn't run lifespan) still works.
     """
     os.environ["DATABASE_URL"] = os.environ["DATABASE_URL_TEST_PG"]
+
+    # In TEST_HARNESS=pg16 mode, conftest's autouse TRUNCATE clears users +
+    # settings between tests. This fixture restores the migration seeds so
+    # the demo-owner login below finds the row and the JWT secret the token
+    # path reads from `settings.auth_jwt_secret`.
+    try:
+        request.getfixturevalue("_pg_restore_seeds")
+    except Exception:
+        pass
 
     import app.db as db_mod
     import app.main as main_mod

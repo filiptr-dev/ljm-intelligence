@@ -51,15 +51,24 @@ def _nonsuperuser_url() -> str:
     return f"postgresql+psycopg://app_user:app@{hostpath}"
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture
 async def pg_setup():
     """Prepare the schema + two tenants + two leads + a non-superuser role."""
     super_url = os.environ["DATABASE_URL_TEST_PG"]
     engine = create_async_engine(super_url, connect_args={"prepare_threshold": None})
     try:
         async with engine.begin() as conn:
-            # Non-superuser role so RLS is not bypassed.
-            await conn.execute(text("DROP ROLE IF EXISTS app_user"))
+            # Non-superuser role so RLS is not bypassed. DROP OWNED first so
+            # a prior test run's grants don't block DROP ROLE.
+            await conn.execute(
+                text(
+                    "DO $$ BEGIN "
+                    "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN "
+                    "EXECUTE 'DROP OWNED BY app_user CASCADE'; "
+                    "EXECUTE 'DROP ROLE app_user'; "
+                    "END IF; END $$"
+                )
+            )
             await conn.execute(text("CREATE ROLE app_user LOGIN PASSWORD 'app'"))
             await conn.execute(text("GRANT ALL ON SCHEMA public TO app_user"))
             await conn.execute(text("GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user"))
