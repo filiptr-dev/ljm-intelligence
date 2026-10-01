@@ -1,12 +1,17 @@
-"""Leads API: paged, filter-safe reads from stored data. No live Gemini on read."""
+"""Leads API — thin router over ``app.prospecting.service``.
+
+The business logic (filters, pagination, N+1-safe source fetch) lives in
+``app.prospecting.service``. This router does HTTP: parse query params,
+call the service, project the service's dataclasses into pydantic schemas.
+"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
 
-from app.models import Lead, LeadContact, LeadSource, Score
+from app.prospecting.service import list_leads as svc_list_leads
+from app.prospecting.service import show_lead as svc_show_lead
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -53,104 +58,28 @@ async def list_leads(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> LeadsPage:
-    async with request.app.state.sessionmaker() as s:
-        base = select(Lead)
-        if state:
-            base = base.where(Lead.state == state.upper())
-        if kind:
-            base = base.where(Lead.kind == kind)
-        if min_score is not None:
-            base = base.where(Lead.current_score >= min_score)
-        if q:
-            like = f"%{q}%"
-            base = base.where(Lead.name.ilike(like))
-
-        total_res = await s.execute(select(func.count()).select_from(base.subquery()))
-        total = int(total_res.scalar() or 0)
-
-        rows = await s.execute(base.order_by(desc(Lead.last_seen_at), desc(Lead.id)).offset(offset).limit(limit))
-        leads = list(rows.scalars().all())
-
-        # Batch-fetch sources per lead so /leads doesn't N+1.
-        source_map: dict[str, list[str]] = {}
-        if leads:
-            src_rows = await s.execute(
-                select(LeadSource.lead_id, LeadSource.source).where(LeadSource.lead_id.in_([lead.id for lead in leads]))
-            )
-            for lid, src in src_rows.all():
-                source_map.setdefault(lid, [])
-                if src not in source_map[lid]:
-                    source_map[lid].append(src)
-
-    items = [
-        LeadOut(
-            id=l.id,
-            kind=l.kind,
-            name=l.name,
-            state=l.state,
-            city=l.city,
-            mc=l.mc,
-            dot=l.dot,
-            domain=l.domain,
-            primary_email=l.primary_email,
-            phone=l.phone,
-            current_score=l.current_score,
-            first_seen_at=l.first_seen_at.isoformat() if l.first_seen_at else "",
-            last_seen_at=l.last_seen_at.isoformat() if l.last_seen_at else "",
-            sources=source_map.get(l.id, []),
+    async with request.app.state.sessionmaker() as session:
+        result = await svc_list_leads(
+            session,
+            state=state,
+            kind=kind,
+            min_score=min_score,
+            q=q,
+            offset=offset,
+            limit=limit,
         )
-        for l in leads
-    ]
-    return LeadsPage(items=items, total=total, limit=limit, offset=offset)
+    return LeadsPage(
+        items=[LeadOut(**row.__dict__) for row in result.items],
+        total=result.total,
+        limit=result.limit,
+        offset=result.offset,
+    )
 
 
 @router.get("/{lead_id}", response_model=LeadDetail)
 async def show_lead(request: Request, lead_id: str) -> LeadDetail:
-    async with request.app.state.sessionmaker() as s:
-        res = await s.execute(select(Lead).where(Lead.id == lead_id))
-        l = res.scalar_one_or_none()
-        if not l:
-            raise HTTPException(404, "lead not found")
-        srcs = (await s.execute(select(LeadSource.source).where(LeadSource.lead_id == lead_id))).scalars().all()
-        contacts = (await s.execute(select(LeadContact).where(LeadContact.lead_id == lead_id))).scalars().all()
-        score_row = (
-            await s.execute(select(Score).where(Score.lead_id == lead_id).order_by(desc(Score.created_at)).limit(1))
-        ).scalar_one_or_none()
-    return LeadDetail(
-        id=l.id,
-        kind=l.kind,
-        name=l.name,
-        state=l.state,
-        city=l.city,
-        mc=l.mc,
-        dot=l.dot,
-        domain=l.domain,
-        primary_email=l.primary_email,
-        phone=l.phone,
-        current_score=l.current_score,
-        first_seen_at=l.first_seen_at.isoformat() if l.first_seen_at else "",
-        last_seen_at=l.last_seen_at.isoformat() if l.last_seen_at else "",
-        sources=list(dict.fromkeys(srcs)),
-        address=l.address,
-        raw=l.raw or {},
-        evidence=l.evidence or {},
-        contacts=[
-            {
-                "id": c.id,
-                "name": c.name,
-                "title": c.title,
-                "email": c.email,
-                "phone": c.phone,
-                "source": c.source,
-            }
-            for c in contacts
-        ],
-        score={
-            "value": score_row.score,
-            "rationale": score_row.rationale,
-            "signals": (score_row.signals or {}).get("signals", []),
-            "model": score_row.model,
-        }
-        if score_row
-        else None,
-    )
+    async with request.app.state.sessionmaker() as session:
+        row = await svc_show_lead(session, lead_id)
+    if row is None:
+        raise HTTPException(404, "lead not found")
+    return LeadDetail(**row.__dict__)
