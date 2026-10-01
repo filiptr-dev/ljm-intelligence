@@ -107,3 +107,49 @@ services:
       # URL enumeration.
       - key: UNSUBSCRIBE_SECRET
         sync: false
+      # ---- Mail connector (plan 2026-10-01-google-workspace-mail-connector)
+      # Default is simulated. Values are set in the Render dashboard, not git.
+      - key: MAIL_SENDER
+        value: simulated
+      - key: MAILBOX_SOURCE
+        value: simulated
+      - key: MAIL_OWNER_SEND_ENABLED
+        value: "false"
+      - key: GMAIL_SA_JSON
+        sync: false
+      - key: GMAIL_IMPERSONATE
+        value: contact@ljminternational.com
+      - key: GMAIL_ADMIN_IMPERSONATE
+        sync: false
+      - key: GMAIL_PER_MAILBOX_RPS
+        value: "2"
+      - key: GMAIL_GLOBAL_RPS
+        value: "20"
+      - key: GMAIL_BACKOFF_MAX_SECONDS
+        value: "60"
+      # ---- Load-board connectors (plan 2026-10-01-load-board-connectors)
+      # All env-gated; absent = disabled.
+      - key: DAT_SERVICE_ACCOUNT_EMAIL
+        sync: false
+      - key: DAT_SERVICE_ACCOUNT_PASSWORD
+        sync: false
+      - key: DAT_ORG_ID
+        sync: false
+      - key: CHR_CLIENT_ID
+        sync: false
+      - key: CHR_CLIENT_SECRET
+        sync: false
+      - key: CHR_CARRIER_CODE
+        sync: false
+      - key: LB123_API_KEY
+        sync: false
+      - key: LB123_CARRIER_USERNAME
+        sync: false
+      - key: LB123_CARRIER_PASSWORD
+        sync: false
+      - key: TRUCKSTOP_INTEGRATION_ID
+        sync: false
+      - key: TRUCKSTOP_USERNAME
+        sync: false
+      - key: TRUCKSTOP_PASSWORD
+        sync: false

@@ -136,6 +136,65 @@ class Settings(BaseSettings):
     # the secret cannot mass-unsubscribe by URL enumeration.
     unsubscribe_secret: SecretStr | None = None
 
+    # ------------------------------------------------------------------
+    # Mail connector (plan 2026-10-01-google-workspace-mail-connector).
+    # Env-gated, default simulated.
+    # ------------------------------------------------------------------
+    mail_sender: Literal["simulated", "gmail"] = "simulated"
+    mailbox_source: Literal["simulated", "gmail"] = "simulated"
+    mail_owner_send_enabled: bool = False
+    gmail_sa_json: SecretStr | None = None
+    gmail_impersonate: str = "contact@ljminternational.com"
+    gmail_admin_impersonate: str = ""
+    gmail_scopes_send: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/gmail.send"]
+    )
+    gmail_scopes_read: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/gmail.readonly"]
+    )
+    gmail_scopes_admin: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/admin.directory.user.readonly"]
+    )
+    gmail_per_mailbox_rps: float = Field(default=2.0, gt=0)
+    gmail_global_rps: float = Field(default=20.0, gt=0)
+    gmail_backoff_max_seconds: int = Field(default=60, ge=1, le=600)
+
+    # ------------------------------------------------------------------
+    # Load-board connectors (plan 2026-10-01-load-board-connectors).
+    # All adapters enabled = bool(env). Defaults OFF, zero-impact on deploy.
+    # ------------------------------------------------------------------
+    dat_base_url: str = "https://api.dat.com"
+    dat_service_account_email: str | None = None
+    dat_service_account_password: SecretStr | None = None
+    dat_org_id: str | None = None
+    dat_rps: float = 1.0
+
+    chr_base_url: str = "https://api.chrobinson.com"
+    chr_client_id: str | None = None
+    chr_client_secret: SecretStr | None = None
+    chr_carrier_code: str | None = None
+    chr_scope: str = "loads.read"
+    chr_rps: float = 2.0
+
+    lb123_base_url: str = "https://api.123loadboard.com"
+    lb123_api_key: SecretStr | None = None
+    lb123_carrier_username: str | None = None
+    lb123_carrier_password: SecretStr | None = None
+    lb123_rps: float = 1.0
+
+    truckstop_base_url: str = "https://api.truckstop.com"
+    truckstop_integration_id: SecretStr | None = None
+    truckstop_username: str | None = None
+    truckstop_password: SecretStr | None = None
+    truckstop_rps: float = 2.0
+
+    @field_validator("gmail_scopes_send", "gmail_scopes_read", "gmail_scopes_admin", mode="before")
+    @classmethod
+    def _split_scopes(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [s.strip() for s in value.split(",") if s.strip()]
+        return value
+
     @field_validator("discovery_industries", mode="before")
     @classmethod
     def _split_industries(cls, value: object) -> object:

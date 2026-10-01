@@ -201,6 +201,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/email/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Email
+         * @description Owner-only. Resolves the mail sender once; writes SentLog with provider fields.
+         */
+        post: operations["send_email_email_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings": {
         parameters: {
             query?: never;
@@ -446,23 +466,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ai/compare": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Compare */
-        post: operations["compare_ai_compare_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/ai/usage": {
         parameters: {
             query?: never;
@@ -474,6 +477,193 @@ export interface paths {
         get: operations["usage_ai_usage_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_mail_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/test-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Send */
+        post: operations["test_send_mail_test_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Backfill */
+        post: operations["backfill_mail_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/incremental": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Incremental */
+        post: operations["incremental_mail_incremental_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disconnect */
+        post: operations["disconnect_mail_disconnect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/mailboxes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mailboxes */
+        get: operations["mailboxes_mail_mailboxes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Loads */
+        get: operations["list_loads_loads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sources */
+        get: operations["list_sources_loads_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/sources/{kind}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Source */
+        post: operations["test_source_loads_sources__kind__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/sources/{kind}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Source */
+        post: operations["refresh_source_loads_sources__kind__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/sources/refresh-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh All */
+        post: operations["refresh_all_loads_sources_refresh_all_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -541,6 +731,19 @@ export interface components {
             /** Dry Run */
             dry_run: boolean;
         };
+        /** BackfillIn */
+        BackfillIn: {
+            /**
+             * Mailbox
+             * Format: email
+             */
+            mailbox: string;
+            /**
+             * Months
+             * @default 12
+             */
+            months: number;
+        };
         /** CallListOut */
         CallListOut: {
             /** Date */
@@ -569,6 +772,17 @@ export interface components {
             /** Opener */
             opener: string;
             last_outcome: components["schemas"]["LastOutcomeOut"] | null;
+        };
+        /** ConnectionTestOut */
+        ConnectionTestOut: {
+            /** Ok */
+            ok: boolean;
+            /** Latency Ms */
+            latency_ms: number;
+            /** Reason */
+            reason: string | null;
+            /** Sample Count */
+            sample_count: number;
         };
         /** CrawlRunOut */
         CrawlRunOut: {
@@ -619,6 +833,16 @@ export interface components {
             last_verified_at: string | null;
             /** Pipeline Status */
             pipeline_status: string;
+        };
+        /** DisconnectOut */
+        DisconnectOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Mode
+             * @constant
+             */
+            mode: "simulated";
         };
         /** DraftIn */
         DraftIn: {
@@ -758,6 +982,33 @@ export interface components {
             /** App Env */
             app_env: string;
         };
+        /** IncrementalIn */
+        IncrementalIn: {
+            /** Mailbox */
+            mailbox?: string | null;
+        };
+        /** IncrementalOut */
+        IncrementalOut: {
+            /** Items */
+            items: components["schemas"]["IngestStatsOut"][];
+        };
+        /** IngestStatsOut */
+        IngestStatsOut: {
+            /** Mailbox */
+            mailbox: string;
+            /** Read */
+            read: number;
+            /** Upserted */
+            upserted: number;
+            /** Skipped */
+            skipped: number;
+            /** Last History Id */
+            last_history_id: string | null;
+            /** Status */
+            status: string;
+            /** Error */
+            error?: string | null;
+        };
         /** LastOutcomeOut */
         LastOutcomeOut: {
             /** Outcome */
@@ -871,6 +1122,38 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** LoadOut */
+        LoadOut: {
+            /** Id */
+            id: number;
+            /** Source */
+            source: string;
+            /** Broker Name */
+            broker_name: string;
+            /** Origin City */
+            origin_city: string | null;
+            /** Origin State */
+            origin_state: string | null;
+            /** Dest City */
+            dest_city: string | null;
+            /** Dest State */
+            dest_state: string | null;
+            /** Pickup Date */
+            pickup_date: string | null;
+            /** Equipment */
+            equipment: string | null;
+            /** Rate Usd */
+            rate_usd: number | null;
+            /** Miles */
+            miles: number | null;
+            /** Posted At */
+            posted_at: string | null;
+        };
+        /** LoadsListOut */
+        LoadsListOut: {
+            /** Items */
+            items: components["schemas"]["LoadOut"][];
+        };
         /** LoginIn */
         LoginIn: {
             /** Email */
@@ -901,6 +1184,46 @@ export interface components {
              * @default true
              */
             ok: boolean;
+        };
+        /** MailStatusOut */
+        MailStatusOut: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "simulated" | "gmail";
+            /** Impersonate */
+            impersonate: string;
+            /** Admin Impersonate */
+            admin_impersonate: string;
+            /** Scopes */
+            scopes: string[];
+            /** Sa Configured */
+            sa_configured: boolean;
+            /** Sa Fingerprint */
+            sa_fingerprint: string | null;
+            /** Postal Address Set */
+            postal_address_set: boolean;
+            /** Sends Today */
+            sends_today: number;
+            /** Last Message Id */
+            last_message_id: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** MailboxOut */
+        MailboxOut: {
+            /** Email */
+            email: string;
+            /** Last History Id */
+            last_history_id: string | null;
+            /** Backfilled Through */
+            backfilled_through: string | null;
+        };
+        /** MailboxesOut */
+        MailboxesOut: {
+            /** Items */
+            items: components["schemas"]["MailboxOut"][];
         };
         /** OutcomeHistoryOut */
         OutcomeHistoryOut: {
@@ -1038,32 +1361,66 @@ export interface components {
             /** Primary Email */
             primary_email: string | null;
         };
-        /** ProviderCallResponse */
-        ProviderCallResponse: {
-            /** Provider */
-            provider: string;
-            /** Model */
-            model: string;
-            /** Status */
-            status: string;
-            /** Text */
-            text: string;
-            /** Parsed */
-            parsed: unknown | null;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Latency Ms */
-            latency_ms: number;
-            /** Cost Usd */
-            cost_usd: string;
+        /** RefreshAllOut */
+        RefreshAllOut: {
+            /** Items */
+            items: components["schemas"]["RefreshStatsOut"][];
+        };
+        /** RefreshStatsOut */
+        RefreshStatsOut: {
+            /** Kind */
+            kind: string;
+            /** Read */
+            read: number;
+            /** Inserted */
+            inserted: number;
+            /** Skipped */
+            skipped: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "disabled" | "error";
             /** Error */
-            error: string | null;
-            /** Citations */
-            citations?: {
-                [key: string]: unknown;
-            }[];
+            error?: string | null;
+        };
+        /** SendIn */
+        SendIn: {
+            /**
+             * To
+             * Format: email
+             */
+            to: string;
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+            /** Body Html */
+            body_html?: string | null;
+            /** Lead Id */
+            lead_id?: string | null;
+            /** In Reply To */
+            in_reply_to?: string | null;
+            /** References */
+            references?: string[] | null;
+            /** Thread Id */
+            thread_id?: string | null;
+        };
+        /** SendOut */
+        SendOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "simulated" | "real";
+            /** Message Id */
+            message_id: string | null;
+            /** Thread Id */
+            thread_id: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1216,6 +1573,22 @@ export interface components {
             /** Fit Reasons */
             fit_reasons?: string[];
         };
+        /** SourceOut */
+        SourceOut: {
+            /** Kind */
+            kind: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Last Verified At */
+            last_verified_at?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** SourcesOut */
+        SourcesOut: {
+            /** Items */
+            items: components["schemas"]["SourceOut"][];
+        };
         /** SuggestionList */
         SuggestionList: {
             post: components["schemas"]["PostOut"];
@@ -1238,6 +1611,30 @@ export interface components {
             score: number;
             /** Reason */
             reason: string;
+        };
+        /** TestSendIn */
+        TestSendIn: {
+            /**
+             * To
+             * Format: email
+             */
+            to: string;
+        };
+        /** TestSendOut */
+        TestSendOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "simulated" | "real";
+            /** Message Id */
+            message_id: string | null;
+            /** Thread Id */
+            thread_id: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** UnsubscribeOut */
         UnsubscribeOut: {
@@ -1696,6 +2093,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_email_email_send_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendOut"];
                 };
             };
             /** @description Validation Error */
@@ -2319,6 +2751,376 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status_mail_status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailStatusOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_send_mail_test_send_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestSendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_mail_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackfillIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestStatsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    incremental_mail_incremental_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncrementalIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncrementalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_mail_disconnect_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisconnectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mailboxes_mail_mailboxes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_loads_loads_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadsListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sources_loads_sources_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_source_loads_sources__kind__test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path: {
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_source_loads_sources__kind__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path: {
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshStatsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_all_loads_sources_refresh_all_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshAllOut"];
                 };
             };
             /** @description Validation Error */

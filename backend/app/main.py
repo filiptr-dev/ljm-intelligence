@@ -115,6 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.enrichment import router as enrichment_router
     from app.api.enrichment import unsub_router as unsubscribe_router
     from app.api.leads import router as leads_router
+    from app.api.loads import router as loads_router
+    from app.api.mail import router as mail_router
     from app.api.settings import router as settings_router
     from app.api.shipper_finder import router as shipper_finder_router
     from app.auth.deps import current_user, require_user_or_cron
@@ -141,5 +143,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(shipper_finder_router, dependencies=user_only)
     app.include_router(enrichment_router, dependencies=user_or_cron)
     app.include_router(ai_router, dependencies=user_only)
+    # Mail + loads connectors (plans 2026-10-01-google-workspace-mail-connector + load-board).
+    # ``user_or_cron`` so cron-secret headers can hit backfill/incremental/refresh-all.
+    app.include_router(mail_router, dependencies=user_or_cron)
+    app.include_router(loads_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)
     return app

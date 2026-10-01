@@ -311,3 +311,78 @@ async def draft_email(payload: DraftIn, request: Request) -> DraftOut:
         lead_id=payload.lead_id or lead.get("id"),
         stance=_stance(lead),
     )
+
+
+# ---------- POST /email/send (plan 2026-10-01-google-workspace-mail) --------
+
+
+from pydantic import EmailStr
+
+from app.mail.sender import get_mail_sender
+from app.models import SentLog
+
+
+class SendIn(BaseModel):
+    to: EmailStr
+    subject: str
+    body: str
+    body_html: str | None = None
+    lead_id: str | None = None
+    in_reply_to: str | None = None
+    references: list[str] | None = None
+    thread_id: str | None = None
+
+
+class SendOut(BaseModel):
+    ok: bool
+    mode: Literal["simulated", "real"]
+    message_id: str | None
+    thread_id: str | None
+    reason: str | None = None
+
+
+@router.post("/send", response_model=SendOut)
+async def send_email(payload: SendIn, request: Request) -> SendOut:
+    """Owner-only. Resolves the mail sender once; writes SentLog with provider fields."""
+    settings: Settings = request.app.state.settings
+    sessionmaker = request.app.state.sessionmaker
+    # DB override wins over env for the mode (lets /settings flip without redeploy).
+    async with sessionmaker() as s:
+        row = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+        mode_override = row.mail_sender_override if row else None
+    sender = get_mail_sender(settings, mode_override=mode_override)
+    result = await sender.send(
+        to=str(payload.to),
+        subject=payload.subject,
+        body=payload.body,
+        body_html=payload.body_html,
+        in_reply_to=payload.in_reply_to,
+        references=payload.references,
+        thread_id=payload.thread_id,
+        from_addr=settings.outreach_from_email,
+    )
+    async with sessionmaker() as s:
+        s.add(
+            SentLog(
+                lead_id=payload.lead_id or "SYSTEM",
+                mode=result.mode,
+                to_email=str(payload.to),
+                subject=payload.subject,
+                body=payload.body,
+                provider_message_id=result.message_id,
+                thread_id=result.thread_id,
+                in_reply_to=payload.in_reply_to,
+            )
+        )
+        try:
+            await s.commit()
+        except Exception as exc:  # noqa: BLE001
+            await s.rollback()
+            log.warning("email/send: sent_log insert skipped: %s", exc)
+    return SendOut(
+        ok=result.error is None,
+        mode=result.mode,
+        message_id=result.message_id,
+        thread_id=result.thread_id,
+        reason=result.error,
+    )
