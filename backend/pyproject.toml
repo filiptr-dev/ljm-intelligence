@@ -46,5 +46,8 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = ["-ra", "--strict-markers"]
-markers = ["live: requires DATABASE_URL to a real Postgres (Neon)"]
+addopts = ["-ra", "--strict-markers", "-m", "not perf"]
+markers = [
+    "live: requires DATABASE_URL to a real Postgres (Neon)",
+    "perf: slow performance benchmarks — opt-in via `pytest -m perf`",
+]
