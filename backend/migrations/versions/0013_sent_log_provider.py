@@ -20,7 +20,7 @@ def upgrade() -> None:
         b.add_column(sa.Column("provider_message_id", sa.String(255)))
         b.add_column(sa.Column("thread_id", sa.String(255)))
         b.add_column(sa.Column("in_reply_to", sa.String(255)))
-        b.add_column(sa.Column("is_test", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+        b.add_column(sa.Column("is_test", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.create_index("sent_log_thread_idx", "sent_log", ["thread_id"])
     with op.batch_alter_table("settings") as b:
         b.add_column(sa.Column("mail_sender_override", sa.String(16)))

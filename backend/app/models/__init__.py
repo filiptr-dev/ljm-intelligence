@@ -22,6 +22,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    false,
     func,
     text,
 )
@@ -365,7 +366,7 @@ class SentLog(Base):
     provider_message_id: Mapped[str | None] = mapped_column(String(255))
     thread_id: Mapped[str | None] = mapped_column(String(255))
     in_reply_to: Mapped[str | None] = mapped_column(String(255))
-    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
 
     __table_args__ = (
         Index("sent_log_contact_sent", "contact_id", text("sent_at DESC")),
