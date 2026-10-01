@@ -60,6 +60,7 @@ async def _seed_template(sm, template_id: str = "tmpl-1") -> None:
             )
         )
         await s.commit()
+from app.integrations.adapters.ai.provider import GeminiProvider, NullProvider
 from app.pipeline.enrichment import (
     ContactPayload,
     copy_enrichment_candidates_to_lead,
@@ -76,7 +77,6 @@ from app.sources.linkedin_search import (
     _normalize_url,
     find_decision_makers,
 )
-from app.integrations.adapters.ai.provider import GeminiProvider, NullProvider
 
 # =========================================================================
 # Fixtures / mocks
@@ -348,12 +348,20 @@ async def test_enrich_no_api_key(sm, monkeypatch):
 async def test_enrich_happy_path(sm, monkeypatch):
     """Site scraper + LinkedIn search both hit. Contacts dedupe by email; provenance recorded."""
     # Earlier revision hung here: `robots.is_allowed` called urllib's
-    # `RobotFileParser.read()`, which has no socket timeout and blocked
-    # the event loop fetching acme.com/robots.txt. Fixed in robots.py with
-    # a bounded urlopen; also stubbed here so the test never leaves the box.
+    # `RobotFileParser.read()` without a socket timeout. Follow-up pass: the
+    # cache stored ``None`` for unreachable hosts, which collapsed into "miss"
+    # and refetched on EVERY page in a crawl — turning one 3s timeout into
+    # ~30s per scrape. Both fixes landed in robots.py; here we belt-and-
+    # suspenders stub the lookup so no network leaves the box regardless.
+    #
+    # ``site_scraper`` imports ``is_allowed`` into its own module namespace via
+    # ``from app.sources.robots import is_allowed``, so patching only the
+    # ``robots`` module no longer propagates — we patch both bindings.
     from app.sources import robots as _robots
+    from app.sources import site_scraper as _ss
 
     monkeypatch.setattr(_robots, "is_allowed", lambda url, ua: True)
+    monkeypatch.setattr(_ss, "is_allowed", lambda url, ua: True)
     _robots.clear_cache()
 
     await _seed_lead(sm)
@@ -385,7 +393,7 @@ async def test_enrich_happy_path(sm, monkeypatch):
 
     from app.integrations.adapters.ai import provider as _pv
 
-    async def _fake_generate_json(self, prompt, *, schema_hint=None):  # noqa: ARG001
+    async def _fake_generate_json(self, prompt, *, schema_hint=None):
         parsed = {
             "emails": [{"value": "hello@acme.com", "context": ""}],
             "phones": [],
