@@ -19,8 +19,11 @@ import { Label } from "@/components/ui/label"
 import {
   getMailStatus,
   listLoadSources,
-  postMailTestSend,
+  postMailBackfill,
   postMailDisconnect,
+  postMailReconnect,
+  postMailTestRead,
+  postMailTestSend,
   refreshLoadSource,
   testLoadSource,
   type LoadSourceRow,
@@ -111,6 +114,48 @@ export function ConnectorsPanel() {
     }
   }
 
+  async function onReconnect() {
+    setBusy("mail-reconnect")
+    try {
+      await postMailReconnect()
+      toast.success("Reconnected — using env mail_sender")
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onTestRead() {
+    setBusy("mail-test-read")
+    try {
+      const r = await postMailTestRead()
+      if (!r) {
+        toast.error("Test-read failed")
+      } else if (r.ok) {
+        toast.success(
+          `Read OK · ${r.mailboxes_found} mailbox${r.mailboxes_found === 1 ? "" : "es"}` +
+            (r.sample_subject ? ` · last: "${r.sample_subject}"` : ""),
+        )
+      } else {
+        toast.error(r.reason ?? "Test-read failed")
+      }
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onStartFirstSync() {
+    if (!mail?.impersonate) return
+    setBusy("mail-first-sync")
+    try {
+      await postMailBackfill(mail.impersonate, 3)
+      toast.success(`Backfill queued for ${mail.impersonate}`)
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function onTestSource(kind: string) {
     setBusy(`src-test-${kind}`)
     try {
@@ -150,7 +195,7 @@ export function ConnectorsPanel() {
     <>
       <Panel
         title="Mail connection"
-        description="Default is simulated. Add your Google Workspace credentials in Render, then click Test connection — it switches to live Gmail once the credentials verify."
+        description="Default is simulated. Add your Google Workspace service-account JSON in Render as GMAIL_SA_JSON, set GMAIL_ADMIN_IMPERSONATE and MAIL_OWNER_SEND_ENABLED=true, then use the two Test buttons below. Test connection sends a tiny email (write-side); Test read lists one mailbox and shows the most recent message (read-side). Start first sync kicks a 3-month backfill of the owner mailbox."
       >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm">
@@ -165,6 +210,23 @@ export function ConnectorsPanel() {
               {mailOk ? `Gmail · ${mail?.impersonate}` : "Simulated"}
             </span>
           </div>
+          <span
+            className={
+              "rounded px-2 py-0.5 text-xs " +
+              (mail?.owner_send_enabled
+                ? "bg-blue-500/10 text-blue-700"
+                : "bg-muted text-muted-foreground")
+            }
+            title="MAIL_OWNER_SEND_ENABLED"
+          >
+            Owner-send: {mail?.owner_send_enabled ? "ON" : "OFF"}
+          </span>
+          <span className="text-xs text-muted-foreground" title="mailbox_source">
+            Read source: {mail?.mailbox_source ?? "simulated"}
+            {typeof mail?.read_mailboxes_count === "number" && mail.read_mailboxes_count > 0
+              ? ` (${mail.read_mailboxes_count} mailboxes)`
+              : ""}
+          </span>
           {mail?.sa_fingerprint && (
             <span className="text-xs text-muted-foreground">SA #{mail.sa_fingerprint}</span>
           )}
@@ -197,8 +259,19 @@ export function ConnectorsPanel() {
             {busy === "mail-test" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
             Test connection
           </Button>
+          <Button variant="outline" onClick={onTestRead} disabled={busy === "mail-test-read"}>
+            {busy === "mail-test-read" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Test read
+          </Button>
+          <Button variant="outline" onClick={onStartFirstSync} disabled={busy === "mail-first-sync" || !mail?.impersonate}>
+            {busy === "mail-first-sync" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
+            Start first sync
+          </Button>
           <Button variant="outline" onClick={onDisconnect} disabled={busy === "mail-disconnect"}>
             Disconnect
+          </Button>
+          <Button variant="outline" onClick={onReconnect} disabled={busy === "mail-reconnect"}>
+            Reconnect
           </Button>
         </div>
       </Panel>

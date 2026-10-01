@@ -30,7 +30,9 @@ from app.integrations.mail_service import (
     disconnect as svc_disconnect,
     incremental as svc_incremental,
     list_mailboxes as svc_list_mailboxes,
+    reconnect as svc_reconnect,
     status as svc_status,
+    test_read as svc_test_read,
     test_send as svc_test_send,
 )
 
@@ -53,6 +55,18 @@ class MailStatusOut(BaseModel):
     postal_address_set: bool
     sends_today: int
     last_message_id: str | None
+    reason: str | None = None
+    owner_send_enabled: bool = False
+    mailbox_source: Literal["simulated", "gmail"] = "simulated"
+    read_mailboxes_count: int = 0
+
+
+class TestReadOut(BaseModel):
+    ok: bool
+    mode: Literal["simulated", "gmail"]
+    mailboxes_found: int
+    sample_subject: str | None = None
+    sample_from: str | None = None
     reason: str | None = None
 
 
@@ -214,6 +228,36 @@ async def incremental(
 async def disconnect(request: Request) -> DisconnectOut:
     await svc_disconnect(request.app.state.sessionmaker)
     return DisconnectOut(ok=True, mode="simulated")
+
+
+class ReconnectOut(BaseModel):
+    ok: bool
+
+
+@router.post("/reconnect", response_model=ReconnectOut)
+async def reconnect(request: Request) -> ReconnectOut:
+    """Clear the DB-side simulated override — defer to env `mail_sender` again.
+
+    The pre-build findings called this out: `/disconnect` wrote
+    `mail_sender_override='simulated'` with no way to clear it from the UI.
+    `/reconnect` nulls that override; env settings take over from the next
+    `/mail/status` read.
+    """
+    await svc_reconnect(request.app.state.sessionmaker)
+    return ReconnectOut(ok=True)
+
+
+@router.post("/test-read", response_model=TestReadOut)
+async def test_read(request: Request) -> TestReadOut:
+    """Read-side connection probe — proves the DWD + read scope actually works.
+
+    Lists one mailbox, pulls its most recent message (no DB write) so an
+    owner can tell the difference between "SA valid, send scope only" and
+    "SA valid, DWD + admin + read scope all granted".
+    """
+    settings: Settings = request.app.state.settings
+    row = await svc_test_read(settings)
+    return TestReadOut(**row.__dict__)
 
 
 @router.get("/mailboxes", response_model=MailboxesOut)

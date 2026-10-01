@@ -173,6 +173,12 @@ def get_mail_sender(settings: Settings, mode_override: str | None = None) -> Mai
     mode = mode_override or settings.mail_sender
     if mode != "gmail":
         return SimulatedSender()
+    # Owner kill-switch (`MAIL_OWNER_SEND_ENABLED`). Even with Gmail configured,
+    # we never pass this gate without an explicit owner opt-in — this is the
+    # only call that can embarrass LJM in front of a broker.
+    if not getattr(settings, "mail_owner_send_enabled", False):
+        log.info("mail/factory: owner-send switch OFF; using simulated")
+        return SimulatedSender()
     sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
     if sa is None:
         log.warning("mail/factory: GMAIL_SA_JSON missing/invalid; falling back to simulated")

@@ -31,6 +31,23 @@ export async function postMailDisconnect(): Promise<boolean> {
   return !!data?.ok
 }
 
+export async function postMailReconnect(): Promise<boolean> {
+  const { data } = await api.POST("/mail/reconnect", {})
+  return !!data?.ok
+}
+
+export type TestReadResult = components["schemas"]["TestReadOut"]
+
+export async function postMailTestRead(): Promise<TestReadResult | null> {
+  const { data } = await api.POST("/mail/test-read", {})
+  return data ?? null
+}
+
+export async function postMailBackfill(mailbox: string, months = 12): Promise<unknown> {
+  const { data } = await api.POST("/mail/backfill", { body: { mailbox, months } })
+  return data ?? null
+}
+
 export async function listLoadSources(): Promise<LoadSourceRow[]> {
   const { data } = await api.GET("/loads/sources", {})
   return data?.items ?? []

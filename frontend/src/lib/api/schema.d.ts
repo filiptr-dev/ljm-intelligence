@@ -604,6 +604,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mail/reconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconnect
+         * @description Clear the DB-side simulated override — defer to env `mail_sender` again.
+         *
+         *     The pre-build findings called this out: `/disconnect` wrote
+         *     `mail_sender_override='simulated'` with no way to clear it from the UI.
+         *     `/reconnect` nulls that override; env settings take over from the next
+         *     `/mail/status` read.
+         */
+        post: operations["reconnect_mail_reconnect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/test-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Read
+         * @description Read-side connection probe — proves the DWD + read scope actually works.
+         *
+         *     Lists one mailbox, pulls its most recent message (no DB write) so an
+         *     owner can tell the difference between "SA valid, send scope only" and
+         *     "SA valid, DWD + admin + read scope all granted".
+         */
+        post: operations["test_read_mail_test_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mail/mailboxes": {
         parameters: {
             query?: never;
@@ -1679,6 +1728,22 @@ export interface components {
             last_message_id: string | null;
             /** Reason */
             reason?: string | null;
+            /**
+             * Owner Send Enabled
+             * @default false
+             */
+            owner_send_enabled: boolean;
+            /**
+             * Mailbox Source
+             * @default simulated
+             * @enum {string}
+             */
+            mailbox_source: "simulated" | "gmail";
+            /**
+             * Read Mailboxes Count
+             * @default 0
+             */
+            read_mailboxes_count: number;
         };
         /** MailboxOut */
         MailboxOut: {
@@ -1886,6 +1951,11 @@ export interface components {
             phone: string | null;
             /** Primary Email */
             primary_email: string | null;
+        };
+        /** ReconnectOut */
+        ReconnectOut: {
+            /** Ok */
+            ok: boolean;
         };
         /** RefreshAllOut */
         RefreshAllOut: {
@@ -2146,6 +2216,24 @@ export interface components {
             score: number;
             /** Reason */
             reason: string;
+        };
+        /** TestReadOut */
+        TestReadOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "simulated" | "gmail";
+            /** Mailboxes Found */
+            mailboxes_found: number;
+            /** Sample Subject */
+            sample_subject?: string | null;
+            /** Sample From */
+            sample_from?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** TestSendIn */
         TestSendIn: {
@@ -3536,6 +3624,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DisconnectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconnect_mail_reconnect_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconnectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_read_mail_test_read_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestReadOut"];
                 };
             };
             /** @description Validation Error */

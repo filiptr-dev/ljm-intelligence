@@ -39,6 +39,9 @@ class MailStatusRow:
     sends_today: int
     last_message_id: str | None
     reason: str | None = None
+    owner_send_enabled: bool = False
+    mailbox_source: str = "simulated"
+    read_mailboxes_count: int = 0
 
 
 @dataclass
@@ -112,6 +115,17 @@ async def status(sessionmaker: Any, settings: Any) -> MailStatusRow:
     reason = None
     if mode == "gmail" and sa is None:
         reason = "missing_env:GMAIL_SA_JSON"
+    elif mode == "gmail" and not getattr(settings, "mail_owner_send_enabled", False):
+        reason = "owner_switch_off:MAIL_OWNER_SEND_ENABLED"
+    # Read-side mailbox count — informational only; a real list call happens
+    # on `/mail/mailboxes` so this stays cheap.
+    read_mailboxes_count = 0
+    if settings.mailbox_source == "gmail" and sa is not None:
+        try:
+            from app.integrations.adapters.email.mailbox import GmailMailbox
+            read_mailboxes_count = len(await GmailMailbox(settings).list_mailboxes())
+        except Exception as exc:  # noqa: BLE001
+            log.warning("mail/status: list_mailboxes probe failed: %s", exc)
     return MailStatusRow(
         mode=mode if mode in ("simulated", "gmail") else "simulated",
         impersonate=settings.gmail.impersonate,
@@ -125,6 +139,9 @@ async def status(sessionmaker: Any, settings: Any) -> MailStatusRow:
         sends_today=int(sends_today),
         last_message_id=last,
         reason=reason,
+        owner_send_enabled=bool(getattr(settings, "mail_owner_send_enabled", False)),
+        mailbox_source=settings.mailbox_source,
+        read_mailboxes_count=read_mailboxes_count,
     )
 
 
@@ -197,6 +214,74 @@ async def disconnect(sessionmaker: Any) -> None:
             s.add(row)
         row.mail_sender_override = "simulated"
         await s.commit()
+
+
+async def reconnect(sessionmaker: Any) -> None:
+    """Clear the DB-side simulated override so the env `mail_sender` wins again.
+
+    Mirrors `disconnect`. The connector-setup findings called this out: once
+    an owner clicked Disconnect, the override stuck forever with no UI to
+    bring Gmail back. ``mail_sender_override = NULL`` means "defer to env".
+    """
+    async with sessionmaker() as s:
+        row = (
+            await s.execute(select(SettingsRow).where(SettingsRow.id == 1))
+        ).scalar_one_or_none()
+        if row is None:
+            row = SettingsRow(id=1)
+            s.add(row)
+        row.mail_sender_override = None
+        await s.commit()
+
+
+@dataclass
+class TestReadRow:
+    """Result of /mail/test-read — the read-side companion to /mail/test-send."""
+
+    ok: bool
+    mode: str  # "simulated" | "gmail"
+    mailboxes_found: int
+    sample_subject: str | None = None
+    sample_from: str | None = None
+    reason: str | None = None
+
+
+async def test_read(settings: Any) -> TestReadRow:
+    """Prove the configured mailbox source can actually read mail.
+
+    The old Mail connection panel claimed "Test connection switches to live
+    Gmail", but under the hood it only sent a test email. That left a whole
+    class of DWD misconfiguration (missing admin scope, impersonation
+    subject wrong, read scope not granted) invisible until the first cron
+    hit. This endpoint lists at most one mailbox, pulls its most recent
+    message, returns the subject + from — no DB writes, nothing persisted.
+    """
+    source = get_mailbox_source(settings)
+    try:
+        mailboxes = await source.list_mailboxes()
+    except Exception as exc:  # noqa: BLE001
+        return TestReadRow(ok=False, mode=source.kind, mailboxes_found=0, reason=str(exc))
+    if not mailboxes:
+        return TestReadRow(
+            ok=False, mode=source.kind, mailboxes_found=0,
+            reason="no_mailboxes_listed (check admin_impersonate + admin scope)",
+        )
+    first = mailboxes[0]
+    try:
+        async for msg in source.backfill(first, datetime.now(UTC).replace(day=1)):
+            return TestReadRow(
+                ok=True, mode=source.kind, mailboxes_found=len(mailboxes),
+                sample_subject=msg.subject, sample_from=msg.from_addr,
+            )
+    except Exception as exc:  # noqa: BLE001
+        return TestReadRow(
+            ok=False, mode=source.kind, mailboxes_found=len(mailboxes), reason=str(exc)
+        )
+    return TestReadRow(
+        ok=True, mode=source.kind, mailboxes_found=len(mailboxes),
+        sample_subject=None, sample_from=None,
+        reason="listed_but_no_recent_messages",
+    )
 
 
 async def list_mailboxes(sessionmaker: Any, settings: Any) -> list[MailboxRow]:

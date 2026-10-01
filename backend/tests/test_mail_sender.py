@@ -51,7 +51,7 @@ def test_factory_returns_gmail_when_env_and_refresh_ok() -> None:
         '{"client_email":"sa@proj.iam.gserviceaccount.com","client_id":"123",'
         '"private_key":"KEY","type":"service_account"}'
     )
-    s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json))
+    s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json), mail_owner_send_enabled=True)
     with (
         patch("app.integrations.adapters.email.sender.build_delegated_credentials", return_value=object()),
         patch("app.integrations.adapters.email.sender.test_refresh", return_value=(True, None)),
@@ -66,12 +66,23 @@ def test_factory_fallback_when_refresh_fails() -> None:
         '{"client_email":"sa@proj.iam.gserviceaccount.com","client_id":"123",'
         '"private_key":"KEY","type":"service_account"}'
     )
-    s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json))
+    s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json), mail_owner_send_enabled=True)
     with (
         patch("app.integrations.adapters.email.sender.build_delegated_credentials", return_value=object()),
         patch("app.integrations.adapters.email.sender.test_refresh", return_value=(False, "boom")),
     ):
         sender = get_mail_sender(s)
+    assert isinstance(sender, SimulatedSender)
+
+
+def test_factory_fallback_when_owner_send_switch_off() -> None:
+    """Even with Gmail configured, owner-send OFF means simulated."""
+    sa_json = (
+        '{"client_email":"sa@proj.iam.gserviceaccount.com","client_id":"123",'
+        '"private_key":"KEY","type":"service_account"}'
+    )
+    s = _settings(mail_sender="gmail", gmail_sa_json=SecretStr(sa_json), mail_owner_send_enabled=False)
+    sender = get_mail_sender(s)
     assert isinstance(sender, SimulatedSender)
 
 
