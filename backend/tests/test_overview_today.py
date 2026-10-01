@@ -67,7 +67,13 @@ def _lead(
 async def _seed(client: AsyncClient, *, leads=(), outcomes=(), posts=(), crawls=()) -> None:
     sm = client._test_sessionmaker  # type: ignore[attr-defined]
     async with sm() as s:
-        for row in (*leads, *outcomes, *posts, *crawls):
+        # Leads first: `call_outcomes.lead_id` has a FK to `leads.id` that PG16
+        # enforces (sqlite doesn't). Flush before the dependents.
+        for row in leads:
+            s.add(row)
+        if leads:
+            await s.flush()
+        for row in (*outcomes, *posts, *crawls):
             s.add(row)
         await s.commit()
 

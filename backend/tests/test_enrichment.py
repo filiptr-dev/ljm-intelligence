@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db import Base
 from app.main import create_app
 from app.models import (
+    EmailTemplate,
     EnrichmentCandidate,
     Lead,
     LeadContact,
@@ -43,6 +44,22 @@ from app.models import (
     ShipperCandidate,
     Suppression,
 )
+
+
+async def _seed_template(sm, template_id: str = "tmpl-1") -> None:
+    """Seed an EmailTemplate row for `settings.auto_outreach_template_id` FK.
+    PG16 enforces the FK; sqlite doesn't."""
+    async with sm() as s:
+        s.add(
+            EmailTemplate(
+                id=template_id,
+                name=template_id,
+                subject="Hi {name}",
+                body="Hello {name} — {{unsub}}",
+                tokens=[],
+            )
+        )
+        await s.commit()
 from app.pipeline.enrichment import (
     ContactPayload,
     copy_enrichment_candidates_to_lead,
@@ -518,6 +535,7 @@ async def test_promote_copies_enrichment_candidates(sm, client):
                 state="NJ",
             )
         )
+        await s.flush()  # PG16 FK: parent must land before the child insert.
         s.add(
             EnrichmentCandidate(
                 candidate_id=cand_id,
@@ -621,6 +639,7 @@ async def test_auto_send_disabled_by_default(sm, client):
 
 async def test_auto_send_needs_footer(sm, client, app, monkeypatch):
     # Enable auto-outreach + template. Empty postal address must refuse.
+    await _seed_template(sm)
     async with sm() as s:
         s.add(SettingsRow(id=1, auto_outreach_enabled=True, auto_outreach_template_id="tmpl-1"))
         await s.commit()
@@ -635,6 +654,7 @@ async def test_auto_send_respects_suppression_and_cap(sm, client, app):
         outreach_postal_address="22 Troy Lane, Lincoln Park NJ",
         unsubscribe_base_url="https://ljm.test",
     )
+    await _seed_template(sm)
     async with sm() as s:
         s.add(
             SettingsRow(
@@ -823,6 +843,7 @@ async def test_copy_enrichment_candidates_helper(sm):
     async with sm() as s:
         s.add(Lead(id="MC-COPY", name="Copy", kind="Shipper", state="NJ", raw={}, evidence={}, recommendations=[]))
         s.add(ShipperCandidate(id="cand-copy", sources=["FMCSA"], name="Copy", state="NJ"))
+        await s.flush()  # PG16 FK: parent must land before the child insert.
         s.add(
             EnrichmentCandidate(
                 candidate_id="cand-copy", email="dm@copy.com", is_decision_maker=True, source="X", source_url=""

@@ -215,17 +215,11 @@ if _PG_HARNESS:
             kwargs.pop("poolclass", None)
             kwargs.pop("future", None)
             engine = _orig_create_async_engine(_PG_TEST_URL, **kwargs)
-            # SQLite tests ignore FK ordering (templates referenced before
-            # inserted, etc.). Replicate that laxity on PG with
-            # session_replication_role=replica so the test *behavioural*
-            # intent is preserved; real production uses the strict role.
-            from sqlalchemy import event
-
-            @event.listens_for(engine.sync_engine, "connect")
-            def _relax_fks(dbapi_conn, _):
-                with dbapi_conn.cursor() as cur:
-                    cur.execute("SET session_replication_role = 'replica'")
-
+            # FK enforcement is ON. The sqlite harness is permissive by
+            # driver default; the PG16 harness is strict by design — tests
+            # that insert a referencing row must seed the referenced row
+            # first. See projects/ljm-intelligence/tasks/.../
+            # 2026-10-01-pg-test-harness-real-fks.md.
             return engine
         return _orig_create_async_engine(url, **kwargs)
 

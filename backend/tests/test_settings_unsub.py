@@ -22,7 +22,27 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.main import create_app
-from app.models import Lead, LeadContact, SentLog, SettingsRow
+from app.models import EmailTemplate, Lead, LeadContact, SentLog, SettingsRow
+
+
+async def _seed_tmpl_x(sm) -> None:
+    """Seed the `tmpl-x` row referenced by `settings.auto_outreach_template_id`.
+
+    PG16 enforces the FK; sqlite doesn't. Keeping the seed here (instead of
+    weakening the migration) keeps the test's intent explicit and future-proofs
+    against the strict harness.
+    """
+    async with sm() as s:
+        s.add(
+            EmailTemplate(
+                id="tmpl-x",
+                name="tmpl-x",
+                subject="Hi",
+                body="Hello {name} — {{unsub}}",
+                tokens=[],
+            )
+        )
+        await s.commit()
 
 
 @pytest.fixture
@@ -216,6 +236,7 @@ async def test_auto_send_refuses_when_secret_missing(sm, client, app):
     """No HMAC secret → the unsubscribe link can't be built → refuse with
     `no_unsub_config`: zero sends, zero rows."""
     app.state.settings = _hermetic_settings()  # both env values None
+    await _seed_tmpl_x(sm)
     async with sm() as s:
         s.add(
             SettingsRow(
@@ -242,6 +263,7 @@ async def test_auto_send_filters_by_min_fit_and_orders_desc(sm, client, app):
     """Only leads with fit_score >= threshold get contacted; highest first,
     unscored dropped."""
     app.state.settings = _hermetic_settings(unsubscribe_secret=SecretStr("s"))
+    await _seed_tmpl_x(sm)
     async with sm() as s:
         s.add(
             SettingsRow(
@@ -272,6 +294,7 @@ async def test_auto_send_filters_by_min_fit_and_orders_desc(sm, client, app):
 
 async def test_auto_send_unscored_only_returns_ok_zero(sm, client, app):
     app.state.settings = _hermetic_settings(unsubscribe_secret=SecretStr("s"))
+    await _seed_tmpl_x(sm)
     async with sm() as s:
         s.add(
             SettingsRow(
@@ -298,6 +321,7 @@ _DEFAULT_BASE = "https://ljm-intelligence-api.onrender.com"
 
 
 async def _arm_with_one_contact(sm, *, secret: str | None = "db-secret"):
+    await _seed_tmpl_x(sm)
     async with sm() as s:
         s.add(
             SettingsRow(
