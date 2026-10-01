@@ -56,6 +56,10 @@ PRICES: dict[tuple[str, str], tuple[Decimal, Decimal]] = {
 DEFAULT_FEATURES: dict[str, dict[str, str]] = {
     "email_drafts": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     "inbox_analysis": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
+    # Pre-fill the "Reply" composer on an inbox thread. Cheap-flash by default
+    # — the operator always edits before sending, so hallucinations are
+    # self-correcting; a mis-firing timeout must never block the UI.
+    "inbox_draft_reply": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     "lead_scoring": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     "enrichment_extractor": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     "shipper_discovery": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},

@@ -17,16 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.analysis import service as analysis_svc
 from app.analysis.models import (
-    BrokerLookalike,
     BrokerPrediction,
     ForgetContactAudit,
     LanePrediction,
-    ObjectionCluster,
     PredictionRun,
 )
 from app.db import Base
 from app.inbox import service as inbox_svc
-from app.inbox.models import MailMessage, MessageInsight, NoReplyTracker
+from app.inbox.models import MailMessage, MessageInsight
 
 
 async def _fresh_session() -> AsyncSession:
@@ -183,3 +181,60 @@ async def test_ai_draft_pre_fills_from_last_inbound() -> None:
         assert draft.subject.startswith("Re:")
         assert len(draft.body_text) > 20
         assert "<p>" in draft.body_html
+
+
+@pytest.mark.asyncio
+async def test_ai_draft_uses_provider_when_available() -> None:
+    """When the provider returns ok text, that becomes the draft body."""
+    from decimal import Decimal
+
+    from app.integrations.adapters.ai.provider import ProviderCall
+
+    class _OkProvider:
+        kind = "gemini"
+        model = "gemini-3.5-flash-lite"
+
+        async def generate_text(self, prompt: str) -> ProviderCall:
+            assert "Broker:" in prompt and "Intent:" in prompt  # prompt wiring sanity
+            return ProviderCall(
+                text="Hi Scott,\n\nTaking the LA → Dallas load at $2200. Pickup window?\n\n— LJM",
+                parsed=None,
+                input_tokens=10,
+                output_tokens=20,
+                latency_ms=5,
+                cost_usd=Decimal(0),
+                model="gemini-3.5-flash-lite",
+                provider="gemini",
+                status="ok",
+                error=None,
+            )
+
+    async with await _fresh_session() as s:
+        await _seed(s)
+        draft = await inbox_svc.ai_draft_reply(s, "T1", provider=_OkProvider())
+        assert draft is not None
+        assert "Taking the LA → Dallas load" in draft.body_text
+        assert "<p>" in draft.body_html
+        assert draft.subject.startswith("Re:")
+
+
+@pytest.mark.asyncio
+async def test_ai_draft_falls_back_to_template_on_provider_error() -> None:
+    """On a provider timeout / exception / non-ok status, drop to the template."""
+
+    class _HangingProvider:
+        kind = "gemini"
+        model = "gemini-3.5-flash-lite"
+
+        async def generate_text(self, prompt: str):
+            # Simulate the real timeout path cheaply by raising TimeoutError
+            # directly — our wrapper catches it the same as asyncio.wait_for would.
+            raise TimeoutError()
+
+    async with await _fresh_session() as s:
+        await _seed(s)
+        draft = await inbox_svc.ai_draft_reply(s, "T1", provider=_HangingProvider())
+        assert draft is not None
+        # Template fallback for intent=load_offer mentions the lane prose.
+        assert "Thanks for the note" in draft.body_text
+        assert draft.subject.startswith("Re:")

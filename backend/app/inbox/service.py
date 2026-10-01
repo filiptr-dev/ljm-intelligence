@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.inbox.models import MailMessage, MessageInsight, NoReplyTracker
 
-
 # ---- shapes ---------------------------------------------------------------
 
 
@@ -596,13 +595,84 @@ class AiDraftOut:
     body_html: str
 
 
-async def ai_draft_reply(session: AsyncSession, thread_id: str) -> AiDraftOut | None:
+AI_DRAFT_TIMEOUT_S = 8.0
+
+
+def _template_body(intent: str, broker: str, lane_from: str, lane_to: str, rate: float | None) -> str:
+    """The old template logic, lifted so the AI path can fall back to it."""
+    if intent == "load_offer":
+        rate_line = f"${rate:,.0f} works on our side." if rate else "We can take this at your target rate."
+        return (
+            f"Hi {broker},\n\n"
+            f"Thanks for the load from {lane_from} to {lane_to}. {rate_line} "
+            "Can you confirm the pickup window and the shipper POC?\n\n"
+            "— LJM"
+        )
+    if intent == "rate_request":
+        return (
+            f"Hi {broker},\n\n"
+            f"Target on {lane_from} → {lane_to} is in your range. Send the stop details and we will quote firm within the hour.\n\n"
+            "— LJM"
+        )
+    if intent == "urgent_truck":
+        return (
+            f"Hi {broker},\n\n"
+            "We have equipment in the area and can cover today. Call the dispatch line to lock it in.\n\n"
+            "— LJM"
+        )
+    if intent in ("payment", "detention"):
+        return (
+            f"Hi {broker},\n\n"
+            "Thanks for flagging — I'll pull the paperwork and get back with the resolution today.\n\n"
+            "— LJM"
+        )
+    if intent == "complaint":
+        return (
+            f"Hi {broker},\n\n"
+            "I hear you. Give me the load number and I will trace it personally and come back with a fix.\n\n"
+            "— LJM"
+        )
+    return (
+        f"Hi {broker},\n\n"
+        "Thanks for the note. Confirming we're on it — reply back if you need anything specific.\n\n"
+        "— LJM"
+    )
+
+
+def _ai_draft_prompt(broker: str, intent: str, lane_from: str, lane_to: str, rate: float | None, last_body: str) -> str:
+    """One prompt string — the operator always edits before sending."""
+    rate_str = f"${rate:,.0f}" if rate else "unspecified"
+    return (
+        "You are LJM, a trucking carrier. Draft a short, professional reply (2-4 "
+        "sentences) to the broker email below. Keep the signature '— LJM' on its own line. "
+        "No preamble, no explanations — just the reply body.\n\n"
+        f"Broker: {broker}\n"
+        f"Intent: {intent}\n"
+        f"Lane: {lane_from or '?'} → {lane_to or '?'}\n"
+        f"Rate: {rate_str}\n"
+        f"Last message:\n{last_body[:1500]}\n"
+    )
+
+
+async def ai_draft_reply(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    provider: Any | None = None,
+) -> AiDraftOut | None:
     """Pre-fill a reply draft using the shared email builder shape.
 
-    Deterministic rules keyed off the thread's last inbound intent so the
-    demo surface renders without needing a Gemini call. The AI path (Gemini
-    on ``inbox_draft_reply``) swaps the body here with no caller change.
+    AI path: ask the configured provider for ``inbox_draft_reply`` and use the
+    text. Template path: deterministic rules keyed off the thread's last
+    inbound intent. The AI call is bounded (``AI_DRAFT_TIMEOUT_S``) and any
+    error / timeout / ``no_api_key`` status falls back to the template so the
+    UI never spins. ``provider`` is injectable for tests.
     """
+    import asyncio
+    import logging as _log
+
+    _l = _log.getLogger(__name__)
+
     msgs = await get_thread(session, thread_id)
     if not msgs:
         return None
@@ -615,44 +685,39 @@ async def ai_draft_reply(session: AsyncSession, thread_id: str) -> AiDraftOut | 
     rate = last_in.rate_usd
     lane_from = last_in.lane_from or ""
     lane_to = last_in.lane_to or ""
-    if intent == "load_offer":
-        rate_line = f"${rate:,.0f} works on our side." if rate else "We can take this at your target rate."
-        body = (
-            f"Hi {broker},\n\n"
-            f"Thanks for the load from {lane_from} to {lane_to}. {rate_line} "
-            "Can you confirm the pickup window and the shipper POC?\n\n"
-            "— LJM"
-        )
-    elif intent == "rate_request":
-        body = (
-            f"Hi {broker},\n\n"
-            f"Target on {lane_from} → {lane_to} is in your range. Send the stop details and we will quote firm within the hour.\n\n"
-            "— LJM"
-        )
-    elif intent == "urgent_truck":
-        body = (
-            f"Hi {broker},\n\n"
-            "We have equipment in the area and can cover today. Call the dispatch line to lock it in.\n\n"
-            "— LJM"
-        )
-    elif intent in ("payment", "detention"):
-        body = (
-            f"Hi {broker},\n\n"
-            "Thanks for flagging — I'll pull the paperwork and get back with the resolution today.\n\n"
-            "— LJM"
-        )
-    elif intent == "complaint":
-        body = (
-            f"Hi {broker},\n\n"
-            "I hear you. Give me the load number and I will trace it personally and come back with a fix.\n\n"
-            "— LJM"
-        )
-    else:
-        body = (
-            f"Hi {broker},\n\n"
-            "Thanks for the note. Confirming we're on it — reply back if you need anything specific.\n\n"
-            "— LJM"
-        )
+
+    # ---- AI path first; template is the fallback.
+    if provider is None:
+        try:
+            from app.config import get_settings
+            from app.integrations.adapters.ai.provider import get_for
+
+            provider = get_for("inbox_draft_reply", settings=get_settings())
+        except Exception as exc:  # noqa: BLE001 — any config miss ⇒ template.
+            _l.info("ai_draft_reply: provider resolve failed: %s", type(exc).__name__)
+            provider = None
+
+    ai_body: str | None = None
+    if provider is not None and getattr(provider, "kind", None) != "null":
+        prompt = _ai_draft_prompt(broker, intent, lane_from, lane_to, rate, last_in.body_text or "")
+        try:
+            call = await asyncio.wait_for(
+                provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
+            )
+            if getattr(call, "status", None) == "ok" and (call.text or "").strip():
+                ai_body = call.text.strip()
+        except TimeoutError:
+            _l.info("ai_draft_reply: provider timeout → template fallback")
+        except Exception as exc:  # noqa: BLE001 — any adapter error ⇒ template.
+            _l.info("ai_draft_reply: provider error %s → template fallback", type(exc).__name__)
+
+    if ai_body is not None:
+        body = ai_body
+        html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
+        return AiDraftOut(subject=subject, body_text=body, body_html=html)
+
+    # ---- Template fallback (original behaviour).
+    body = _template_body(intent, broker, lane_from, lane_to, rate)
     html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
     return AiDraftOut(subject=subject, body_text=body, body_html=html)
 
