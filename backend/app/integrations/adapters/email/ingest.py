@@ -30,13 +30,22 @@ class IngestStats:
     error: str | None = None
 
 
+RETENTION_MONTHS = 18
+
+
 def _row_from(msg: RawMessage) -> dict:
+    # Stamp email_lower (normalised sender) + retention_until on ingest so the
+    # analysis queries can filter without touching from_addr case, and the
+    # retention sweeper has a column to compare now() against. Both columns
+    # exist from migration 0016; ingest fills them for new rows.
+    retention_until = datetime.now(UTC) + timedelta(days=30 * RETENTION_MONTHS)
     return {
         "mailbox": msg.mailbox,
         "message_id": msg.message_id,
         "thread_id": msg.thread_id,
         "history_id": msg.history_id,
         "from_addr": msg.from_addr,
+        "email_lower": (msg.from_addr or "").strip().lower() or None,
         "to_addrs": msg.to_addrs,
         "cc_addrs": msg.cc_addrs,
         "subject": msg.subject,
@@ -47,6 +56,7 @@ def _row_from(msg: RawMessage) -> dict:
         "body_text": msg.body_text,
         "body_html": msg.body_html,
         "labels": msg.labels,
+        "retention_until": retention_until,
         "raw": msg.raw,
     }
 
@@ -60,6 +70,15 @@ async def _upsert(session: AsyncSession, msg: RawMessage) -> bool:
     if existing is not None:
         return False
     session.add(MailMessage(**_row_from(msg)))
+    # Triage runs inline in the same UoW — a half-written (message yes, insight
+    # no) state is impossible by construction (plan §Rules "One session per
+    # unit of work").
+    from app.inbox.triage import triage_message
+
+    try:
+        await triage_message(session, msg)
+    except Exception:  # noqa: BLE001 — triage must not block the ingest batch
+        log.exception("mail/ingest: triage failed, continuing with raw message only")
     return True
 
 

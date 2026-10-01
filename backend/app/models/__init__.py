@@ -19,7 +19,7 @@ from app.identity.models import (  # noqa: F401
     TenantSettings,
     User,
 )
-from app.inbox.models import MailCursor, MailMessage  # noqa: F401
+from app.inbox.models import MailCursor, MailMessage, MessageInsight, NoReplyTracker  # noqa: F401
 from app.outreach.models import (  # noqa: F401
     CallOutcome,
     CapacityPost,
@@ -55,6 +55,8 @@ __all__ = [
     "Load",
     "MailCursor",
     "MailMessage",
+    "MessageInsight",
+    "NoReplyTracker",
     "Organization",
     "OrganizationMember",
     "PlatformSettings",

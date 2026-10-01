@@ -165,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.api.enrichment import router as enrichment_router
     from app.api.enrichment import unsub_router as unsubscribe_router
     from app.api.leads import router as leads_router
+    from app.inbox.router import router as inbox_router
     from app.api.loads import router as loads_router
     from app.api.mail import cron_router as mail_cron_router
     from app.api.mail import router as mail_router
@@ -218,6 +219,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ``loads_router`` stays mixed because its /refresh-all is cron-driven and
     # its reads are owner-facing — the per-handler check guards the cron path.
     app.include_router(mail_router, dependencies=user_only)
+    app.include_router(inbox_router, dependencies=user_only)
     app.include_router(mail_cron_router, dependencies=user_or_cron)
     app.include_router(loads_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)
