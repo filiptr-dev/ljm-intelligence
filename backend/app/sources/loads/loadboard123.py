@@ -1,0 +1,120 @@
+"""123Loadboard adapter — API key header + session login.
+
+(Verify at access day — 123LB publishes the full spec after the API agreement.)
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from datetime import datetime
+
+import httpx
+
+from app.sources.loads.base import ConnectionTest, RawLoad
+
+log = logging.getLogger(__name__)
+
+
+def _parse_dt(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).rstrip("Z"))
+    except ValueError:
+        return None
+
+
+def map_lb123_row(row: dict) -> RawLoad:
+    broker = row.get("broker") or {}
+    origin = row.get("origin") or {}
+    dest = row.get("destination") or {}
+    return RawLoad(
+        source="loadboard123",
+        source_ref=str(row.get("load_id") or row.get("id") or ""),
+        broker_name=str(broker.get("company_name") or ""),
+        broker_email=broker.get("email"),
+        broker_phone=broker.get("phone"),
+        origin_city=origin.get("city"),
+        origin_state=origin.get("state"),
+        dest_city=dest.get("city"),
+        dest_state=dest.get("state"),
+        pickup_date=_parse_dt(row.get("pickup_date")),
+        equipment=row.get("equipment"),
+        rate_usd=row.get("rate_usd"),
+        miles=row.get("miles"),
+        posted_at=_parse_dt(row.get("posted_at")),
+        raw=row,
+    )
+
+
+class LoadBoard123Source:
+    kind: str = "loadboard123"
+
+    def __init__(self, settings) -> None:
+        self.settings = settings
+        self._session: tuple[str, float] | None = None
+
+    @property
+    def enabled(self) -> bool:
+        s = self.settings
+        return bool(s.lb123_api_key and s.lb123_carrier_username and s.lb123_carrier_password)
+
+    def reason(self) -> str | None:
+        if self.enabled:
+            return None
+        missing = []
+        s = self.settings
+        if not s.lb123_api_key:
+            missing.append("LB123_API_KEY")
+        if not s.lb123_carrier_username:
+            missing.append("LB123_CARRIER_USERNAME")
+        if not s.lb123_carrier_password:
+            missing.append("LB123_CARRIER_PASSWORD")
+        return f"missing_env:{','.join(missing)}"
+
+    async def _login(self, client: httpx.AsyncClient) -> str:
+        now = time.monotonic()
+        if self._session and self._session[1] > now + 60:
+            return self._session[0]
+        s = self.settings
+        headers = {"X-API-Key": s.lb123_api_key.get_secret_value()}
+        resp = await client.post(
+            f"{s.lb123_base_url}/auth/login",
+            headers=headers,
+            json={
+                "username": s.lb123_carrier_username,
+                "password": s.lb123_carrier_password.get_secret_value(),
+            },
+            timeout=httpx.Timeout(10.0, read=20.0),
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        token = str(body.get("session_token") or body.get("token") or "")
+        self._session = (token, now + 1800)
+        return token
+
+    async def fetch(self, settings) -> list[RawLoad]:
+        if not self.enabled:
+            return []
+        try:
+            async with httpx.AsyncClient() as client:
+                _ = await self._login(client)
+                return []
+        except Exception as exc:  # noqa: BLE001
+            log.warning("loadboard123/fetch: %s", exc)
+            return []
+
+    async def test_connection(self, settings) -> ConnectionTest:
+        if not self.enabled:
+            return ConnectionTest(ok=False, reason=self.reason())
+        t0 = time.monotonic()
+        try:
+            async with httpx.AsyncClient() as client:
+                await self._login(client)
+            return ConnectionTest(ok=True, latency_ms=int((time.monotonic() - t0) * 1000), sample_count=0)
+        except Exception as exc:  # noqa: BLE001
+            return ConnectionTest(ok=False, latency_ms=int((time.monotonic() - t0) * 1000), reason=str(exc))
+
+
+__all__ = ["LoadBoard123Source", "map_lb123_row"]

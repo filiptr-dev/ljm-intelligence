@@ -288,6 +288,13 @@ class SettingsRow(Base):
     # ``{feature: {provider, model}}``. See ``app.sources.provider.DEFAULT_FEATURES``
     # for the fallback shape — missing keys resolve against the code default.
     ai_features: Mapped[dict | None] = mapped_column(JSONType)
+    # Mail connector mode override (migration 0013). Env > this > default.
+    mail_sender_override: Mapped[str | None] = mapped_column(String(16))
+    # Load-source verified timestamps (migration 0014).
+    dat_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    chr_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lb123_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    truckstop_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AiUsageLog(Base):
@@ -348,8 +355,16 @@ class SentLog(Base):
         BigInteger().with_variant(Integer(), "sqlite"),
         ForeignKey("lead_contacts.id", ondelete="SET NULL"),
     )
+    # Gmail provider fields (migration 0013). Nullable so pre-provider rows read unchanged.
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    thread_id: Mapped[str | None] = mapped_column(String(255))
+    in_reply_to: Mapped[str | None] = mapped_column(String(255))
+    is_test: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("0"))
 
-    __table_args__ = (Index("sent_log_contact_sent", "contact_id", text("sent_at DESC")),)
+    __table_args__ = (
+        Index("sent_log_contact_sent", "contact_id", text("sent_at DESC")),
+        Index("sent_log_thread_idx", "thread_id"),
+    )
 
 
 class Suppression(Base):
@@ -579,3 +594,83 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ---------- Loads (migration 0010) -----------------------------------------
+
+
+class Load(Base):
+    """A broker-posted lane snapshot ingested from a load source.
+
+    Dedupe key: ``(source, source_ref)`` — vendor row id tells us 'same load'
+    across refreshes. Added-row counters compare the batch's keys against the
+    seen-today set.
+    """
+
+    __tablename__ = "loads"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    broker_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default=text("''"))
+    broker_email: Mapped[str | None] = mapped_column(String(320))
+    broker_phone: Mapped[str | None] = mapped_column(String(64))
+    origin_city: Mapped[str | None] = mapped_column(String(128))
+    origin_state: Mapped[str | None] = mapped_column(String(8))
+    dest_city: Mapped[str | None] = mapped_column(String(128))
+    dest_state: Mapped[str | None] = mapped_column(String(8))
+    pickup_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    equipment: Mapped[str | None] = mapped_column(String(64))
+    rate_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    miles: Mapped[int | None] = mapped_column(Integer)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    raw: Mapped[dict | None] = mapped_column(JSONType)
+
+    __table_args__ = (
+        Index("loads_source_ref_uq", "source", "source_ref", unique=True),
+        Index("loads_pickup_idx", "pickup_date"),
+    )
+
+
+# ---------- Mail (migration 0011/0012) -------------------------------------
+
+
+class MailMessage(Base):
+    __tablename__ = "mail_messages"
+
+    mailbox: Mapped[str] = mapped_column(String(255), primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    history_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    from_addr: Mapped[str] = mapped_column(String(320), nullable=False, default="", server_default=text("''"))
+    to_addrs: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    cc_addrs: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    subject: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    in_reply_to: Mapped[str | None] = mapped_column(String(255))
+    references_hdr: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    body_text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
+    body_html: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
+    labels: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    raw: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("mail_messages_thread_idx", "thread_id"),
+        Index("mail_messages_from_idx", "from_addr"),
+        Index("mail_messages_sent_at_idx", "sent_at"),
+        Index("mail_messages_mbx_hist_idx", "mailbox", "history_id"),
+    )
+
+
+class MailCursor(Base):
+    __tablename__ = "mail_cursors"
+
+    mailbox: Mapped[str] = mapped_column(String(255), primary_key=True)
+    history_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    backfilled_through_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
