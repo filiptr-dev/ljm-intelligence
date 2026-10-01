@@ -1,0 +1,43 @@
+name: queue-drain
+
+# Ticks the procrastinate queue on the Render free tier (no persistent
+# worker allowed). Posts `POST /jobs/drain?seconds=25` every 5 minutes
+# with the cron secret.
+#
+# When the user moves to their own infra and `docker compose up -d`
+# starts the `worker` container, delete this file — `/jobs/drain` stays
+# a safe no-op (the always-on worker already drains).
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: queue-drain
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST /jobs/drain
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::BACKEND_URL and CRON_SECRET repo secrets must be set." >&2
+            exit 1
+          fi
+          # Wake Render first (free dyno sleeps). Then post the drain tick.
+          curl -fsS --retry 3 --retry-delay 3 --max-time 30 "$BACKEND_URL/health" >/dev/null || true
+          curl -fsS -X POST "$BACKEND_URL/jobs/drain?seconds=25" \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            --retry 2 --retry-delay 2 --max-time 60 \
+            | tee /tmp/drain.out
+          grep -q '"skipped_overlap":true' /tmp/drain.out \
+            && echo "::warning::drain skipped (concurrent run in progress)" \
+            || true

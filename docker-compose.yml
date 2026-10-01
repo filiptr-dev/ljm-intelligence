@@ -1,0 +1,69 @@
+# LJM Intelligence — portable local + user-infra stack.
+#
+# Three services: `api` (FastAPI), `worker` (procrastinate), `postgres`.
+# `docker compose up -d` is the whole deploy on the user's own box.
+#
+# On Render (free), only the `api` service runs; the GitHub Actions
+# `queue-drain.yml` posts `POST /jobs/drain?seconds=25` every 5 min to
+# tick the queue. On the user's infra, the `worker` service drains
+# continuously and `/jobs/drain` is a safe no-op.
+#
+# Secrets live in `.env` beside this file (chmod 600). No secret ever
+# goes into this file literally — every value is `${VAR}`.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ljm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ljm}
+      POSTGRES_DB: ${POSTGRES_DB:-ljm}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-ljm}", "-d", "${POSTGRES_DB:-ljm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    env_file: .env
+    environment:
+      # Pooled URL in prod (Neon); local uses the compose postgres directly.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ljm:ljm@postgres:5432/ljm}
+      DATABASE_URL_DIRECT: ${DATABASE_URL_DIRECT:-postgresql://ljm:ljm@postgres:5432/ljm}
+      APP_ENV: ${APP_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: always
+    env_file: .env
+    environment:
+      # The worker uses the DIRECT (non-pooler) URL — the Neon pooler
+      # (PgBouncer transaction mode) doesn't support LISTEN/NOTIFY and
+      # SET LOCAL doesn't scope the way the UoW helper expects.
+      DATABASE_URL: ${DATABASE_URL_DIRECT:-postgresql://ljm:ljm@postgres:5432/ljm}
+      DATABASE_URL_DIRECT: ${DATABASE_URL_DIRECT:-postgresql://ljm:ljm@postgres:5432/ljm}
+      APP_ENV: ${APP_ENV:-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
