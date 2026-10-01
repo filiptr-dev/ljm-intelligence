@@ -14,11 +14,21 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from app.config import Settings
+from app.config import GmailSettings, Settings
 from app.integrations.adapters.email.sender import GmailSender, SimulatedSender, get_mail_sender
 
 
-def _settings(**overrides) -> Settings:
+# Sentinel: `None` is a valid override value for `gmail_sa_json`, so we need a
+# distinct marker for "not provided" that doesn't collide.
+_UNSET = object()
+
+
+def _settings(gmail_sa_json=_UNSET, **overrides) -> Settings:
+    """Fold the legacy flat `gmail_sa_json` kwarg into the grouped `gmail`
+    sub-settings so existing tests keep working after the settings-grouping
+    refactor."""
+    if gmail_sa_json is not _UNSET:
+        overrides["gmail"] = GmailSettings(sa_json=gmail_sa_json)
     return Settings().model_copy(update=overrides)
 
 

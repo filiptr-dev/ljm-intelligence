@@ -13,6 +13,89 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
+def _split_csv(value: object) -> object:
+    """Shared validator for CSV env vars → list[str]."""
+    if isinstance(value, str):
+        return [s.strip() for s in value.split(",") if s.strip()]
+    return value
+
+
+class GmailSettings(BaseSettings):
+    """Google Workspace mail connector — GMAIL_* env vars."""
+
+    model_config = SettingsConfigDict(env_prefix="GMAIL_", extra="ignore", frozen=True)
+
+    sa_json: SecretStr | None = None
+    impersonate: str = "contact@ljminternational.com"
+    admin_impersonate: str = ""
+    scopes_send: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/gmail.send"]
+    )
+    scopes_read: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/gmail.readonly"]
+    )
+    scopes_admin: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/admin.directory.user.readonly"]
+    )
+    per_mailbox_rps: float = Field(default=2.0, gt=0)
+    global_rps: float = Field(default=20.0, gt=0)
+    backoff_max_seconds: int = Field(default=60, ge=1, le=600)
+
+    @field_validator("scopes_send", "scopes_read", "scopes_admin", mode="before")
+    @classmethod
+    def _split(cls, value: object) -> object:
+        return _split_csv(value)
+
+
+class DatSettings(BaseSettings):
+    """DAT load-board connector — DAT_* env vars."""
+
+    model_config = SettingsConfigDict(env_prefix="DAT_", extra="ignore", frozen=True)
+
+    base_url: str = "https://api.dat.com"
+    service_account_email: str | None = None
+    service_account_password: SecretStr | None = None
+    org_id: str | None = None
+    rps: float = 1.0
+
+
+class ChrSettings(BaseSettings):
+    """C.H. Robinson connector — CHR_* env vars."""
+
+    model_config = SettingsConfigDict(env_prefix="CHR_", extra="ignore", frozen=True)
+
+    base_url: str = "https://api.chrobinson.com"
+    client_id: str | None = None
+    client_secret: SecretStr | None = None
+    carrier_code: str | None = None
+    scope: str = "loads.read"
+    rps: float = 2.0
+
+
+class Lb123Settings(BaseSettings):
+    """123Loadboard connector — LB123_* env vars."""
+
+    model_config = SettingsConfigDict(env_prefix="LB123_", extra="ignore", frozen=True)
+
+    base_url: str = "https://api.123loadboard.com"
+    api_key: SecretStr | None = None
+    carrier_username: str | None = None
+    carrier_password: SecretStr | None = None
+    rps: float = 1.0
+
+
+class TruckstopSettings(BaseSettings):
+    """Truckstop connector — TRUCKSTOP_* env vars."""
+
+    model_config = SettingsConfigDict(env_prefix="TRUCKSTOP_", extra="ignore", frozen=True)
+
+    base_url: str = "https://api.truckstop.com"
+    integration_id: SecretStr | None = None
+    username: str | None = None
+    password: SecretStr | None = None
+    rps: float = 2.0
+
+
 def psycopg_url(url: str) -> str:
     """`postgres://` / `postgresql://` → `postgresql+psycopg://`. Query string preserved."""
     for prefix in ("postgres://", "postgresql://"):
@@ -143,62 +226,22 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------
     # Mail connector (plan 2026-10-01-google-workspace-mail-connector).
-    # Env-gated, default simulated.
+    # Env-gated, default simulated. `mail_sender`/`mailbox_source`/
+    # `mail_owner_send_enabled` are deliberately kept flat because their
+    # env names don't share the GMAIL_ prefix the sub-model owns.
     # ------------------------------------------------------------------
     mail_sender: Literal["simulated", "gmail"] = "simulated"
     mailbox_source: Literal["simulated", "gmail"] = "simulated"
     mail_owner_send_enabled: bool = False
-    gmail_sa_json: SecretStr | None = None
-    gmail_impersonate: str = "contact@ljminternational.com"
-    gmail_admin_impersonate: str = ""
-    gmail_scopes_send: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["https://www.googleapis.com/auth/gmail.send"]
-    )
-    gmail_scopes_read: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["https://www.googleapis.com/auth/gmail.readonly"]
-    )
-    gmail_scopes_admin: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["https://www.googleapis.com/auth/admin.directory.user.readonly"]
-    )
-    gmail_per_mailbox_rps: float = Field(default=2.0, gt=0)
-    gmail_global_rps: float = Field(default=20.0, gt=0)
-    gmail_backoff_max_seconds: int = Field(default=60, ge=1, le=600)
 
-    # ------------------------------------------------------------------
-    # Load-board connectors (plan 2026-10-01-load-board-connectors).
-    # All adapters enabled = bool(env). Defaults OFF, zero-impact on deploy.
-    # ------------------------------------------------------------------
-    dat_base_url: str = "https://api.dat.com"
-    dat_service_account_email: str | None = None
-    dat_service_account_password: SecretStr | None = None
-    dat_org_id: str | None = None
-    dat_rps: float = 1.0
-
-    chr_base_url: str = "https://api.chrobinson.com"
-    chr_client_id: str | None = None
-    chr_client_secret: SecretStr | None = None
-    chr_carrier_code: str | None = None
-    chr_scope: str = "loads.read"
-    chr_rps: float = 2.0
-
-    lb123_base_url: str = "https://api.123loadboard.com"
-    lb123_api_key: SecretStr | None = None
-    lb123_carrier_username: str | None = None
-    lb123_carrier_password: SecretStr | None = None
-    lb123_rps: float = 1.0
-
-    truckstop_base_url: str = "https://api.truckstop.com"
-    truckstop_integration_id: SecretStr | None = None
-    truckstop_username: str | None = None
-    truckstop_password: SecretStr | None = None
-    truckstop_rps: float = 2.0
-
-    @field_validator("gmail_scopes_send", "gmail_scopes_read", "gmail_scopes_admin", mode="before")
-    @classmethod
-    def _split_scopes(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [s.strip() for s in value.split(",") if s.strip()]
-        return value
+    # Feature-grouped sub-settings. Each sub-settings carries its env_prefix
+    # so env var names stay IDENTICAL (GMAIL_SA_JSON, DAT_ORG_ID, …) — see
+    # `operator-setup-guide.md` for the full documented list.
+    gmail: "GmailSettings" = Field(default_factory=lambda: GmailSettings())
+    dat: "DatSettings" = Field(default_factory=lambda: DatSettings())
+    chr: "ChrSettings" = Field(default_factory=lambda: ChrSettings())
+    lb123: "Lb123Settings" = Field(default_factory=lambda: Lb123Settings())
+    truckstop: "TruckstopSettings" = Field(default_factory=lambda: TruckstopSettings())
 
     @field_validator("discovery_industries", mode="before")
     @classmethod

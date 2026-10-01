@@ -67,7 +67,7 @@ class DatSource:
     @property
     def enabled(self) -> bool:
         s = self.settings
-        return bool(s.dat_service_account_email and s.dat_service_account_password and s.dat_org_id)
+        return bool(s.dat.service_account_email and s.dat.service_account_password and s.dat.org_id)
 
     def reason(self) -> str | None:
         if self._breaker.is_open():
@@ -76,11 +76,11 @@ class DatSource:
             return None
         missing = []
         s = self.settings
-        if not s.dat_service_account_email:
+        if not s.dat.service_account_email:
             missing.append("DAT_SERVICE_ACCOUNT_EMAIL")
-        if not s.dat_service_account_password:
+        if not s.dat.service_account_password:
             missing.append("DAT_SERVICE_ACCOUNT_PASSWORD")
-        if not s.dat_org_id:
+        if not s.dat.org_id:
             missing.append("DAT_ORG_ID")
         return f"missing_env:{','.join(missing)}"
 
@@ -90,11 +90,11 @@ class DatSource:
             return self._org_token[0]
         s = self.settings
         resp = await client.post(
-            f"{s.dat_base_url}/auth/v2/token/organization",
+            f"{s.dat.base_url}/auth/v2/token/organization",
             json={
-                "username": s.dat_service_account_email,
-                "password": s.dat_service_account_password.get_secret_value(),
-                "organizationId": s.dat_org_id,
+                "username": s.dat.service_account_email,
+                "password": s.dat.service_account_password.get_secret_value(),
+                "organizationId": s.dat.org_id,
             },
             timeout=httpx.Timeout(10.0, read=20.0),
         )

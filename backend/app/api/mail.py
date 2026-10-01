@@ -125,7 +125,7 @@ async def _effective_mode(request: Request) -> str:
 async def status(request: Request) -> MailStatusOut:
     settings: Settings = request.app.state.settings
     mode = await _effective_mode(request)
-    sa = load_sa_info(settings.gmail_sa_json.get_secret_value() if settings.gmail_sa_json else None)
+    sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
     fingerprint = sa_fingerprint(sa) if sa else None
     sessionmaker = request.app.state.sessionmaker
     async with sessionmaker() as s:
@@ -146,9 +146,9 @@ async def status(request: Request) -> MailStatusOut:
         reason = "missing_env:GMAIL_SA_JSON"
     return MailStatusOut(
         mode=mode if mode in ("simulated", "gmail") else "simulated",
-        impersonate=settings.gmail_impersonate,
-        admin_impersonate=settings.gmail_admin_impersonate,
-        scopes=list(settings.gmail_scopes_send) + list(settings.gmail_scopes_read) + list(settings.gmail_scopes_admin),
+        impersonate=settings.gmail.impersonate,
+        admin_impersonate=settings.gmail.admin_impersonate,
+        scopes=list(settings.gmail.scopes_send) + list(settings.gmail.scopes_read) + list(settings.gmail.scopes_admin),
         sa_configured=sa is not None,
         sa_fingerprint=fingerprint,
         postal_address_set=bool((settings.outreach_postal_address or "").strip()),

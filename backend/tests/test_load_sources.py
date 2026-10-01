@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from app.config import Settings
+from app.config import ChrSettings, DatSettings, Lb123Settings, Settings, TruckstopSettings
 from app.integrations.adapters.loadboard.chr import ChrSource, map_chr_row
 from app.integrations.adapters.loadboard.dat import DatSource, map_dat_row
 from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source, map_lb123_row
@@ -19,8 +19,42 @@ from app.integrations.adapters.loadboard.registry import all_sources, by_kind, e
 from app.integrations.adapters.loadboard.truckstop import TruckstopSource, map_truckstop_row
 
 
+# Legacy flat kwargs → grouped sub-model, so existing call sites keep working
+# after the settings-grouping refactor without rewriting every assertion.
+_FLAT_TO_GROUP: dict[str, tuple[str, str]] = {
+    "dat_service_account_email": ("dat", "service_account_email"),
+    "dat_service_account_password": ("dat", "service_account_password"),
+    "dat_org_id": ("dat", "org_id"),
+    "chr_client_id": ("chr", "client_id"),
+    "chr_client_secret": ("chr", "client_secret"),
+    "chr_carrier_code": ("chr", "carrier_code"),
+    "lb123_api_key": ("lb123", "api_key"),
+    "lb123_carrier_username": ("lb123", "carrier_username"),
+    "lb123_carrier_password": ("lb123", "carrier_password"),
+    "truckstop_integration_id": ("truckstop", "integration_id"),
+    "truckstop_username": ("truckstop", "username"),
+    "truckstop_password": ("truckstop", "password"),
+}
+_GROUP_CLASSES = {
+    "dat": DatSettings,
+    "chr": ChrSettings,
+    "lb123": Lb123Settings,
+    "truckstop": TruckstopSettings,
+}
+
+
 def _s(**overrides) -> Settings:
-    return Settings().model_copy(update=overrides)
+    groups: dict[str, dict] = {}
+    native: dict = {}
+    for k, v in overrides.items():
+        if k in _FLAT_TO_GROUP:
+            grp, field = _FLAT_TO_GROUP[k]
+            groups.setdefault(grp, {})[field] = v
+        else:
+            native[k] = v
+    for grp, kwargs in groups.items():
+        native[grp] = _GROUP_CLASSES[grp](**kwargs)
+    return Settings().model_copy(update=native)
 
 
 @pytest.mark.asyncio

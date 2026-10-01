@@ -60,7 +60,7 @@ class LoadBoard123Source:
     @property
     def enabled(self) -> bool:
         s = self.settings
-        return bool(s.lb123_api_key and s.lb123_carrier_username and s.lb123_carrier_password)
+        return bool(s.lb123.api_key and s.lb123.carrier_username and s.lb123.carrier_password)
 
     def reason(self) -> str | None:
         if self._breaker.is_open():
@@ -69,11 +69,11 @@ class LoadBoard123Source:
             return None
         missing = []
         s = self.settings
-        if not s.lb123_api_key:
+        if not s.lb123.api_key:
             missing.append("LB123_API_KEY")
-        if not s.lb123_carrier_username:
+        if not s.lb123.carrier_username:
             missing.append("LB123_CARRIER_USERNAME")
-        if not s.lb123_carrier_password:
+        if not s.lb123.carrier_password:
             missing.append("LB123_CARRIER_PASSWORD")
         return f"missing_env:{','.join(missing)}"
 
@@ -82,13 +82,13 @@ class LoadBoard123Source:
         if self._session and self._session[1] > now + 60:
             return self._session[0]
         s = self.settings
-        headers = {"X-API-Key": s.lb123_api_key.get_secret_value()}
+        headers = {"X-API-Key": s.lb123.api_key.get_secret_value()}
         resp = await client.post(
-            f"{s.lb123_base_url}/auth/login",
+            f"{s.lb123.base_url}/auth/login",
             headers=headers,
             json={
-                "username": s.lb123_carrier_username,
-                "password": s.lb123_carrier_password.get_secret_value(),
+                "username": s.lb123.carrier_username,
+                "password": s.lb123.carrier_password.get_secret_value(),
             },
             timeout=httpx.Timeout(10.0, read=20.0),
         )

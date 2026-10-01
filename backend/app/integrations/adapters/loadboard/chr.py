@@ -60,7 +60,7 @@ class ChrSource:
     @property
     def enabled(self) -> bool:
         s = self.settings
-        return bool(s.chr_client_id and s.chr_client_secret and s.chr_carrier_code)
+        return bool(s.chr.client_id and s.chr.client_secret and s.chr.carrier_code)
 
     def reason(self) -> str | None:
         if self._breaker.is_open():
@@ -69,11 +69,11 @@ class ChrSource:
             return None
         missing = []
         s = self.settings
-        if not s.chr_client_id:
+        if not s.chr.client_id:
             missing.append("CHR_CLIENT_ID")
-        if not s.chr_client_secret:
+        if not s.chr.client_secret:
             missing.append("CHR_CLIENT_SECRET")
-        if not s.chr_carrier_code:
+        if not s.chr.carrier_code:
             missing.append("CHR_CARRIER_CODE")
         return f"missing_env:{','.join(missing)}"
 
@@ -83,12 +83,12 @@ class ChrSource:
             return self._token[0]
         s = self.settings
         resp = await client.post(
-            f"{s.chr_base_url}/oauth2/v2.0/token",
+            f"{s.chr.base_url}/oauth2/v2.0/token",
             data={
                 "grant_type": "client_credentials",
-                "client_id": s.chr_client_id,
-                "client_secret": s.chr_client_secret.get_secret_value(),
-                "scope": s.chr_scope,
+                "client_id": s.chr.client_id,
+                "client_secret": s.chr.client_secret.get_secret_value(),
+                "scope": s.chr.scope,
             },
             timeout=httpx.Timeout(10.0, read=20.0),
         )

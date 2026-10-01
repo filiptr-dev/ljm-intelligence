@@ -129,20 +129,30 @@ def test_two_independent_breakers_do_not_share_state() -> None:
 
 
 def _enabled_settings() -> Settings:
+    from app.config import ChrSettings, DatSettings, Lb123Settings, TruckstopSettings
+
     return Settings().model_copy(
         update={
-            "dat_service_account_email": "sa@dat",
-            "dat_service_account_password": SecretStr("pw"),
-            "dat_org_id": "ORG",
-            "chr_client_id": "cid",
-            "chr_client_secret": SecretStr("cs"),
-            "chr_carrier_code": "CODE",
-            "lb123_api_key": SecretStr("k"),
-            "lb123_carrier_username": "u",
-            "lb123_carrier_password": SecretStr("p"),
-            "truckstop_integration_id": SecretStr("iid"),
-            "truckstop_username": "u",
-            "truckstop_password": SecretStr("p"),
+            "dat": DatSettings(
+                service_account_email="sa@dat",
+                service_account_password=SecretStr("pw"),
+                org_id="ORG",
+            ),
+            "chr": ChrSettings(
+                client_id="cid",
+                client_secret=SecretStr("cs"),
+                carrier_code="CODE",
+            ),
+            "lb123": Lb123Settings(
+                api_key=SecretStr("k"),
+                carrier_username="u",
+                carrier_password=SecretStr("p"),
+            ),
+            "truckstop": TruckstopSettings(
+                integration_id=SecretStr("iid"),
+                username="u",
+                password=SecretStr("p"),
+            ),
         }
     )
 

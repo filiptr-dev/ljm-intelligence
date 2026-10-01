@@ -58,7 +58,7 @@ class TruckstopSource:
     @property
     def enabled(self) -> bool:
         s = self.settings
-        return bool(s.truckstop_integration_id and s.truckstop_username and s.truckstop_password)
+        return bool(s.truckstop.integration_id and s.truckstop.username and s.truckstop.password)
 
     def reason(self) -> str | None:
         if self._breaker.is_open():
@@ -67,20 +67,20 @@ class TruckstopSource:
             return None
         missing = []
         s = self.settings
-        if not s.truckstop_integration_id:
+        if not s.truckstop.integration_id:
             missing.append("TRUCKSTOP_INTEGRATION_ID")
-        if not s.truckstop_username:
+        if not s.truckstop.username:
             missing.append("TRUCKSTOP_USERNAME")
-        if not s.truckstop_password:
+        if not s.truckstop.password:
             missing.append("TRUCKSTOP_PASSWORD")
         return f"missing_env:{','.join(missing)}"
 
     def _headers(self) -> dict:
         s = self.settings
         return {
-            "IntegrationId": s.truckstop_integration_id.get_secret_value(),
-            "User": s.truckstop_username or "",
-            "Password": s.truckstop_password.get_secret_value(),
+            "IntegrationId": s.truckstop.integration_id.get_secret_value(),
+            "User": s.truckstop.username or "",
+            "Password": s.truckstop.password.get_secret_value(),
         }
 
     async def fetch(self, settings) -> list[RawLoad]:
@@ -91,7 +91,7 @@ class TruckstopSource:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    f"{self.settings.truckstop_base_url}/loads/search",
+                    f"{self.settings.truckstop.base_url}/loads/search",
                     params={"limit": 0},
                     headers=self._headers(),
                     timeout=httpx.Timeout(10.0, read=20.0),
@@ -115,7 +115,7 @@ class TruckstopSource:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    f"{self.settings.truckstop_base_url}/loads/search",
+                    f"{self.settings.truckstop.base_url}/loads/search",
                     params={"limit": 1},
                     headers=self._headers(),
                     timeout=httpx.Timeout(10.0, read=20.0),

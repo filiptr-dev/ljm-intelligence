@@ -89,14 +89,14 @@ class GmailMailbox:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._limiter = MailboxLimiter(settings.gmail_per_mailbox_rps, settings.gmail_global_rps)
-        self._sa = load_sa_info(settings.gmail_sa_json.get_secret_value() if settings.gmail_sa_json else None)
+        self._limiter = MailboxLimiter(settings.gmail.per_mailbox_rps, settings.gmail.global_rps)
+        self._sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
 
     async def list_mailboxes(self) -> list[str]:
-        if self._sa is None or not self._settings.gmail_admin_impersonate:
+        if self._sa is None or not self._settings.gmail.admin_impersonate:
             return []
         creds = build_delegated_credentials(
-            self._sa, self._settings.gmail_admin_impersonate, list(self._settings.gmail_scopes_admin)
+            self._sa, self._settings.gmail.admin_impersonate, list(self._settings.gmail.scopes_admin)
         )
         if creds is None:
             return []
@@ -138,7 +138,7 @@ class GmailMailbox:
 def get_mailbox_source(settings: Settings) -> MailboxSource:
     if settings.mailbox_source != "gmail":
         return SimulatedMailbox()
-    sa = load_sa_info(settings.gmail_sa_json.get_secret_value() if settings.gmail_sa_json else None)
+    sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
     if sa is None:
         return SimulatedMailbox()
     return GmailMailbox(settings)

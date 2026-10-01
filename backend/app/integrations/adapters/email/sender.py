@@ -173,12 +173,12 @@ def get_mail_sender(settings: Settings, mode_override: str | None = None) -> Mai
     mode = mode_override or settings.mail_sender
     if mode != "gmail":
         return SimulatedSender()
-    sa = load_sa_info(settings.gmail_sa_json.get_secret_value() if settings.gmail_sa_json else None)
+    sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
     if sa is None:
         log.warning("mail/factory: GMAIL_SA_JSON missing/invalid; falling back to simulated")
         return SimulatedSender()
-    scopes = list(settings.gmail_scopes_send)
-    creds = build_delegated_credentials(sa, settings.gmail_impersonate, scopes)
+    scopes = list(settings.gmail.scopes_send)
+    creds = build_delegated_credentials(sa, settings.gmail.impersonate, scopes)
     ok, reason = test_refresh(creds)
     if not ok:
         log.warning("mail/factory: token refresh failed (%s); falling back to simulated", reason)
