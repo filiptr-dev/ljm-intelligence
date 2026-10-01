@@ -18,10 +18,16 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import String, event
+from sqlalchemy import JSON, String, event
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.tenant import ADMIN_SENTINEL, _tenant_ctx
+
+# Prefer JSONB on Postgres; JSON fallback keeps the models importable elsewhere
+# (docs, tools, sqlite test harness). Shared so every per-module `models.py`
+# references the same TypeEngine instance.
+JSONType = JSONB().with_variant(JSON(), "sqlite")
 
 log = logging.getLogger(__name__)
 
