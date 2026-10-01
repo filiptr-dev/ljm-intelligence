@@ -1,14 +1,13 @@
 /**
- * Typed client for the LJM Intelligence FastAPI backend.
+ * Shared **type-only** surface for the LJM Intelligence FastAPI backend.
  *
- * Two rules:
- *   - Only the SERVER-side helpers touch `CRON_SECRET`. The browser never sees it.
- *   - Every call has an upper timeout so a sleeping Render free-tier instance
- *     can't hang the UI; readers fall back to the simulated feed instead.
- *
- * `BACKEND_URL` is read on the server (Next.js `process.env.BACKEND_URL`), and
- * `NEXT_PUBLIC_API_URL` is the browser-safe mirror (unused today because we
- * proxy everything through `/api/crawler/*` — keeps CORS + secrets simple).
+ * The live `fetch` helpers that used to live here (`triggerRun`, `listLeads`,
+ * `latestRun`, `draftEmail`, `health`) were removed when the frontend moved
+ * to server-first Next.js: every HTTP call now goes through the typed
+ * `lib/api/` client server-side, or through `/api/proxy/[...path]` for
+ * client islands. Keeping this file as a types-only module avoids a parallel
+ * fetch surface — one data path, enforced by the `server-only` import guard
+ * on `lib/api/`.
  */
 
 export type BackendLead = {
@@ -81,74 +80,4 @@ export const TONE_LABEL: Record<EmailTone, string> = {
   friendly: "Friendly",
   direct: "Direct",
   persuasive: "Persuasive",
-}
-
-const DEFAULT_BACKEND = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
-
-async function fetchJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
-  const { timeoutMs = 6000, ...rest } = init
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(url, { ...rest, signal: ctrl.signal, cache: "no-store" })
-    if (!res.ok) throw new Error(`backend ${res.status} ${res.statusText}`)
-    return (await res.json()) as T
-  } finally {
-    clearTimeout(t)
-  }
-}
-
-/** Merge a bearer token into a headers init object. Centralised so every
- *  `backend.*` call stamps `Authorization` the same way; keep in sync with
- *  `@/lib/auth/bff#authHeaders` (same shape, different signature). */
-function withAuth(extra: HeadersInit | undefined, authToken: string | undefined): HeadersInit | undefined {
-  if (!authToken) return extra
-  const h = new Headers(extra ?? {})
-  if (!h.has("authorization")) h.set("authorization", `Bearer ${authToken}`)
-  return h
-}
-
-export const backend = {
-  base: DEFAULT_BACKEND,
-  async health(base = DEFAULT_BACKEND): Promise<{ ok: boolean; db: "up" | "down" }> {
-    return fetchJson(`${base}/health`, { timeoutMs: 4000 })
-  },
-  async listLeads(base = DEFAULT_BACKEND, params: { limit?: number; state?: string; kind?: string; min_score?: number } = {}, authToken?: string) {
-    const qs = new URLSearchParams()
-    if (params.limit) qs.set("limit", String(params.limit))
-    if (params.state) qs.set("state", params.state)
-    if (params.kind) qs.set("kind", params.kind)
-    if (params.min_score !== undefined) qs.set("min_score", String(params.min_score))
-    return fetchJson<BackendLeadsPage>(`${base}/leads?${qs.toString()}`, {
-      headers: withAuth(undefined, authToken),
-      timeoutMs: 8000,
-    })
-  },
-  async latestRun(base = DEFAULT_BACKEND, authToken?: string): Promise<BackendCrawlRun | null> {
-    return fetchJson<BackendCrawlRun | null>(`${base}/crawl/latest`, {
-      headers: withAuth(undefined, authToken),
-      timeoutMs: 5000,
-    })
-  },
-  /** SERVER-only. Uses CRON_SECRET from the process env; never call from the browser. */
-  async triggerRun(base = DEFAULT_BACKEND, limit = 25): Promise<{ run_id: string; status: string }> {
-    const secret = process.env.CRON_SECRET || ""
-    return fetchJson(`${base}/crawl/run?trigger=on_demand&limit=${limit}`, {
-      method: "POST",
-      headers: { "X-Cron-Secret": secret },
-      timeoutMs: 8000,
-    })
-  },
-  async draftEmail(
-    base = DEFAULT_BACKEND,
-    body: { lead_id?: string; lead?: Record<string, unknown>; tone: EmailTone; instructions?: string },
-    authToken?: string,
-  ) {
-    return fetchJson<EmailDraft>(`${base}/email/draft`, {
-      method: "POST",
-      headers: withAuth({ "Content-Type": "application/json" }, authToken),
-      body: JSON.stringify(body),
-      timeoutMs: 45000,
-    })
-  },
 }

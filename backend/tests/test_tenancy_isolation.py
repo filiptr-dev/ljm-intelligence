@@ -124,8 +124,18 @@ async def app_session(pg_setup):
 
 
 async def _bind(session: AsyncSession, tenant: str) -> None:
+    """Bind the tenant inside a transaction with ``is_local=true``.
+
+    This mirrors the exact production path in ``app.db.uow()`` (transaction-
+    scoped ``set_config``), which is what matters for PgBouncer transaction
+    pooling: a session-scoped setting (``false``) could leak across pooled
+    connections and quietly hide a cross-tenant read in prod. SQLAlchemy's
+    AsyncSession auto-begins a transaction on first ``execute()``, so this
+    call *is* the transaction's first statement; the setting applies for
+    the lifetime of that tx and gets wiped on commit/rollback.
+    """
     await session.execute(
-        text("SELECT set_config('app.tenant_id', :tid, false)"),
+        text("SELECT set_config('app.tenant_id', :tid, true)"),
         {"tid": tenant},
     )
 
