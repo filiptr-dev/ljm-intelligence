@@ -77,7 +77,7 @@ async def _upsert(session: AsyncSession, msg: RawMessage) -> bool:
 
     try:
         await triage_message(session, msg)
-    except Exception:  # noqa: BLE001 — triage must not block the ingest batch
+    except Exception:
         log.exception("mail/ingest: triage failed, continuing with raw message only")
     return True
 

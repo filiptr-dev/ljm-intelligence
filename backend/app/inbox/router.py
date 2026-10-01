@@ -224,7 +224,7 @@ async def thread_endpoint(session: Session, thread_id: str) -> ThreadOut:
 # ---- status board + compose/reply + forget-contact (plan Step 4/5/8) -----
 
 
-from fastapi import Body, Request
+from fastapi import Request
 from pydantic import EmailStr, constr
 
 

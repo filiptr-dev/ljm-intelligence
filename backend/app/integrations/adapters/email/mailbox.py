@@ -319,8 +319,7 @@ def _collect_bodies(payload: dict | None) -> tuple[str, str]:
             text = _decode_part(data)
         elif data and mime == "text/html" and not html:
             html = _decode_part(data)
-        for p in node.get("parts") or []:
-            stack.append(p)
+        stack.extend(node.get("parts") or [])
     return text, html
 
 

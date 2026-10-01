@@ -333,10 +333,10 @@ async def test_outcomes_query_is_bounded_by_lookback(client: AsyncClient, monkey
 
 def test_today_et_follows_eastern_timezone():
     """At 23:59 UTC on day D, ET is already 19:59 D (EST) or 19:59 D (EDT) — still D."""
-    from app.prospecting.call_list_service import today_et
-
     # Smoke: calling it works and returns a date in the operator-local day.
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _Z
+
+    from app.prospecting.call_list_service import today_et
 
     assert today_et() == _dt.now(_Z("America/New_York")).date()

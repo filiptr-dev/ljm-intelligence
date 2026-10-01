@@ -25,7 +25,6 @@ from app.models import CallOutcome, CapacityPost, CrawlRun, Lead
 from app.pipeline.match import score_broker_for_post
 from app.prospecting.call_list_service import load_and_rank as _load_and_rank
 
-
 ET = ZoneInfo("America/New_York")
 
 # Deterministic merge weights for ``do_next[]`` — kept here so changing them

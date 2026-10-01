@@ -31,7 +31,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -317,4 +316,4 @@ async def triage_message(session: AsyncSession, msg: RawMessage) -> TriageOutcom
     return outcome
 
 
-__all__ = ["triage_message", "TriageOutcome", "MODEL_NAME", "MODEL_VERSION"]
+__all__ = ["MODEL_NAME", "MODEL_VERSION", "TriageOutcome", "triage_message"]

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.models import (
@@ -26,7 +26,6 @@ from app.analysis.models import (
     PredictionRun,
 )
 from app.inbox.models import MailMessage, MessageInsight
-
 
 # ---- shapes ---------------------------------------------------------------
 
@@ -121,7 +120,7 @@ def _percentile(xs: list[float], q: float) -> float | None:
     if not xs:
         return None
     xs = sorted(xs)
-    k = max(0, min(len(xs) - 1, int(round(q * (len(xs) - 1)))))
+    k = max(0, min(len(xs) - 1, round(q * (len(xs) - 1))))
     return float(xs[k])
 
 
@@ -223,7 +222,7 @@ def _compute_broker_predictions(msgs: list[Any], ins: list[Any]) -> list[BrokerP
         parent = msg_by_pk.get(pk)
         if parent is None:
             continue
-        dom = _domain((i.from_email_normalized or parent.from_addr))
+        dom = _domain(i.from_email_normalized or parent.from_addr)
         if not dom or parent.from_addr == parent.mailbox:
             continue
         bucket = by_dom[dom]
@@ -244,7 +243,7 @@ def _compute_broker_predictions(msgs: list[Any], ins: list[Any]) -> list[BrokerP
 
     ins_by_pk = {(i.mailbox, i.message_id): i for i in ins}
 
-    for tid, items in threads.items():
+    for items in threads.values():
         items.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=UTC))
         # dominant broker domain for this thread
         in_doms = [
@@ -373,7 +372,6 @@ def _lookup_from(msg_by_pk: dict, pk: str) -> str | None:
 def _compute_lane_predictions(ins: list[Any]) -> list[LanePredictionRow]:
     now = datetime.now(UTC)
     by_lane: dict[tuple[str, str, str | None], list[float]] = defaultdict(list)
-    season: dict[tuple[str, str, str | None], Counter] = defaultdict(Counter)
     for i in ins:
         if not (i.lane_from and i.lane_to and i.rate_usd):
             continue
@@ -639,7 +637,7 @@ async def thread_age_by_intent(session: AsyncSession) -> list[ThreadAgeBucket]:
     for m in msgs:
         by_thread[m.thread_id].append(m)
     gaps_by_intent: dict[str, list[float]] = defaultdict(list)
-    for tid, items in by_thread.items():
+    for items in by_thread.values():
         first_in = next((x for x in items if x.from_addr != x.mailbox), None)
         if not first_in:
             continue
