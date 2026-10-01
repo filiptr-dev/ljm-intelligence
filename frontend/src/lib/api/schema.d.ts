@@ -305,6 +305,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/brokers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Brokers */
+        get: operations["list_brokers_brokers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/brokers/{broker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Broker */
+        get: operations["get_broker_brokers__broker_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/brokers/{broker_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Broker Activity */
+        get: operations["get_broker_activity_brokers__broker_id__activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tools/shipper-finder": {
         parameters: {
             query?: never;
@@ -446,23 +497,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ai/compare": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Compare */
-        post: operations["compare_ai_compare_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/ai/usage": {
         parameters: {
             query?: never;
@@ -515,6 +549,47 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivityCallOut */
+        ActivityCallOut: {
+            /**
+             * Kind
+             * @default call_outcome
+             * @constant
+             */
+            kind: "call_outcome";
+            /** Outcome */
+            outcome: string;
+            /** Logged At */
+            logged_at: string;
+            /** Note */
+            note?: string | null;
+        };
+        /** ActivityEmailOut */
+        ActivityEmailOut: {
+            /**
+             * Kind
+             * @default email_sent
+             * @constant
+             */
+            kind: "email_sent";
+            /** Subject */
+            subject?: string | null;
+            /** To Email */
+            to_email: string;
+            /** Sent At */
+            sent_at: string;
+            /** Replied At */
+            replied_at?: string | null;
+            /** Mode */
+            mode: string;
+        };
+        /** ActivityPageOut */
+        ActivityPageOut: {
+            /** Items */
+            items: (components["schemas"]["ActivityCallOut"] | components["schemas"]["ActivityEmailOut"])[];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** AutoSendIn */
         AutoSendIn: {
             /**
@@ -540,6 +615,82 @@ export interface components {
             skipped_cap: number;
             /** Dry Run */
             dry_run: boolean;
+        };
+        /** BrokerDetailBody */
+        BrokerDetailBody: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Mc */
+            mc?: string | null;
+            /** Dot */
+            dot?: string | null;
+            /** State */
+            state: string;
+            /** City */
+            city?: string | null;
+            phone: components["schemas"]["ContactFieldOut"];
+            primary_email: components["schemas"]["ContactFieldOut"];
+            /** Fit Score */
+            fit_score?: number | null;
+            next_action: components["schemas"]["NextActionOut"];
+            /** Last Activity At */
+            last_activity_at?: string | null;
+            address: components["schemas"]["ContactFieldOut"];
+            /** Linkedin Company Url */
+            linkedin_company_url?: string | null;
+            /** Website Url */
+            website_url?: string | null;
+            /** Contacts */
+            contacts: components["schemas"]["NamedContactOut"][];
+        };
+        /** BrokerDetailOut */
+        BrokerDetailOut: {
+            broker: components["schemas"]["BrokerDetailBody"];
+            /** Activity */
+            activity: (components["schemas"]["ActivityCallOut"] | components["schemas"]["ActivityEmailOut"])[];
+            summary: components["schemas"]["BrokerSummaryOut"];
+        };
+        /** BrokerListOut */
+        BrokerListOut: {
+            /** Items */
+            items: components["schemas"]["BrokerRowOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Total */
+            total: number;
+        };
+        /** BrokerRowOut */
+        BrokerRowOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Mc */
+            mc?: string | null;
+            /** Dot */
+            dot?: string | null;
+            /** State */
+            state: string;
+            /** City */
+            city?: string | null;
+            phone: components["schemas"]["ContactFieldOut"];
+            primary_email: components["schemas"]["ContactFieldOut"];
+            /** Fit Score */
+            fit_score?: number | null;
+            next_action: components["schemas"]["NextActionOut"];
+            /** Last Activity At */
+            last_activity_at?: string | null;
+        };
+        /** BrokerSummaryOut */
+        BrokerSummaryOut: {
+            /** Sent Count 30D */
+            sent_count_30d: number;
+            /** Reply Count 30D */
+            reply_count_30d: number;
+            last_call?: components["schemas"]["LastCallOut"] | null;
+            last_email?: components["schemas"]["LastEmailOut"] | null;
         };
         /** CallListOut */
         CallListOut: {
@@ -569,6 +720,17 @@ export interface components {
             /** Opener */
             opener: string;
             last_outcome: components["schemas"]["LastOutcomeOut"] | null;
+        };
+        /** ContactFieldOut */
+        ContactFieldOut: {
+            /** Value */
+            value?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Verified At */
+            verified_at?: string | null;
+            /** Confidence */
+            confidence?: string | null;
         };
         /** CrawlRunOut */
         CrawlRunOut: {
@@ -758,6 +920,22 @@ export interface components {
             /** App Env */
             app_env: string;
         };
+        /** LastCallOut */
+        LastCallOut: {
+            /** Outcome */
+            outcome: string;
+            /** Logged At */
+            logged_at: string;
+        };
+        /** LastEmailOut */
+        LastEmailOut: {
+            /** Subject */
+            subject?: string | null;
+            /** Sent At */
+            sent_at: string;
+            /** Replied At */
+            replied_at?: string | null;
+        };
         /** LastOutcomeOut */
         LastOutcomeOut: {
             /** Outcome */
@@ -902,6 +1080,35 @@ export interface components {
              */
             ok: boolean;
         };
+        /** NamedContactOut */
+        NamedContactOut: {
+            /** Id */
+            id: number;
+            name: components["schemas"]["ContactFieldOut"];
+            title: components["schemas"]["ContactFieldOut"];
+            email: components["schemas"]["ContactFieldOut"];
+            phone: components["schemas"]["ContactFieldOut"];
+            /** Is Decision Maker */
+            is_decision_maker: boolean;
+            /** Pipeline Status */
+            pipeline_status: string;
+            /** Sighted Count */
+            sighted_count: number;
+            /** Linkedin Url */
+            linkedin_url?: string | null;
+        };
+        /** NextActionOut */
+        NextActionOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "call" | "email" | "follow_up" | "wait";
+            /** Reason */
+            reason: string;
+            /** Due At */
+            due_at?: string | null;
+        };
         /** OutcomeHistoryOut */
         OutcomeHistoryOut: {
             /** Lead Id */
@@ -1037,33 +1244,6 @@ export interface components {
             phone: string | null;
             /** Primary Email */
             primary_email: string | null;
-        };
-        /** ProviderCallResponse */
-        ProviderCallResponse: {
-            /** Provider */
-            provider: string;
-            /** Model */
-            model: string;
-            /** Status */
-            status: string;
-            /** Text */
-            text: string;
-            /** Parsed */
-            parsed: unknown | null;
-            /** Input Tokens */
-            input_tokens: number;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Latency Ms */
-            latency_ms: number;
-            /** Cost Usd */
-            cost_usd: string;
-            /** Error */
-            error: string | null;
-            /** Citations */
-            citations?: {
-                [key: string]: unknown;
-            }[];
         };
         /** SettingsOut */
         SettingsOut: {
@@ -1968,6 +2148,115 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OutcomeHistoryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_brokers_brokers_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                min_fit?: number | null;
+                has_email?: boolean | null;
+                has_phone?: boolean | null;
+                next_action?: ("call" | "email" | "follow_up" | "wait") | null;
+                q?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrokerListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_broker_brokers__broker_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                broker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrokerDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_broker_activity_brokers__broker_id__activity_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                broker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPageOut"];
                 };
             };
             /** @description Validation Error */

@@ -71,6 +71,12 @@ class Lead(Base):
     fit_score: Mapped[int | None] = mapped_column(Integer)
     fit_reasons: Mapped[list | None] = mapped_column(JSONType)
     fit_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Per-field provenance for the top-level broker/shipper contact strings
+    # (migration 0010). Nullable; future enrichment runs fill these. The
+    # per-named-contact source already lives on `lead_contacts.source`.
+    primary_email_source: Mapped[str | None] = mapped_column(String(32))
+    phone_source: Mapped[str | None] = mapped_column(String(32))
+    address_source: Mapped[str | None] = mapped_column(String(32))
 
     __table_args__ = (
         # Partial-unique dedupe: MC → DOT → domain (plan rule).

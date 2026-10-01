@@ -108,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from app.api.ai import router as ai_router
     from app.api.auth import router as auth_router
+    from app.api.brokers import router as brokers_router
     from app.api.call_list import router as call_list_router
     from app.api.capacity import router as capacity_router
     from app.api.crawl import router as crawl_router
@@ -138,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(settings_router, dependencies=user_only)
     app.include_router(capacity_router, dependencies=user_only)
     app.include_router(call_list_router, dependencies=user_only)
+    app.include_router(brokers_router, dependencies=user_only)
     app.include_router(shipper_finder_router, dependencies=user_only)
     app.include_router(enrichment_router, dependencies=user_or_cron)
     app.include_router(ai_router, dependencies=user_only)
