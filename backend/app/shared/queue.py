@@ -94,6 +94,15 @@ async def dispatch(task_name: str, /, **kwargs: Any) -> int | None:
     if not _is_postgres():
         return None
     try:
+        # If called from inside a worker (the App is already open, e.g. a
+        # periodic task re-dispatching real work), reuse that open connector
+        # — closing + reopening our own context would kill the surrounding
+        # worker's pool mid-flight and crash the current job.
+        already_open = getattr(app.connector, "_async_pool", None) is not None
+        if already_open:
+            job = app.configure_task(name=task_name)
+            job_id = await job.defer_async(**kwargs)
+            return int(job_id)
         async with app.open_async():
             job = app.configure_task(name=task_name)
             job_id = await job.defer_async(**kwargs)

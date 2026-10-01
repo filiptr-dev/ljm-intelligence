@@ -85,10 +85,16 @@ class IngestStatsOut(BaseModel):
     last_history_id: str | None
     status: str
     error: str | None = None
+    # Set only on the queued path — the frontend polls `/jobs/{id}` until
+    # the worker finishes, then refetches the mailbox view. On the inline
+    # path (sqlite + tests) this stays null and the sync fields hold the
+    # real result.
+    job_id: int | None = None
 
 
 class IncrementalOut(BaseModel):
     items: list[IngestStatsOut]
+    job_id: int | None = None
 
 
 class DisconnectOut(BaseModel):
@@ -131,6 +137,26 @@ async def backfill(
 ) -> IngestStatsOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
+
+    # Whole-mailbox backfill would time out on Render free (web dynos die
+    # mid-request on reclaim). Hand it to the worker when the queue exists;
+    # fall back to inline ingest on sqlite/tests.
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.queue_dispatch import maybe_dispatch
+
+    job_id = await maybe_dispatch(
+        request.app.state.sessionmaker,
+        "inbox.mail_backfill",
+        tenant_id=LJM_TENANT_ID,
+        mailbox=str(payload.mailbox),
+        months=payload.months,
+    )
+    if job_id is not None:
+        return IngestStatsOut(
+            mailbox=str(payload.mailbox), read=0, upserted=0, skipped=0,
+            last_history_id=None, status="queued", job_id=job_id,
+        )
+
     row = await svc_backfill(
         request.app.state.sessionmaker,
         settings,
@@ -148,6 +174,19 @@ async def incremental(
 ) -> IncrementalOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
+
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.queue_dispatch import maybe_dispatch
+
+    job_id = await maybe_dispatch(
+        request.app.state.sessionmaker,
+        "inbox.mail_incremental",
+        tenant_id=LJM_TENANT_ID,
+        mailbox=str(payload.mailbox) if payload.mailbox else None,
+    )
+    if job_id is not None:
+        return IncrementalOut(items=[], job_id=job_id)
+
     result = await svc_incremental(
         request.app.state.sessionmaker,
         settings,

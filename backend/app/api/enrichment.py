@@ -112,6 +112,7 @@ AutoSendStatus = Literal[
     "no_template",
     "no_unsub_config",
     "outside_window",
+    "queued",
 ]
 
 
@@ -121,6 +122,10 @@ class AutoSendOut(BaseModel):
     skipped_suppressed: int
     skipped_cap: int
     dry_run: bool
+    # Set when the auto-send is handed to the worker; the daily-crawl cron
+    # workflow polls `/jobs/{id}` for completion. On the inline path (sqlite
+    # + tests) this stays null and the sync fields hold the real tally.
+    job_id: int | None = None
 
 
 # ---------- projection ------------------------------------------------------
@@ -259,6 +264,22 @@ async def auto_send(
     ``auto_outreach_enabled`` is a *what*, not a *who* — this guard ensures
     only the cron caller can ask."""
     check_secret(request.app.state.settings, x_cron_secret)
+
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.queue_dispatch import maybe_dispatch
+
+    job_id = await maybe_dispatch(
+        request.app.state.sessionmaker,
+        "outreach.auto_send",
+        tenant_id=LJM_TENANT_ID,
+        dry_run=body.dry_run,
+    )
+    if job_id is not None:
+        return AutoSendOut(
+            status="queued", sent=0, skipped_suppressed=0, skipped_cap=0,
+            dry_run=body.dry_run, job_id=job_id,
+        )
+
     return await _auto_send_impl(request, body)
 
 

@@ -71,7 +71,24 @@ export function useLatestRun(pollMs = 4000) {
       // The proxy injects `X-Cron-Secret` for POST /crawl/run from a server-
       // only env var; the browser never learns the secret. See
       // `app/api/proxy/[...path]/route.ts`.
-      await api.POST("/crawl/run", { params: { query: { trigger: "on_demand", limit } } })
+      //
+      // Backend may now return `{run_id, status, job_id}` when the queue is
+      // installed — the pipeline runs in the worker, not inside this request.
+      // Either way the `CrawlRun` row progresses queued → running → done,
+      // and `useLatestRun` keeps polling `/crawl/latest` to reflect it, so
+      // the UI continues to show live state. The optional `job_id` is
+      // surfaced on `window.__ljm_last_job_id` for the Jobs admin page.
+      const resp = await api.POST(
+        "/crawl/run",
+        { params: { query: { trigger: "on_demand", limit } } },
+      )
+      // Shape differs between queued and inline paths; both are compatible.
+      if (resp.data && typeof window !== "undefined") {
+        const anyData = resp.data as { job_id?: number | null }
+        if (anyData.job_id) {
+          ;(window as unknown as { __ljm_last_job_id?: number }).__ljm_last_job_id = anyData.job_id
+        }
+      }
       await fetchLatest()
     } finally {
       setRunning(false)
@@ -79,4 +96,65 @@ export function useLatestRun(pollMs = 4000) {
   }, [fetchLatest])
 
   return { run, running, trigger }
+}
+
+
+/** Poll /jobs/{id} until the worker reports a terminal status. The hook
+ *  is intentionally minimal — a caller passes `onDone` to refetch its own
+ *  data when the job succeeds, and `onFail` to show an error.
+ */
+export type JobStatus = "todo" | "doing" | "succeeded" | "failed" | "cancelled" | "aborted"
+
+export function useJobStatus(
+  jobId: number | null,
+  opts: { pollMs?: number; onDone?: () => void; onFail?: (err: string | null) => void } = {},
+) {
+  const { pollMs = 2000, onDone, onFail } = opts
+  const [status, setStatus] = React.useState<JobStatus | null>(null)
+  const [lastError, setLastError] = React.useState<string | null>(null)
+  const terminalRef = React.useRef(false)
+
+  React.useEffect(() => {
+    if (jobId == null) {
+      // Reset is required when the caller clears the id; the lint
+      // guidance applies to render-driving setStates, not to clean-up.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStatus(null)
+      terminalRef.current = false
+      return
+    }
+    terminalRef.current = false
+    let alive = true
+
+    const tick = async () => {
+      try {
+        const { data, response } = await api.GET("/jobs/{job_id}", {
+          params: { path: { job_id: jobId } },
+        })
+        if (!alive || !response.ok || !data) return
+        const s = data.status as JobStatus
+        setStatus(s)
+        setLastError(data.last_error ?? null)
+        if (s === "succeeded" || s === "failed" || s === "cancelled" || s === "aborted") {
+          terminalRef.current = true
+          if (s === "succeeded") onDone?.()
+          if (s === "failed" || s === "cancelled" || s === "aborted") onFail?.(data.last_error ?? null)
+        }
+      } catch {
+        // transient — the next tick will retry
+      }
+    }
+
+    tick()
+    const id = setInterval(() => {
+      if (terminalRef.current) return
+      tick()
+    }, pollMs)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [jobId, pollMs, onDone, onFail])
+
+  return { status, lastError, running: status === "todo" || status === "doing" }
 }

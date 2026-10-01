@@ -212,7 +212,8 @@ export interface paths {
         put?: never;
         /**
          * Send Email
-         * @description Owner-only. Resolves the mail sender once; writes SentLog with provider fields.
+         * @description Owner-only. The service resolves the mail sender (DB override wins over
+         *     env) and persists SentLog with provider fields.
          */
         post: operations["send_email_email_send_post"];
         delete?: never;
@@ -490,8 +491,9 @@ export interface paths {
         put?: never;
         /**
          * Auto Send
-         * @description Route-level auth (BLOCKING-2 fix). Application-level `auto_outreach_enabled`
-         *     is a *what*, not a *who* — this guard makes sure only the cron caller can ask.
+         * @description Route-level auth (BLOCKING-2 fix). Application-level
+         *     ``auto_outreach_enabled`` is a *what*, not a *who* — this guard ensures
+         *     only the cron caller can ask.
          */
         post: operations["auto_send_enrichment_auto_send_post"];
         delete?: never;
@@ -585,40 +587,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/mail/backfill": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Backfill */
-        post: operations["backfill_mail_backfill_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/mail/incremental": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Incremental */
-        post: operations["incremental_mail_incremental_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/mail/disconnect": {
         parameters: {
             query?: never;
@@ -647,6 +615,40 @@ export interface paths {
         get: operations["mailboxes_mail_mailboxes_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Backfill */
+        post: operations["backfill_mail_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail/incremental": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Incremental */
+        post: operations["incremental_mail_incremental_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -759,10 +761,85 @@ export interface paths {
         /**
          * Unsubscribe Post
          * @description POST performs the suppression. Same route also accepts RFC 8058
-         *     `List-Unsubscribe=One-Click` payloads via `?t=<token>` on the query string.
-         *     Invalid / forged token → 400 with zero side effects.
+         *     ``List-Unsubscribe=One-Click`` payloads via ``?t=<token>`` on the query
+         *     string. Invalid / forged token → 400 with zero side effects.
          */
         post: operations["unsubscribe_post_unsubscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/drain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Drain
+         * @description Run the worker for ``seconds`` and return a summary.
+         *
+         *     Protected by CRON_SECRET so the GitHub Actions workflow is the only
+         *     external caller. Owners can also hit it from an authenticated session
+         *     (the router mount uses ``require_user_or_cron``).
+         */
+        post: operations["drain_jobs_drain_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job */
+        get: operations["get_job_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Jobs */
+        get: operations["list_jobs_admin_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Job */
+        post: operations["retry_job_admin_jobs__job_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -830,7 +907,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "ok" | "disabled" | "no_footer" | "no_template" | "no_unsub_config" | "outside_window";
+            status: "ok" | "disabled" | "no_footer" | "no_template" | "no_unsub_config" | "outside_window" | "queued";
             /** Sent */
             sent: number;
             /** Skipped Suppressed */
@@ -839,6 +916,8 @@ export interface components {
             skipped_cap: number;
             /** Dry Run */
             dry_run: boolean;
+            /** Job Id */
+            job_id?: number | null;
         };
         /** BackfillIn */
         BackfillIn: {
@@ -1163,6 +1242,24 @@ export interface components {
             /** Stance */
             stance?: ("positive" | "neutral" | "cooling") | null;
         };
+        /** DrainOut */
+        DrainOut: {
+            /** Ran */
+            ran: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Failed */
+            failed: number;
+            /** Remaining */
+            remaining: number;
+            /**
+             * Skipped Overlap
+             * @default false
+             */
+            skipped_overlap: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
         /** EnrichmentMetricsOut */
         EnrichmentMetricsOut: {
             /**
@@ -1273,6 +1370,7 @@ export interface components {
             db: "up" | "down";
             /** App Env */
             app_env: string;
+            jobs?: components["schemas"]["JobsHealth"] | null;
         };
         /** IncrementalIn */
         IncrementalIn: {
@@ -1283,6 +1381,8 @@ export interface components {
         IncrementalOut: {
             /** Items */
             items: components["schemas"]["IngestStatsOut"][];
+            /** Job Id */
+            job_id?: number | null;
         };
         /** IngestStatsOut */
         IngestStatsOut: {
@@ -1300,6 +1400,57 @@ export interface components {
             status: string;
             /** Error */
             error?: string | null;
+            /** Job Id */
+            job_id?: number | null;
+        };
+        /** JobOut */
+        JobOut: {
+            /** Id */
+            id: number;
+            /** Task Name */
+            task_name: string;
+            /** Status */
+            status: string;
+            /** Queue Name */
+            queue_name: string;
+            /** Attempts */
+            attempts: number;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            /** Args */
+            args: {
+                [key: string]: unknown;
+            };
+            /** Last Error */
+            last_error?: string | null;
+        };
+        /** JobsHealth */
+        JobsHealth: {
+            /**
+             * Queued
+             * @default 0
+             */
+            queued: number;
+            /**
+             * Running
+             * @default 0
+             */
+            running: number;
+            /**
+             * Failed Last 24H
+             * @default 0
+             */
+            failed_last_24h: number;
+            /**
+             * Oldest Queued Age S
+             * @default 0
+             */
+            oldest_queued_age_s: number;
+        };
+        /** JobsListOut */
+        JobsListOut: {
+            /** Items */
+            items: components["schemas"]["JobOut"][];
         };
         /** LastCallOut */
         LastCallOut: {
@@ -1739,6 +1890,8 @@ export interface components {
         RefreshAllOut: {
             /** Items */
             items: components["schemas"]["RefreshStatsOut"][];
+            /** Job Id */
+            job_id?: number | null;
         };
         /** RefreshStatsOut */
         RefreshStatsOut: {
@@ -1757,6 +1910,13 @@ export interface components {
             status: "ok" | "disabled" | "error";
             /** Error */
             error?: string | null;
+        };
+        /** RetryOut */
+        RetryOut: {
+            /** Ok */
+            ok: boolean;
+            /** Id */
+            id: number;
         };
         /** SendIn */
         SendIn: {
@@ -3296,7 +3456,6 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
-                "X-Cron-Secret"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -3328,7 +3487,6 @@ export interface operations {
             query?: never;
             header?: {
                 authorization?: string | null;
-                "X-Cron-Secret"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -3346,6 +3504,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_mail_disconnect_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisconnectOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mailboxes_mail_mailboxes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxesOut"];
                 };
             };
             /** @description Validation Error */
@@ -3418,70 +3638,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IncrementalOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    disconnect_mail_disconnect_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-Cron-Secret"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DisconnectOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    mailboxes_mail_mailboxes_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-                "X-Cron-Secret"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MailboxesOut"];
                 };
             };
             /** @description Validation Error */
@@ -3710,6 +3866,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UnsubscribeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    drain_jobs_drain_post: {
+        parameters: {
+            query?: {
+                seconds?: number;
+            };
+            header?: {
+                "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DrainOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_admin_jobs_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobsListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_job_admin_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryOut"];
                 };
             };
             /** @description Validation Error */

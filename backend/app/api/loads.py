@@ -77,6 +77,9 @@ class RefreshStatsOut(BaseModel):
 
 class RefreshAllOut(BaseModel):
     items: list[RefreshStatsOut]
+    # Set when the refresh is dispatched to the worker; frontend polls
+    # `/jobs/{id}` and refetches the loads board on success.
+    job_id: int | None = None
 
 
 @router.get("", response_model=LoadsListOut)
@@ -120,6 +123,19 @@ async def refresh_all(
 ) -> RefreshAllOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
+
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.queue_dispatch import maybe_dispatch
+
+    job_id = await maybe_dispatch(
+        request.app.state.sessionmaker,
+        "loads.refresh",
+        tenant_id=LJM_TENANT_ID,
+        source_kind=None,
+    )
+    if job_id is not None:
+        return RefreshAllOut(items=[], job_id=job_id)
+
     result = await svc_refresh_all(request.app.state.sessionmaker, settings)
     return RefreshAllOut(items=[RefreshStatsOut(**r.__dict__) for r in result.items])
 

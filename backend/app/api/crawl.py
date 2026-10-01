@@ -76,6 +76,24 @@ async def start_run(
         )
         await s.commit()
 
+    # When the queue is installed (Postgres + 0017), hand the pipeline to
+    # the worker via `prospecting.crawl_leads` and return the job id so
+    # the frontend can poll `/jobs/{id}`. Otherwise fall back to the
+    # historical BackgroundTasks path (sqlite dev + whole test suite).
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.queue_dispatch import maybe_dispatch
+
+    job_id = await maybe_dispatch(
+        sessionmaker,
+        "prospecting.crawl_leads",
+        tenant_id=LJM_TENANT_ID,
+        trigger=trig,
+        limit=limit,
+        run_id=intake_id,
+    )
+    if job_id is not None:
+        return {"run_id": intake_id, "status": "queued", "job_id": job_id}
+
     async def _work() -> None:
         await run_crawl(sessionmaker, settings, trigger=trig, fmcsa_limit=limit, run_id=intake_id)
 
