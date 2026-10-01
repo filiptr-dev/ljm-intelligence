@@ -1,4 +1,4 @@
-"""Mail connector routes — status, test send, backfill, incremental, disconnect.
+"""Mail connector routes — thin router over ``app.integrations.mail_service``.
 
 Two routers, same ``/mail`` prefix:
 
@@ -17,20 +17,22 @@ these also accept cron". The route paths are unchanged — no URL moves.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Header, Request
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, select
 
 from app.api._auth import check_secret
 from app.config import Settings
-from app.integrations.adapters.email.credentials import load_sa_info, sa_fingerprint
-from app.integrations.adapters.email.ingest import ingest_backfill, ingest_incremental
-from app.integrations.adapters.email.mailbox import get_mailbox_source
-from app.integrations.adapters.email.sender import get_mail_sender
-from app.models import MailCursor, SentLog, SettingsRow
+from app.integrations.mail_service import (
+    backfill as svc_backfill,
+    disconnect as svc_disconnect,
+    incremental as svc_incremental,
+    list_mailboxes as svc_list_mailboxes,
+    status as svc_status,
+    test_send as svc_test_send,
+)
 
 log = logging.getLogger(__name__)
 
@@ -104,101 +106,21 @@ class MailboxesOut(BaseModel):
     items: list[MailboxOut]
 
 
-# ---------- helpers --------------------------------------------------------
-
-
-async def _effective_mode(request: Request) -> str:
-    """DB override wins over env (per plan: env > DB > default, but owner-flip
-    needs to work live, so we invert for the override path: DB override wins)."""
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:
-        row = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
-        if row and row.mail_sender_override:
-            return row.mail_sender_override
-    return request.app.state.settings.mail_sender
-
-
 # ---------- routes ---------------------------------------------------------
 
 
 @router.get("/status", response_model=MailStatusOut)
 async def status(request: Request) -> MailStatusOut:
     settings: Settings = request.app.state.settings
-    mode = await _effective_mode(request)
-    sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
-    fingerprint = sa_fingerprint(sa) if sa else None
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:
-        today = datetime.now(UTC).date()
-        sends_today = (
-            await s.execute(select(func.count(SentLog.id)).where(func.date(SentLog.sent_at) == today))
-        ).scalar() or 0
-        last = (
-            await s.execute(
-                select(SentLog.provider_message_id)
-                .where(SentLog.provider_message_id.is_not(None))
-                .order_by(SentLog.sent_at.desc())
-                .limit(1)
-            )
-        ).scalar()
-    reason = None
-    if mode == "gmail" and sa is None:
-        reason = "missing_env:GMAIL_SA_JSON"
-    return MailStatusOut(
-        mode=mode if mode in ("simulated", "gmail") else "simulated",
-        impersonate=settings.gmail.impersonate,
-        admin_impersonate=settings.gmail.admin_impersonate,
-        scopes=list(settings.gmail.scopes_send) + list(settings.gmail.scopes_read) + list(settings.gmail.scopes_admin),
-        sa_configured=sa is not None,
-        sa_fingerprint=fingerprint,
-        postal_address_set=bool((settings.outreach_postal_address or "").strip()),
-        sends_today=int(sends_today),
-        last_message_id=last,
-        reason=reason,
-    )
+    row = await svc_status(request.app.state.sessionmaker, settings)
+    return MailStatusOut(**row.__dict__)
 
 
 @router.post("/test-send", response_model=TestSendOut)
 async def test_send(payload: TestSendIn, request: Request) -> TestSendOut:
     settings: Settings = request.app.state.settings
-    mode = await _effective_mode(request)
-    sender = get_mail_sender(settings, mode_override=mode)
-    result = await sender.send(
-        to=str(payload.to),
-        subject="LJM Intelligence — connection test",
-        body="This is a test from LJM Intelligence /mail/test-send.",
-        from_addr=settings.outreach_from_email,
-    )
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:
-        s.add(
-            SentLog(
-                lead_id="SYSTEM",
-                mode=result.mode,
-                to_email=str(payload.to),
-                subject="LJM Intelligence — connection test",
-                body="(test)",
-                provider_message_id=result.message_id,
-                thread_id=result.thread_id,
-                is_test=True,
-            )
-        )
-        try:
-            await s.commit()
-        except Exception as exc:  # noqa: BLE001
-            await s.rollback()
-            log.warning("mail/test-send: sent_log insert skipped: %s", exc)
-    return TestSendOut(
-        ok=result.error is None,
-        mode=result.mode,
-        message_id=result.message_id,
-        thread_id=result.thread_id,
-        reason=result.error,
-    )
-
-
-class _MailboxForm(BaseModel):
-    mailbox: EmailStr
+    row = await svc_test_send(request.app.state.sessionmaker, settings, to=str(payload.to))
+    return TestSendOut(**row.__dict__)
 
 
 @cron_router.post("/backfill", response_model=IngestStatsOut)
@@ -209,11 +131,13 @@ async def backfill(
 ) -> IngestStatsOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
-    source = get_mailbox_source(settings)
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:
-        stats = await ingest_backfill(s, source, str(payload.mailbox), months=payload.months)
-    return IngestStatsOut(**stats.__dict__)
+    row = await svc_backfill(
+        request.app.state.sessionmaker,
+        settings,
+        mailbox=str(payload.mailbox),
+        months=payload.months,
+    )
+    return IngestStatsOut(**row.__dict__)
 
 
 @cron_router.post("/incremental", response_model=IncrementalOut)
@@ -224,48 +148,25 @@ async def incremental(
 ) -> IncrementalOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
-    source = get_mailbox_source(settings)
-    mailboxes = [str(payload.mailbox)] if payload.mailbox else await source.list_mailboxes()
-    items: list[IngestStatsOut] = []
-    sessionmaker = request.app.state.sessionmaker
-    for mbx in mailboxes:
-        async with sessionmaker() as s:
-            stats = await ingest_incremental(s, source, mbx)
-            items.append(IngestStatsOut(**stats.__dict__))
-    return IncrementalOut(items=items)
+    result = await svc_incremental(
+        request.app.state.sessionmaker,
+        settings,
+        mailbox=str(payload.mailbox) if payload.mailbox else None,
+    )
+    return IncrementalOut(items=[IngestStatsOut(**r.__dict__) for r in result.items])
 
 
 @router.post("/disconnect", response_model=DisconnectOut)
 async def disconnect(request: Request) -> DisconnectOut:
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:
-        row = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
-        if row is None:
-            row = SettingsRow(id=1)
-            s.add(row)
-        row.mail_sender_override = "simulated"
-        await s.commit()
+    await svc_disconnect(request.app.state.sessionmaker)
     return DisconnectOut(ok=True, mode="simulated")
 
 
 @router.get("/mailboxes", response_model=MailboxesOut)
 async def mailboxes(request: Request) -> MailboxesOut:
     settings: Settings = request.app.state.settings
-    source = get_mailbox_source(settings)
-    emails = await source.list_mailboxes()
-    sessionmaker = request.app.state.sessionmaker
-    items: list[MailboxOut] = []
-    async with sessionmaker() as s:
-        for email in emails:
-            cur = (await s.execute(select(MailCursor).where(MailCursor.mailbox == email))).scalar_one_or_none()
-            items.append(
-                MailboxOut(
-                    email=email,
-                    last_history_id=cur.history_id if cur else None,
-                    backfilled_through=cur.backfilled_through_at if cur else None,
-                )
-            )
-    return MailboxesOut(items=items)
+    rows = await svc_list_mailboxes(request.app.state.sessionmaker, settings)
+    return MailboxesOut(items=[MailboxOut(**r.__dict__) for r in rows])
 
 
 __all__ = ["cron_router", "router"]
