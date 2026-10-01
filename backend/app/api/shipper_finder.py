@@ -1,53 +1,30 @@
-"""Shipper Finder API — direct-shipper tool (Slice 3).
+"""Shipper Finder API — thin router over ``app.prospecting.shipper_finder_service``.
 
-Three routes, all thin adapters around the pure `pipeline.shipper_rank.rank_shippers`:
+Three routes:
 
   GET  /tools/shipper-finder           — filtered, ranked, cursor-paginated
   POST /tools/shipper-finder/promote   — one-write gate into `leads` (idempotent)
   GET  /tools/shipper-finder/{id}      — single-candidate detail (right column)
 
-Reads only; no Gemini in the read path (plan §"Rules that apply"). The ranker
-owns the scoring / drop / filter logic; this module pumps the three inputs
-(candidates + open capacity posts + call outcomes) into it, applies opaque-cursor
-pagination on the ranked list, and serialises the result.
-
-Cursor shape: URL-safe base64 of ``"{score}:{id}"``. The ranked order is
-``(-score, id asc)`` so "after cursor (cs, cid)" means the row with either
-``score < cs`` or ``(score == cs AND id > cid)``. Deterministic across pages
-whenever the underlying data is unchanged.
-
-Promote dedupe ladder (plan §"Promote route"): MC → DOT → domain → case-insensitive
-``(name, state)``. Uses the candidate's ``fmcsa_mc``/``fmcsa_dot``/``domain``/
-``name``/``state`` to reach into ``leads``. Idempotent: a second call on the same
-candidate returns ``created=false`` with the previously linked ``lead_id``, and
-the DB always has one lead, not two. The whole write runs inside
-``async with s.begin():`` — two tables in one transaction (see plan rule
-"Promote = DB transaction"; half-writes must not happen).
-
-Style mirrors `app/api/call_list.py`: APIRouter, `request.app.state.sessionmaker`,
-Pydantic response models with explicit ``response_model=…`` on every route so the
-OpenAPI schema names (``ShipperListOut``, ``PromoteOut``, ``ShipperDetailOut``)
-stay stable for the frontend typed client.
+Cursor encoding stays in the router — it is HTTP sugar, not business logic.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-import uuid
-from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
 
-from app.models import CallOutcome, CapacityPost, Lead, ShipperCandidate
-from app.pipeline.shipper_rank import (
-    SHIPPER_FINDER_LIMIT_CAP,
-    ShipperFilters,
-    ShipperRow,
-    rank_shippers,
+from app.pipeline.shipper_rank import ShipperRow
+from app.prospecting.shipper_finder_service import (
+    NotFoundError,
+    PromotedLeadRow,
+    get_detail as svc_get_detail,
+    promote as svc_promote,
+    rank_all as svc_rank_all,
 )
 
 router = APIRouter(prefix="/tools/shipper-finder", tags=["shipper-finder"])
@@ -74,7 +51,6 @@ class ShipperRowOut(BaseModel):
     reasons: list[str]
     promoted_lead_id: str | None
     match_reason: str | None
-    # Fit-score (scope change 2026-09-30). Null if never computed.
     fit_score: int | None = None
     fit_reasons: list[str] = Field(default_factory=list)
 
@@ -119,10 +95,51 @@ class ShipperDetailOut(BaseModel):
     promoted_lead: PromotedLeadOut | None
 
 
+# ---------- cursor helpers --------------------------------------------------
+
+
+def _encode_cursor(score: int, id_: str) -> str:
+    raw = f"{score}:{id_}".encode()
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple[int, str]:
+    """Decode ``base64(score:id)``. Raises ``HTTPException(400)`` on garbage."""
+    try:
+        pad = "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode(cursor + pad).decode("ascii")
+        score_s, id_ = raw.split(":", 1)
+        return int(score_s), id_
+    except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
+        raise HTTPException(400, f"invalid cursor: {exc}") from exc
+
+
+def _after_cursor(rows: list[ShipperRow], cursor: tuple[int, str]) -> list[ShipperRow]:
+    cs, cid = cursor
+    return [r for r in rows if (r.score < cs) or (r.score == cs and r.id > cid)]
+
+
+def _after_fit_cursor(
+    rows: list[ShipperRow],
+    fit_by_id: dict[str, tuple[int | None, list[str]]],
+    cursor: tuple[int, str],
+) -> list[ShipperRow]:
+    cf, cid = cursor
+    kept: list[ShipperRow] = []
+    for r in rows:
+        rf = fit_by_id.get(r.id, (None, []))[0]
+        rf_key = rf if rf is not None else -1
+        if rf_key < cf or (rf_key == cf and r.id > cid):
+            kept.append(r)
+    return kept
+
+
 # ---------- serializers -----------------------------------------------------
 
 
-def _row_out(r: ShipperRow, *, fit_score: int | None = None, fit_reasons: list[str] | None = None) -> ShipperRowOut:
+def _row_out(
+    r: ShipperRow, *, fit_score: int | None = None, fit_reasons: list[str] | None = None
+) -> ShipperRowOut:
     return ShipperRowOut(
         id=r.id,
         name=r.name,
@@ -146,98 +163,6 @@ def _row_out(r: ShipperRow, *, fit_score: int | None = None, fit_reasons: list[s
     )
 
 
-def _iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt else None
-
-
-# ---------- cursor helpers --------------------------------------------------
-
-
-def _encode_cursor(score: int, id_: str) -> str:
-    raw = f"{score}:{id_}".encode()
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def _decode_cursor(cursor: str) -> tuple[int, str]:
-    """Decode ``base64(score:id)``. Raises ``HTTPException(400)`` on garbage.
-
-    Malformed cursors are a client bug (a stale link, a hand-typed value); the
-    caller should surface it clearly, not silently return the first page.
-    """
-    try:
-        pad = "=" * (-len(cursor) % 4)
-        raw = base64.urlsafe_b64decode(cursor + pad).decode("ascii")
-        score_s, id_ = raw.split(":", 1)
-        return int(score_s), id_
-    except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
-        raise HTTPException(400, f"invalid cursor: {exc}") from exc
-
-
-def _after_cursor(rows: list[ShipperRow], cursor: tuple[int, str]) -> list[ShipperRow]:
-    """Return rows strictly after (score, id) in the ranked order (-score, id asc)."""
-    cs, cid = cursor
-    return [r for r in rows if (r.score < cs) or (r.score == cs and r.id > cid)]
-
-
-def _after_fit_cursor(
-    rows: list[ShipperRow],
-    fit_by_id: dict[str, tuple[int | None, list[str]]],
-    cursor: tuple[int, str],
-) -> list[ShipperRow]:
-    """Fit-sort cursor: after (fit_or_-1, id) under (-fit, id asc)."""
-    cf, cid = cursor
-    kept: list[ShipperRow] = []
-    for r in rows:
-        rf = fit_by_id.get(r.id, (None, []))[0]
-        rf_key = rf if rf is not None else -1
-        if rf_key < cf or (rf_key == cf and r.id > cid):
-            kept.append(r)
-    return kept
-
-
-# ---------- shared read -----------------------------------------------------
-
-
-async def _rank_all(
-    sessionmaker,
-    *,
-    state: str | None,
-    source: str | None,
-    min_score: int | None,
-    promoted_only: bool | None,
-    q: str | None,
-) -> list[ShipperRow]:
-    """Load candidates + posts + outcomes, hand to the pure ranker.
-
-    Only ``state`` is pushed down to SQL (backed by ``shipper_candidates_state``);
-    everything else is applied in the ranker so the filter semantics match the
-    unit tests. At demo scale (thousands of rows total) an in-memory rank is
-    cheap; if this ever grows we'd add DB-side pre-filters — the ranker stays
-    the source of truth for what "matching" means.
-    """
-    async with sessionmaker() as s:
-        cand_q = select(ShipperCandidate)
-        if state:
-            cand_q = cand_q.where(ShipperCandidate.state == state.upper())
-        candidates = (await s.execute(cand_q)).scalars().all()
-        posts = (await s.execute(select(CapacityPost).where(CapacityPost.status == "open"))).scalars().all()
-        outcomes = (await s.execute(select(CallOutcome))).scalars().all()
-
-    filters = ShipperFilters(
-        state=state,
-        source=source,
-        min_score=min_score,
-        promoted_only=promoted_only,
-        q=q,
-        # Rank the whole matching set up to the hard cap so cursor pagination
-        # is stable across pages. The route-level ``limit`` is applied AFTER
-        # cursor slicing so page N returns exactly N rows even when N < cap.
-        limit=SHIPPER_FINDER_LIMIT_CAP,
-    )
-    today = datetime.now(UTC).date()
-    return rank_shippers(candidates, posts, outcomes, today, filters=filters)
-
-
 # ---------- routes ----------------------------------------------------------
 
 
@@ -251,12 +176,9 @@ async def list_shippers(
     q: str | None = Query(None, max_length=128),
     cursor: str | None = Query(None, max_length=256),
     limit: int = Query(50, ge=25, le=100),
-    # Sort control (2026-09-30). "lane" = existing lane-ranking (default).
-    # "fit" = fit_score DESC, unscored last, stable tiebreak by id ASC. Server-
-    # side so cursor pagination stays correct even with tens of pages.
     sort: Literal["lane", "fit"] = Query("lane"),
 ) -> ShipperListOut:
-    rows = await _rank_all(
+    result = await svc_rank_all(
         request.app.state.sessionmaker,
         state=state,
         source=source,
@@ -264,31 +186,14 @@ async def list_shippers(
         promoted_only=promoted,
         q=q,
     )
-
-    # Pre-fetch fit_scores for ALL ranked rows so a fit-sort re-order works
-    # across pages. At demo scale (≤ SHIPPER_FINDER_LIMIT_CAP rows) this is one
-    # `IN (...)` lookup; if the frontier ever grows we would push the sort into
-    # SQL. Fold-in used both for the fit sort and for the page's display value.
-    fit_by_id: dict[str, tuple[int | None, list[str]]] = {}
-    all_ids = [r.id for r in rows]
-    if all_ids:
-        async with request.app.state.sessionmaker() as s:
-            fit_rows = (
-                await s.execute(
-                    select(ShipperCandidate.id, ShipperCandidate.fit_score, ShipperCandidate.fit_reasons).where(
-                        ShipperCandidate.id.in_(all_ids)
-                    )
-                )
-            ).all()
-        for cid, fs, fr in fit_rows:
-            fit_by_id[cid] = (fs, list(fr or []))
+    rows = result.rows
+    fit_by_id = result.fit_by_id
 
     if sort == "fit":
-        # `-1` sentinel for null so nulls sort last under DESC; final tiebreak on id ASC.
-        # Explicit `is not None` — `fs or -1` would collapse fit_score=0 into the
-        # null bucket (0 is falsy in Python), breaking cursor pagination at the
-        # boundary where a null-row cursor is followed by fit=0 rows. Match the
-        # cursor encoder below, which already uses this form.
+        # ``-1`` sentinel for null so nulls sort last under DESC; final tiebreak
+        # on id ASC. Explicit ``is not None`` — ``fs or -1`` would collapse
+        # ``fit_score=0`` into the null bucket (0 is falsy in Python), breaking
+        # cursor pagination at that boundary.
         def _fit_sort_key(r):
             fs = fit_by_id.get(r.id, (None, []))[0]
             return (-(fs if fs is not None else -1), r.id)
@@ -306,219 +211,51 @@ async def list_shippers(
         last = page[-1]
         if sort == "fit":
             fs = fit_by_id.get(last.id, (None, []))[0]
-            # Encode -1 for null so decode → int stays lossless.
             next_cursor = _encode_cursor(fs if fs is not None else -1, last.id)
         else:
             next_cursor = _encode_cursor(last.score, last.id)
 
     return ShipperListOut(
         items=[
-            _row_out(r, fit_score=fit_by_id.get(r.id, (None, []))[0], fit_reasons=fit_by_id.get(r.id, (None, []))[1])
+            _row_out(
+                r,
+                fit_score=fit_by_id.get(r.id, (None, []))[0],
+                fit_reasons=fit_by_id.get(r.id, (None, []))[1],
+            )
             for r in page
         ],
         next_cursor=next_cursor,
     )
 
 
-# ---- promote --------------------------------------------------------------
-
-
-def _mint_lead_id(c: ShipperCandidate) -> str:
-    """Prefix-encoded id, mirroring `app/sources/fmcsa.py` + `gemini_search.py`.
-
-    Order matches the dedupe ladder: MC → DOT → DOMAIN → SHIPPER-<uuid>. The
-    fallback is only reached when a candidate has neither authority nor a
-    domain (OSM-only rows) — those still deserve a promotable lead, and a
-    random suffix keeps the PK unique without leaking anything.
-    """
-    mc = c.fmcsa_mc or c.mc
-    dot = c.fmcsa_dot or c.dot
-    if mc:
-        return f"MC-{mc}"
-    if dot:
-        return f"DOT-{dot}"
-    if c.domain:
-        return f"DOMAIN-{c.domain}"
-    return f"SHIPPER-{uuid.uuid4().hex[:20]}"
-
-
-async def _find_existing_lead(session, c: ShipperCandidate) -> Lead | None:
-    """Dedupe ladder: MC → DOT → domain → case-insensitive (name, state).
-
-    Each rung is one indexed lookup. First hit wins; the caller links to it
-    rather than inserting. Ambiguity (two matches at different rungs) is
-    resolved by the ladder order — MC beats DOT beats domain beats name+state.
-    """
-    mc = c.fmcsa_mc or c.mc
-    if mc:
-        row = (await session.execute(select(Lead).where(Lead.mc == mc))).scalar_one_or_none()
-        if row:
-            return row
-    dot = c.fmcsa_dot or c.dot
-    if dot:
-        row = (await session.execute(select(Lead).where(Lead.dot == dot))).scalar_one_or_none()
-        if row:
-            return row
-    if c.domain:
-        row = (await session.execute(select(Lead).where(Lead.domain == c.domain))).scalar_one_or_none()
-        if row:
-            return row
-    if c.name and c.state:
-        row = (
-            await session.execute(
-                select(Lead).where(
-                    func.lower(Lead.name) == c.name.strip().lower(),
-                    Lead.state == c.state.upper(),
-                )
-            )
-        ).scalar_one_or_none()
-        if row:
-            return row
-    return None
-
-
 @router.post("/promote", response_model=PromoteOut)
 async def promote(request: Request, body: PromoteIn) -> PromoteOut:
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:  # noqa: SIM117 — inner `s.begin()` needs the bound session
-        # ONE transaction: two tables, no half-writes (plan §"Promote = DB transaction").
-        async with s.begin():
-            c = (
-                await s.execute(select(ShipperCandidate).where(ShipperCandidate.id == body.candidate_id))
-            ).scalar_one_or_none()
-            if c is None:
-                raise HTTPException(404, "shipper candidate not found")
-
-            # Idempotent short-circuit — a candidate already pointing at a lead
-            # returns the existing link, never a new lead.
-            if c.promoted_lead_id:
-                # Still copy any enrichment_candidates onto the linked lead (idempotent).
-                from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
-
-                await copy_enrichment_candidates_to_lead(s, candidate_id=c.id, lead_id=c.promoted_lead_id, run_id=None)
-                return PromoteOut(lead_id=c.promoted_lead_id, created=False)
-
-            existing = await _find_existing_lead(s, c)
-            if existing is not None:
-                c.promoted_lead_id = existing.id
-                from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
-
-                await copy_enrichment_candidates_to_lead(s, candidate_id=c.id, lead_id=existing.id, run_id=None)
-                return PromoteOut(lead_id=existing.id, created=False)
-
-            lead_id = _mint_lead_id(c)
-            # Defensive: the mint could collide on a re-promote race — treat a
-            # concurrent id hit as an idempotent link (created=false).
-            already = (await s.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
-            if already is not None:
-                c.promoted_lead_id = already.id
-                return PromoteOut(lead_id=already.id, created=False)
-
-            lead = Lead(
-                id=lead_id,
-                mc=(c.fmcsa_mc or c.mc),
-                dot=(c.fmcsa_dot or c.dot),
-                domain=c.domain,
-                name=c.name,
-                kind="Shipper",
-                state=c.state.upper(),
-                city=c.city,
-                address=c.address,
-                phone=c.phone,
-                primary_email=c.primary_email,
-                raw=c.raw or {},
-                evidence=c.evidence or {},
-                recommendations=[],
-            )
-            s.add(lead)
-            c.promoted_lead_id = lead_id
-            await s.flush()
-            from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
-
-            await copy_enrichment_candidates_to_lead(s, candidate_id=c.id, lead_id=lead_id, run_id=None)
-            return PromoteOut(lead_id=lead_id, created=True)
+    try:
+        result = await svc_promote(request.app.state.sessionmaker, body.candidate_id)
+    except NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return PromoteOut(lead_id=result.lead_id, created=result.created)
 
 
-# ---- detail --------------------------------------------------------------
+def _promoted_out(r: PromotedLeadRow | None) -> PromotedLeadOut | None:
+    return PromotedLeadOut(**r.__dict__) if r is not None else None
 
 
 @router.get("/{candidate_id}", response_model=ShipperDetailOut)
 async def get_shipper(request: Request, candidate_id: str) -> ShipperDetailOut:
-    sessionmaker = request.app.state.sessionmaker
-    async with sessionmaker() as s:
-        c = (await s.execute(select(ShipperCandidate).where(ShipperCandidate.id == candidate_id))).scalar_one_or_none()
-        if c is None:
-            raise HTTPException(404, "shipper candidate not found")
-
-        posts = (await s.execute(select(CapacityPost).where(CapacityPost.status == "open"))).scalars().all()
-        outcomes = (await s.execute(select(CallOutcome))).scalars().all()
-
-        promoted_lead: Lead | None = None
-        if c.promoted_lead_id:
-            promoted_lead = (await s.execute(select(Lead).where(Lead.id == c.promoted_lead_id))).scalar_one_or_none()
-
-    # Run the row through the ranker so the detail column shows the same score
-    # + reason chips the list does. Bypass the ranker's state/name drops by
-    # trusting the fact that the row already sits in the DB — if a drop rule
-    # excludes it, we return the raw fields with score=0 so the operator can
-    # still see the row's evidence.
-    today = datetime.now(UTC).date()
-    ranked = rank_shippers(
-        [c],
-        posts,
-        outcomes,
-        today,
-        filters=ShipperFilters(limit=SHIPPER_FINDER_LIMIT_CAP),
-    )
-    if ranked:
-        row_out = _row_out(ranked[0], fit_score=c.fit_score, fit_reasons=list(c.fit_reasons or []))
-    else:
-        row_out = ShipperRowOut(
-            id=c.id,
-            name=c.name or "",
-            state=(c.state or "").upper(),
-            city=c.city,
-            address=c.address,
-            lat=c.lat,
-            lng=c.lng,
-            sources=list(c.sources or []),
-            mc=c.mc,
-            dot=c.dot,
-            domain=c.domain,
-            phone=c.phone,
-            primary_email=c.primary_email,
-            score=0,
-            reasons=[],
-            promoted_lead_id=c.promoted_lead_id,
-            match_reason=c.match_reason,
-            fit_score=c.fit_score,
-            fit_reasons=list(c.fit_reasons or []),
-        )
-
-    promoted_out: PromotedLeadOut | None = None
-    if promoted_lead is not None:
-        promoted_out = PromotedLeadOut(
-            id=promoted_lead.id,
-            name=promoted_lead.name,
-            state=promoted_lead.state,
-            city=promoted_lead.city,
-            kind=promoted_lead.kind,
-            mc=promoted_lead.mc,
-            dot=promoted_lead.dot,
-            domain=promoted_lead.domain,
-            phone=promoted_lead.phone,
-            primary_email=promoted_lead.primary_email,
-        )
-
+    try:
+        result = await svc_get_detail(request.app.state.sessionmaker, candidate_id)
+    except NotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
     return ShipperDetailOut(
-        row=row_out,
-        evidence=c.evidence,
-        osm_tags=c.osm_tags,
-        raw=c.raw,
-        osm_ref=c.osm_ref,
-        fmcsa_mc=c.fmcsa_mc,
-        fmcsa_dot=c.fmcsa_dot,
-        first_seen_at=_iso(c.first_seen_at),
-        last_seen_at=_iso(c.last_seen_at),
-        promoted_lead=promoted_out,
+        row=_row_out(result.row, fit_score=result.fit_score, fit_reasons=result.fit_reasons),
+        evidence=result.evidence,
+        osm_tags=result.osm_tags,
+        raw=result.raw,
+        osm_ref=result.osm_ref,
+        fmcsa_mc=result.fmcsa_mc,
+        fmcsa_dot=result.fmcsa_dot,
+        first_seen_at=result.first_seen_at,
+        last_seen_at=result.last_seen_at,
+        promoted_lead=_promoted_out(result.promoted_lead),
     )
