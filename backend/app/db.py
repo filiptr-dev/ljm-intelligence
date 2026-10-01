@@ -47,7 +47,7 @@ def create_engine(settings: Settings) -> AsyncEngine:
     return create_async_engine(
         settings.database_url,
         pool_size=settings.db_pool_size,
-        max_overflow=0,
+        max_overflow=settings.db_pool_overflow,
         pool_pre_ping=True,
         pool_recycle=300,
         connect_args={"prepare_threshold": None, "connect_timeout": 15},

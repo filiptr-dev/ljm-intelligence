@@ -117,7 +117,11 @@ class Settings(BaseSettings):
     # some long-running ops need the direct branch URL. Optional — falls back to
     # `database_url` if unset so dev/test with one local Postgres still works.
     database_url_direct: str | None = None
-    db_pool_size: int = Field(default=5, ge=1, le=20)
+    db_pool_size: int = Field(default=3, ge=1, le=20)
+    # R4 — max_overflow bounds the per-process connection footprint so a
+    # worker's SQLAlchemy pool can't balloon past the Neon-free cap under
+    # burst. One worker consumes up to (pool_size + overflow) connections.
+    db_pool_overflow: int = Field(default=2, ge=0, le=20)
     # First query after Neon autosuspend takes ~1–2s. Keep the health timeout generous.
     db_health_timeout: float = Field(default=8.0, gt=0)
 
