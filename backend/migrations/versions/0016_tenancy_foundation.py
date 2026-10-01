@@ -148,8 +148,23 @@ def upgrade() -> None:
     )
 
     # ---------- 3. Add tenant_id (nullable) to every tenant-owned table ----------
+    # `server_default = LJM_TENANT_ID` is the safety net the review flagged:
+    # on a fresh Render boot (empty DB → migrations run → no backfill rows →
+    # NOT NULL with no default + code that forgets to stamp = every INSERT
+    # fails), the default stamps LJM on any row the ORM path forgot. The
+    # primary path is `TenantMixin` + a before_insert event in
+    # `app/shared/orm.py` that reads the tenant contextvar; this default is
+    # the belt to the ORM's suspenders.
     for table in TENANT_TABLES:
-        op.add_column(table, sa.Column("tenant_id", sa.String(26), nullable=True))
+        op.add_column(
+            table,
+            sa.Column(
+                "tenant_id",
+                sa.String(26),
+                nullable=True,
+                server_default=LJM_TENANT_ID,
+            ),
+        )
 
     # ---------- 4. Backfill every existing row ----------
     for table in TENANT_TABLES:

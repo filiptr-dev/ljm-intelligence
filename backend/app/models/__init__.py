@@ -30,12 +30,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+from app.shared.orm import TenantMixin
 
 # Prefer JSONB on Postgres; JSON fallback keeps the models importable elsewhere (docs, tools).
 JSONType = JSONB().with_variant(JSON(), "sqlite")
 
 
-class Lead(Base):
+class Lead(TenantMixin, Base):
     __tablename__ = "leads"
 
     # id shape "MC-…" / "DOT-…" / "DOMAIN-…" — see the plan's cross-service Lead type.
@@ -88,7 +89,7 @@ class Lead(Base):
     )
 
 
-class LeadSource(Base):
+class LeadSource(TenantMixin, Base):
     __tablename__ = "lead_sources"
 
     lead_id: Mapped[str] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True)
@@ -99,7 +100,7 @@ class LeadSource(Base):
     payload: Mapped[dict] = mapped_column(JSONType, default=dict)
 
 
-class LeadContact(Base):
+class LeadContact(TenantMixin, Base):
     __tablename__ = "lead_contacts"
 
     # BigInteger on Postgres; Integer on SQLite so the rowid-alias autoincrement works in tests.
@@ -136,7 +137,7 @@ class LeadContact(Base):
     )
 
 
-class LeadContactProvenance(Base):
+class LeadContactProvenance(TenantMixin, Base):
     """Per-sighting evidence for a `lead_contacts` row.
 
     One row per page-observation. Trust signal: N provenance rows for one contact
@@ -166,7 +167,7 @@ class LeadContactProvenance(Base):
     __table_args__ = (Index("lead_contact_provenance_contact_disc", "contact_id", text("discovered_at DESC")),)
 
 
-class EnrichmentCandidate(Base):
+class EnrichmentCandidate(TenantMixin, Base):
     """Pre-promotion contacts for a `shipper_candidates` row.
 
     Copied into `lead_contacts` + `lead_contact_provenance` inside the promote
@@ -198,7 +199,7 @@ class EnrichmentCandidate(Base):
     __table_args__ = (Index("enrichment_candidates_cand_dm", "candidate_id", "is_decision_maker"),)
 
 
-class CrawlRun(Base):
+class CrawlRun(TenantMixin, Base):
     __tablename__ = "crawl_runs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -211,7 +212,7 @@ class CrawlRun(Base):
     error: Mapped[str | None] = mapped_column(Text)
 
 
-class Score(Base):
+class Score(TenantMixin, Base):
     __tablename__ = "scores"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -226,7 +227,7 @@ class Score(Base):
     __table_args__ = (Index("scores_lead_id_created_at", "lead_id", "created_at"),)
 
 
-class EmailTemplate(Base):
+class EmailTemplate(TenantMixin, Base):
     __tablename__ = "email_templates"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -304,7 +305,7 @@ class SettingsRow(Base):
     truckstop_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class AiUsageLog(Base):
+class AiUsageLog(TenantMixin, Base):
     """One row per adapter call (migration 0009).
 
     Prompt bodies are NEVER written here; only ``input_hash`` (sha256) for
@@ -339,7 +340,7 @@ class AiUsageLog(Base):
     )
 
 
-class SentLog(Base):
+class SentLog(TenantMixin, Base):
     __tablename__ = "sent_log"
 
     id: Mapped[int] = mapped_column(
@@ -374,7 +375,7 @@ class SentLog(Base):
     )
 
 
-class Suppression(Base):
+class Suppression(TenantMixin, Base):
     __tablename__ = "suppression"
 
     email: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -382,7 +383,7 @@ class Suppression(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class CapacityPost(Base):
+class CapacityPost(TenantMixin, Base):
     """Two-post-type table:
     kind='truck'  → equipment + origin (city/state) + available_date + destinations[]
     kind='load'   → equipment + origin + destination + pickup_date + weight + rate
@@ -416,7 +417,7 @@ class CapacityPost(Base):
     __table_args__ = (Index("capacity_posts_kind_status", "kind", "status"),)
 
 
-class CallOutcome(Base):
+class CallOutcome(TenantMixin, Base):
     """One row per phone-call decision on a Lead.
 
     Outcomes are events, not state, so we get a full timeline per lead:
@@ -459,7 +460,7 @@ class CallOutcome(Base):
     )
 
 
-class ShipperCandidate(Base):
+class ShipperCandidate(TenantMixin, Base):
     """Un-promoted discovery bucket for OSM finds + FMCSA shippers.
 
     The `/tools/shipper-finder` tool reads from here; only "Add to leads" writes
@@ -558,7 +559,7 @@ class ShipperCandidate(Base):
     )
 
 
-class FitScoreHistory(Base):
+class FitScoreHistory(TenantMixin, Base):
     """Append-only history of every fit-score computation. Save everything."""
 
     __tablename__ = "fit_score_history"
@@ -579,7 +580,7 @@ class FitScoreHistory(Base):
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class User(Base):
+class User(TenantMixin, Base):
     """App login account (migration 0008).
 
     V1 is single-owner: migration 0008 seeds exactly one row
@@ -606,7 +607,7 @@ class User(Base):
 # ---------- Loads (migration 0010) -----------------------------------------
 
 
-class Load(Base):
+class Load(TenantMixin, Base):
     """A broker-posted lane snapshot ingested from a load source.
 
     Dedupe key: ``(source, source_ref)`` — vendor row id tells us 'same load'
@@ -645,7 +646,7 @@ class Load(Base):
 # ---------- Mail (migration 0011/0012) -------------------------------------
 
 
-class MailMessage(Base):
+class MailMessage(TenantMixin, Base):
     __tablename__ = "mail_messages"
 
     mailbox: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -674,7 +675,7 @@ class MailMessage(Base):
     )
 
 
-class MailCursor(Base):
+class MailCursor(TenantMixin, Base):
     __tablename__ = "mail_cursors"
 
     mailbox: Mapped[str] = mapped_column(String(255), primary_key=True)

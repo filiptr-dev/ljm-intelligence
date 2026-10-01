@@ -1,7 +1,7 @@
 """Drift guard — DEFAULT_WEIGHTS (Python) vs DEFAULT_FIT_WEIGHTS (TypeScript).
 
 The frontend Settings page ships a hint per weight in
-`frontend/src/app/settings/fit-weight-meta.ts`. If a weight is added or removed
+`frontend/src/app/(app)/settings/fit-weight-meta.ts`. If a weight is added or removed
 on the backend without updating that file, the UI shows the raw key + no
 tooltip. This test parses the TS module to extract the DEFAULT_FIT_WEIGHTS keys
 and asserts they match Python one-to-one — catches the drift at CI time, not
@@ -19,7 +19,7 @@ from pathlib import Path
 from app.scoring.fit_score import DEFAULT_WEIGHTS
 
 _META_FILE = (
-    Path(__file__).resolve().parent.parent.parent / "frontend" / "src" / "app" / "settings" / "fit-weight-meta.ts"
+    Path(__file__).resolve().parent.parent.parent / "frontend" / "src" / "app" / "(app)" / "settings" / "fit-weight-meta.ts"
 )
 
 
