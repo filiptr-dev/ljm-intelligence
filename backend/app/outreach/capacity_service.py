@@ -143,6 +143,14 @@ async def create_post(
 async def suggestions_for_post(
     session: AsyncSession, post_id: str, *, top: int = 20
 ) -> SuggestionsResult:
+    # Fail closed: a missing tenant context must never return other-tenant
+    # rows. `current_tenant()` raises `RuntimeError` when unset — we let it
+    # propagate rather than fall through to an unscoped query. Both the
+    # broker (`Lead`) read and the shipper (`ShipperCandidate`) read below
+    # apply this filter explicitly; the ORM `before_insert` hook only stamps
+    # on write, so reads must be scoped by hand.
+    tenant = current_tenant()
+
     post = (
         await session.execute(select(CapacityPost).where(CapacityPost.id == post_id))
     ).scalar_one_or_none()
@@ -150,10 +158,14 @@ async def suggestions_for_post(
         raise PostNotFoundError(post_id)
 
     # Candidate leads: all broker/shipper/forwarder leads at demo scale. The
-    # scorer handles targeting; we still rank globally.
+    # scorer handles targeting; we still rank globally — but strictly within
+    # the current tenant (see review 2026-10-05-capacity-shipper-matches).
     rows = (
         await session.execute(
-            select(Lead).where(Lead.kind.in_(["Broker", "Shipper", "Forwarder"])).limit(500)
+            select(Lead)
+            .where(Lead.tenant_id == tenant)
+            .where(Lead.kind.in_(["Broker", "Shipper", "Forwarder"]))
+            .limit(500)
         )
     ).scalars().all()
 
@@ -189,16 +201,14 @@ async def suggestions_for_post(
     if lane_states:
         # Explicit tenant filter — the ORM `before_insert` hook stamps on
         # write, but there's no automatic read-side scope. We mirror
-        # `shipper_finder_service` and require the current tenant context.
-        try:
-            tenant = current_tenant()
-        except RuntimeError:
-            tenant = None
-        cand_q = select(ShipperCandidate).where(
-            ShipperCandidate.state.in_(lane_states)
-        ).limit(500)
-        if tenant:
-            cand_q = cand_q.where(ShipperCandidate.tenant_id == tenant)
+        # `shipper_finder_service` and require the current tenant context
+        # (resolved at the top of this function — fail closed if missing).
+        cand_q = (
+            select(ShipperCandidate)
+            .where(ShipperCandidate.tenant_id == tenant)
+            .where(ShipperCandidate.state.in_(lane_states))
+            .limit(500)
+        )
         cand_rows = (await session.execute(cand_q)).scalars().all()
         matched = match_shippers_for_post(post, list(cand_rows), top=top)
         shippers = [

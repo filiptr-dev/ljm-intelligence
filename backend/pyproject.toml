@@ -45,6 +45,11 @@ package = false
 line-length = 120
 target-version = "py312"
 
+[tool.ruff.lint.isort]
+# Keep aliased + bare `from X import ...` in a single combined block, so the
+# convention is one import block per module (see review 2026-10-05-capacity-shipper-matches).
+combine-as-imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

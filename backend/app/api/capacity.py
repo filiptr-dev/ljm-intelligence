@@ -16,14 +16,8 @@ from pydantic import BaseModel, Field
 from app.outreach.capacity_service import (
     PostNotFoundError,
     PostRow,
-)
-from app.outreach.capacity_service import (
     create_post as svc_create_post,
-)
-from app.outreach.capacity_service import (
     list_posts as svc_list_posts,
-)
-from app.outreach.capacity_service import (
     suggestions_for_post as svc_suggestions,
 )
 

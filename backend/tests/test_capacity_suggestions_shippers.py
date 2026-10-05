@@ -83,9 +83,10 @@ async def _seed_shipper(sm, *, tenant_id: str = LJM_TENANT_ID, **kw) -> ShipperC
     return row
 
 
-async def _seed_broker(sm, **kw) -> Lead:
+async def _seed_broker(sm, *, tenant_id: str = LJM_TENANT_ID, **kw) -> Lead:
     defaults = {
         "id": "MC-1",
+        "tenant_id": tenant_id,
         "name": "Broker One",
         "kind": "Broker",
         "state": "NJ",
@@ -186,6 +187,85 @@ async def test_broker_items_unchanged_additive_field(client):
     body = r.json()
     assert body["shippers"] == []
     assert any(it["lead_id"] == "MC-1" for it in body["items"])
+
+
+@pytest.mark.asyncio
+async def test_tenant_isolation_broker_leads(client):
+    """Brokers (items) must honour tenant scoping — a different tenant's broker
+    must never surface in our tenant's capacity-post suggestions. Mirrors the
+    shipper-side isolation test; closes the read-side gap flagged in review
+    2026-10-05-capacity-shipper-matches."""
+    sm = client._sm  # type: ignore[attr-defined]
+    post = await _seed_post(sm, id="CP-broker-tenant")
+    # Other-tenant broker on the same lane — must NOT appear.
+    await _seed_broker(
+        sm,
+        id="MC-OTHER-1",
+        tenant_id=OTHER_TENANT,
+        name="Other Tenant Broker",
+        mc="9999",
+    )
+    r = await client.get(f"/capacity/posts/{post.id}/suggestions")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["items"] == []
+    # And an own-tenant broker on the same seeded post still comes through.
+    await _seed_broker(sm, id="MC-OURS-1", name="Our Broker", mc="1111")
+    r2 = await client.get(f"/capacity/posts/{post.id}/suggestions")
+    assert r2.status_code == 200
+    ids = {it["lead_id"] for it in r2.json()["items"]}
+    assert "MC-OURS-1" in ids
+    assert "MC-OTHER-1" not in ids
+
+
+@pytest.mark.asyncio
+async def test_missing_tenant_context_fails_closed():
+    """If `current_tenant()` has nothing in context, suggestions_for_post must
+    raise rather than fall through to an unscoped read. We exercise the service
+    directly (bypassing the HTTP auth dep that would set the tenant) to prove
+    the fail-closed contract — never return other-tenant rows just because the
+    boundary layer forgot to set the ContextVar."""
+    from app.outreach.capacity_service import suggestions_for_post
+    from app.shared.tenant import reset_tenant
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    sm = async_sessionmaker(engine, expire_on_commit=False)
+
+    # Seed a post + a shipper candidate under some tenant so an unscoped read
+    # would clearly leak if the fail-closed guard were missing.
+    async with sm() as s:
+        s.add(
+            CapacityPost(
+                id="CP-no-tenant",
+                kind="truck",
+                equipment="Dry Van",
+                origin_city="Lincoln Park",
+                origin_state="NJ",
+                destinations=["PA"],
+                status="open",
+                tenant_id=LJM_TENANT_ID,
+            )
+        )
+        s.add(
+            ShipperCandidate(
+                id="01LEAK0000000000000000000A",
+                tenant_id=LJM_TENANT_ID,
+                sources=["FMCSA"],
+                name="Would Leak Co",
+                state="NJ",
+            )
+        )
+        await s.commit()
+
+    reset_tenant()
+    try:
+        async with sm() as s:
+            with pytest.raises(RuntimeError):
+                await suggestions_for_post(s, "CP-no-tenant")
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
