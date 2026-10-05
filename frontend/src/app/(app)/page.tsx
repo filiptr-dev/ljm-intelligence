@@ -114,12 +114,27 @@ function HeaderActions({ data }: { data: OverviewToday | null }) {
  * `.catch(() => null)` for graceful degradation — settling preserves
  * both shapes without extra try/catch noise.
  */
-async function OverviewContent({ filters }: { filters: AnalyticsFilters }) {
+async function OverviewContent({
+  filters,
+  kpiPeriodLabel,
+}: {
+  filters: AnalyticsFilters
+  kpiPeriodLabel: string
+}) {
   const [todayRes, inboxRes, kpiRes] = await Promise.allSettled([
     getToday(),
     inbox.overviewKpis(),
     analysis.getOverviewKpi(filtersToQuery(filters)),
   ])
+
+  // Pull `data` early so the PageHeader (moved inside the Suspense
+  // boundary — see the fallback in `OverviewPage`) can hand the real
+  // crawl_now_href / new_post_href to `HeaderActions`. Rendering the
+  // header outside the boundary with `data={null}` permanently dropped
+  // those links; a static placeholder header in the fallback is enough
+  // while we wait for the Render dyno to warm.
+  const dataForHeader: OverviewToday | null =
+    todayRes.status === "fulfilled" ? todayRes.value : null
 
   const data: OverviewToday | null =
     todayRes.status === "fulfilled" ? todayRes.value : null
@@ -171,6 +186,20 @@ async function OverviewContent({ filters }: { filters: AnalyticsFilters }) {
 
   return (
     <>
+      <PageHeader
+        eyebrow="Overview"
+        title="Today"
+        description="Who to call and what to chase today."
+        actions={<HeaderActions data={dataForHeader} />}
+      />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <FilterBar />
+        <span className="text-xs text-muted-foreground">
+          Comparing {kpiPeriodLabel} vs prior period
+        </span>
+      </div>
+
       {error ? (
         <div className="mb-5 rounded-sm border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <div className="flex items-center justify-between gap-3">
@@ -354,24 +383,25 @@ export default async function OverviewPage({
   const kpiPeriodLabel = filters.period === "today" ? "today" : filters.period
 
   return (
-    <>
-      <PageHeader
-        eyebrow="Overview"
-        title="Today"
-        description="Who to call and what to chase today."
-        actions={<HeaderActions data={null} />}
-      />
-
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <FilterBar />
-        <span className="text-xs text-muted-foreground">
-          Comparing {kpiPeriodLabel} vs prior period
-        </span>
-      </div>
-
-      <Suspense fallback={<OverviewSkeleton />}>
-        <OverviewContent filters={filters} />
-      </Suspense>
-    </>
+    <Suspense
+      fallback={
+        <>
+          <PageHeader
+            eyebrow="Overview"
+            title="Today"
+            description="Who to call and what to chase today."
+          />
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <FilterBar />
+            <span className="text-xs text-muted-foreground">
+              Comparing {kpiPeriodLabel} vs prior period
+            </span>
+          </div>
+          <OverviewSkeleton />
+        </>
+      }
+    >
+      <OverviewContent filters={filters} kpiPeriodLabel={kpiPeriodLabel} />
+    </Suspense>
   )
 }
