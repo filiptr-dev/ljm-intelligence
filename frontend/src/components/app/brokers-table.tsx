@@ -1,225 +1,485 @@
 "use client"
 
+/**
+ * Brokers overview table — real-data v2 restore of the pre-ba15198 surface.
+ *
+ * Dense table with segment pills on top, column-click sort with arrow
+ * indicators (user's explicit extra: "when I click on the labels it should be
+ * sorted"), a 12-month activity sparkline, and the real-data next-action
+ * chip from the current list route carried over as the "Suggested action"
+ * column.
+ *
+ * Two columns are deliberately HIDDEN per the operator's plan-gate decision:
+ *   - Revenue  — Load table has no FK to Lead; dashed "—" would misrepresent.
+ *   - Payment issues chip — signal is still computed server-side on
+ *     overview.has_bounce / has_suppression, but we don't render a column.
+ *
+ * Pattern: typed openapi-fetch client in `lib/api/brokers`, no ad-hoc proxies.
+ */
+
 import * as React from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { ArrowDown, ArrowUp, ArrowUpDown, Search, Send } from "lucide-react"
-import { Plate } from "@/components/brand/marks"
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { SEGMENTS, type Segment } from "@/lib/analytics"
-import type { Region } from "@/lib/data/geo"
-import { money, pct } from "@/lib/format"
+import { Label } from "@/components/ui/label"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { HealthPill, Sparkline } from "@/components/app/ui"
 import { cn } from "@/lib/utils"
-import { HealthPill, SEGMENT_COLOR, SegmentBadge, Sparkline } from "./ui"
-import { Segmented } from "./segmented"
+import { pct } from "@/lib/format"
+import {
+  listBrokers,
+  type BrokerRow,
+  type BrokerSegment,
+  type BrokerSortKey,
+  type NextActionKind,
+  type SegmentsCount,
+} from "@/lib/api/brokers"
 
-export type BrokerRow = {
-  id: string
-  name: string
-  region: Region
-  country: string
-  hq: string
-  registration: string
-  contact: string
-  segment: Segment
-  booked: number
-  rejected: number
-  winRate: number
-  revenue: number
-  health: number
-  healthDelta: number
-  daysSinceLast: number
-  monthly: number[]
-  paymentIssues: number
+type SegmentChoice = BrokerSegment | "all"
+
+const SEGMENT_LABEL: Record<SegmentChoice, string> = {
+  all: "All",
+  hot: "Hot",
+  warm: "Warm",
+  payment_issues: "Payment issues",
+  dormant: "Dormant",
+  not_interested: "Not interested",
+  neutral: "Neutral",
 }
 
-const SORTS: Record<string, { label: string; fn: (a: BrokerRow, b: BrokerRow) => number }> = {
-  health: { label: "Health score", fn: (a, b) => b.health - a.health },
-  loads: { label: "Loads booked", fn: (a, b) => b.booked - a.booked },
-  rejections: { label: "Most rejections", fn: (a, b) => b.rejected - a.rejected },
-  recent: { label: "Last contact", fn: (a, b) => a.daysSinceLast - b.daysSinceLast },
-  payment: { label: "Overdue invoices", fn: (a, b) => b.paymentIssues - a.paymentIssues || b.booked - a.booked },
+const SEGMENT_ORDER: SegmentChoice[] = [
+  "all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral",
+]
+
+const SEGMENT_DOT: Record<SegmentChoice, string> = {
+  all: "var(--muted-foreground)",
+  hot: "var(--bad)",
+  warm: "var(--chart-2)",
+  payment_issues: "var(--warn)",
+  dormant: "var(--steel)",
+  not_interested: "var(--muted)",
+  neutral: "var(--chart-1)",
 }
 
-type HeaderKey = "name" | "health" | "loads" | "winRate" | "revenue" | "recent"
-type HeaderSort = { key: HeaderKey; dir: "desc" | "asc" }
-
-/** 1st click "desc" = the most useful direction (A→Z for names, most-recent for last contact, highest→lowest for numerics). */
-const HEADER_SORTS: Record<HeaderKey, { desc: (a: BrokerRow, b: BrokerRow) => number; asc: (a: BrokerRow, b: BrokerRow) => number }> = {
-  name: {
-    desc: (a, b) => a.name.localeCompare(b.name),
-    asc: (a, b) => b.name.localeCompare(a.name),
-  },
-  health: { desc: (a, b) => b.health - a.health, asc: (a, b) => a.health - b.health },
-  loads: { desc: (a, b) => b.booked - a.booked, asc: (a, b) => a.booked - b.booked },
-  winRate: { desc: (a, b) => b.winRate - a.winRate, asc: (a, b) => a.winRate - b.winRate },
-  revenue: { desc: (a, b) => b.revenue - a.revenue, asc: (a, b) => a.revenue - b.revenue },
-  // "most recent first" = smallest daysSinceLast first
-  recent: { desc: (a, b) => a.daysSinceLast - b.daysSinceLast, asc: (a, b) => b.daysSinceLast - a.daysSinceLast },
+const ACTION_LABEL: Record<NextActionKind, string> = {
+  call: "Call", email: "Email", follow_up: "Follow up", wait: "Wait",
+}
+const ACTION_STYLE: Record<NextActionKind, string> = {
+  call: "bg-bad text-white",
+  email: "bg-chart-2 text-white",
+  follow_up: "bg-warn text-asphalt",
+  wait: "bg-muted text-muted-foreground",
 }
 
 const ACTIVITY_MONTHS = [12, 7, 3] as const
 type ActivityMonths = (typeof ACTIVITY_MONTHS)[number]
 
-export function BrokersTable({ rows, initialSegment, initialSort }: { rows: BrokerRow[]; initialSegment: string; initialSort: string }) {
-  const router = useRouter()
-  const [segment, setSegment] = React.useState<string>(initialSegment)
-  const [q, setQ] = React.useState("")
-  const [sort, setSort] = React.useState(SORTS[initialSort] ? initialSort : "health")
-  const [headerSort, setHeaderSort] = React.useState<HeaderSort | null>(null)
-  const [activityMonths, setActivityMonths] = React.useState<ActivityMonths>(12)
-  const [selected, setSelected] = React.useState<Set<string>>(new Set())
+type SortDir = "asc" | "desc"
+type HeaderSort = { key: BrokerSortKey; dir: SortDir }
 
-  const filtered = React.useMemo(
-    () => {
-      const base = rows
-        .filter((r) => segment === "All" || r.segment === segment)
-        .filter((r) => !q || `${r.name} ${r.hq} ${r.contact} ${r.registration}`.toLowerCase().includes(q.toLowerCase()))
-      const fn = headerSort ? HEADER_SORTS[headerSort.key][headerSort.dir] : SORTS[sort].fn
-      return base.sort(fn)
+/** Default direction when a header is first clicked. "Health 100 → 0" is more
+ * useful than ascending; "Days since 0 → N" (most-recent first) is likewise.
+ * Encoded so the SortHeader stays simple. */
+const DEFAULT_DIR: Record<BrokerSortKey, SortDir> = {
+  health: "desc",
+  win_rate: "desc",
+  booked: "desc",
+  rejected: "desc",
+  days_since: "asc",
+  name: "asc",
+}
+
+export function BrokersTable() {
+  const [rows, setRows] = React.useState<BrokerRow[]>([])
+  const [total, setTotal] = React.useState(0)
+  const [segmentsCount, setSegmentsCount] = React.useState<SegmentsCount | null>(null)
+  const [cursor, setCursor] = React.useState<string | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [loadingMore, setLoadingMore] = React.useState(false)
+
+  const [segment, setSegment] = React.useState<SegmentChoice>("all")
+  const [action, setAction] = React.useState<NextActionKind | "all">("all")
+  const [state, setState] = React.useState("")
+  const [minFit, setMinFit] = React.useState(0)
+  const [hasEmail, setHasEmail] = React.useState(false)
+  const [hasPhone, setHasPhone] = React.useState(false)
+  const [q, setQ] = React.useState("")
+
+  const [headerSort, setHeaderSort] = React.useState<HeaderSort | null>({ key: "health", dir: "desc" })
+  const [activityMonths, setActivityMonths] = React.useState<ActivityMonths>(12)
+  const [exporting, setExporting] = React.useState(false)
+
+  // Server-side sort / segment via query params; we rely on the backend's
+  // deterministic order so "load more" pagination stays stable.
+  const load = React.useCallback(
+    async (append: boolean, cursorOverride?: string | null) => {
+      if (append) setLoadingMore(true)
+      else setLoading(true)
+      try {
+        const data = await listBrokers({
+          state: state || undefined,
+          min_fit: minFit > 0 ? minFit : undefined,
+          has_email: hasEmail || undefined,
+          has_phone: hasPhone || undefined,
+          next_action: action === "all" ? undefined : action,
+          q: q.trim() || undefined,
+          cursor: append ? (cursorOverride ?? undefined) : undefined,
+          limit: 50,
+          include: "overview_metrics",
+          segment,
+          sort: headerSort?.key,
+        })
+        setRows((prev) => (append ? [...prev, ...data.items] : data.items))
+        setCursor(data.next_cursor ?? null)
+        setTotal(data.total)
+        setSegmentsCount(data.segments_count ?? null)
+      } catch (e) {
+        toast.error("Couldn't load brokers", { description: String(e) })
+      } finally {
+        setLoading(false)
+        setLoadingMore(false)
+      }
     },
-    [rows, segment, q, sort, headerSort],
+    [state, minFit, hasEmail, hasPhone, action, q, segment, headerSort],
   )
 
-  // 1st click: desc. 2nd: asc. 3rd: clear (back to default Select sort).
-  const cycleHeader = (key: HeaderKey) => {
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, minFit, hasEmail, hasPhone, action, segment, headerSort])
+
+  // Client-side search filter — tiny over a 50-row page; keeps the UX snappy
+  // without a server round-trip on every keystroke.
+  const shown = React.useMemo(() => {
+    if (!q.trim()) return rows
+    const needle = q.toLowerCase()
+    return rows.filter((r) =>
+      [r.name, r.mc ?? "", r.dot ?? "", r.city ?? "", r.state].some((f) =>
+        f.toLowerCase().includes(needle),
+      ),
+    )
+  }, [rows, q])
+
+  // 1st click: default dir. 2nd: flip. 3rd: clear (back to server default).
+  const cycleHeader = (key: BrokerSortKey) => {
     setHeaderSort((cur) => {
-      if (!cur || cur.key !== key) return { key, dir: "desc" }
-      if (cur.dir === "desc") return { key, dir: "asc" }
-      return null
+      if (!cur || cur.key !== key) return { key, dir: DEFAULT_DIR[key] }
+      const flipped = cur.dir === "asc" ? "desc" : "asc"
+      if (flipped === DEFAULT_DIR[key]) return null
+      return { key, dir: flipped }
     })
   }
 
-  const onSelectSort = (v: string | null) => {
-    setSort(v ?? "health")
-    setHeaderSort(null) // Select takes over; clear the header override.
+  // Client-side flip for the "asc" direction — the backend always returns a
+  // sort DIRECTION of descending-good (health high→low, days-since low→high);
+  // if the user wants the inverse, we just reverse the array on the client.
+  const sorted = React.useMemo(() => {
+    if (!headerSort) return shown
+    if (headerSort.dir === DEFAULT_DIR[headerSort.key]) return shown
+    return [...shown].reverse()
+  }, [shown, headerSort])
+
+  const downloadCsv = async () => {
+    setExporting(true)
+    try {
+      const qs = new URLSearchParams()
+      if (segment && segment !== "all") qs.set("segment", segment)
+      if (state) qs.set("state", state)
+      if (minFit > 0) qs.set("min_fit", String(minFit))
+      if (hasEmail) qs.set("has_email", "true")
+      if (hasPhone) qs.set("has_phone", "true")
+      if (action !== "all") qs.set("next_action", action)
+      if (q.trim()) qs.set("q", q.trim())
+      if (headerSort) qs.set("sort", headerSort.key)
+      const res = await fetch(`/api/proxy/brokers.csv?${qs.toString()}`)
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `brokers-${segment}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      toast.error("CSV export failed", { description: String(e) })
+    } finally {
+      setExporting(false)
+    }
   }
-
-  const counts = React.useMemo(() => {
-    const c: Record<string, number> = { All: rows.length }
-    rows.forEach((r) => (c[r.segment] = (c[r.segment] ?? 0) + 1))
-    return c
-  }, [rows])
-
-  const toggle = (id: string) =>
-    setSelected((s) => {
-      const n = new Set(s)
-      if (n.has(id)) n.delete(id)
-      else n.add(id)
-      return n
-    })
-  const allOn = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
 
   return (
     <div className="rounded-sm border border-border bg-card">
+      {/* ---- Segment pills --------------------------------------------- */}
       <div className="flex flex-wrap gap-1 border-b border-border p-2">
-        {["All", ...SEGMENTS].map((sg) => (
-          <button
-            key={sg}
-            onClick={() => setSegment(sg)}
-            className={cn(
-              "flex h-8 items-center gap-2 rounded-sm px-3 text-sm font-medium transition-colors",
-              segment === sg ? "bg-asphalt text-white" : "hover:bg-muted",
-            )}
-          >
-            {sg !== "All" ? <span className="size-2 rounded-[2px]" style={{ background: SEGMENT_COLOR[sg as Segment] }} /> : null}
-            {sg}
-            <span className={cn("num font-mono text-xs", segment === sg ? "text-[#b9bcc2]" : "text-muted-foreground")}>{counts[sg] ?? 0}</span>
-          </button>
-        ))}
+        {SEGMENT_ORDER.map((sg) => {
+          const n = segmentsCount?.[sg] ?? (sg === "all" ? total : 0)
+          return (
+            <button
+              key={sg}
+              type="button"
+              onClick={() => setSegment(sg)}
+              className={cn(
+                "flex h-8 items-center gap-2 rounded-sm px-3 text-sm font-medium transition-colors",
+                segment === sg ? "bg-asphalt text-white" : "hover:bg-muted",
+              )}
+            >
+              {sg !== "all" ? (
+                <span className="size-2 rounded-[2px]" style={{ background: SEGMENT_DOT[sg] }} aria-hidden />
+              ) : null}
+              {SEGMENT_LABEL[sg]}
+              <span
+                className={cn(
+                  "num font-mono text-xs",
+                  segment === sg ? "text-[#b9bcc2]" : "text-muted-foreground",
+                )}
+              >
+                {n}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
+      {/* ---- Filter bar ------------------------------------------------ */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
         <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search broker, city, MC / VAT…" className="pl-8" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search broker, city, MC / DOT…"
+            className="pl-8"
+            aria-label="Search brokers"
+          />
         </div>
-        <Select value={sort} onValueChange={onSelectSort}>
-          <SelectTrigger className="w-48">
-            <span className="text-muted-foreground">Sort:</span>{" "}
-            <SelectValue>{headerSort ? "Custom" : SORTS[sort].label}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(SORTS).map(([k, v]) => (
-              <SelectItem key={k} value={k}>{v.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">{filtered.length} brokers</span>
+        <div className="flex items-end gap-2">
+          <div>
+            <Label htmlFor="state" className="text-[0.68rem] text-muted-foreground">State</Label>
+            <Input
+              id="state"
+              maxLength={2}
+              value={state}
+              onChange={(e) => setState(e.target.value.toUpperCase())}
+              placeholder="NJ"
+              className="w-16"
+            />
+          </div>
+          <div>
+            <Label htmlFor="min-fit" className="text-[0.68rem] text-muted-foreground">Min fit</Label>
+            <Input
+              id="min-fit"
+              type="number"
+              min={0}
+              max={100}
+              value={minFit}
+              onChange={(e) => setMinFit(Number(e.target.value) || 0)}
+              className="w-16"
+            />
+          </div>
+          <label className="flex items-center gap-1 pb-1 text-xs">
+            <input type="checkbox" checked={hasPhone} onChange={(e) => setHasPhone(e.target.checked)} />
+            Phone
+          </label>
+          <label className="flex items-center gap-1 pb-1 text-xs">
+            <input type="checkbox" checked={hasEmail} onChange={(e) => setHasEmail(e.target.checked)} />
+            Email
+          </label>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">{total} brokers</span>
           <Button
-            disabled={!selected.size}
-            onClick={() => router.push(`/outreach?audience=existing&ids=${[...selected].join(",")}&campaign=reengage`)}
-            className="font-semibold"
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void downloadCsv()}
+            disabled={exporting || total === 0}
           >
-            <Send /> Email {selected.size || ""} selected
+            <Download className="size-4" /> {exporting ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>
 
+      {/* ---- Next-action chip filters (secondary row) ----------------- */}
+      <div className="flex flex-wrap gap-1 border-b border-border px-3 py-2">
+        {(["all", "call", "email", "follow_up", "wait"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setAction(k)}
+            className={cn(
+              "inline-flex h-7 items-center rounded-[3px] border px-2 text-[0.7rem] font-semibold tracking-wide uppercase transition",
+              action === k ? "border-asphalt bg-asphalt text-white" : "border-border bg-background hover:bg-muted",
+            )}
+          >
+            {k === "all" ? "All actions" : ACTION_LABEL[k]}
+          </button>
+        ))}
+      </div>
+
+      {/* ---- Table ----------------------------------------------------- */}
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-10 pl-4">
-              <Checkbox
-                checked={allOn}
-                onCheckedChange={(v) => setSelected(v ? new Set(filtered.map((r) => r.id)) : new Set())}
-                aria-label="Select all"
-              />
+            <TableHead>
+              <SortHeader label="Broker" k="name" headerSort={headerSort} onClick={cycleHeader} />
             </TableHead>
-            <TableHead><SortHeader label="Broker" k="name" headerSort={headerSort} onClick={cycleHeader} /></TableHead>
-            <TableHead>Segment</TableHead>
-            <TableHead><SortHeader label="Health" k="health" headerSort={headerSort} onClick={cycleHeader} /></TableHead>
-            <TableHead className="text-right"><SortHeader label="Loads" k="loads" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
-            <TableHead className="text-right"><SortHeader label="Win rate" k="winRate" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
-            <TableHead className="text-right"><SortHeader label="Revenue" k="revenue" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
-            <TableHead className="text-right"><SortHeader label="Last contact" k="recent" headerSort={headerSort} onClick={cycleHeader} align="right" /></TableHead>
-            <TableHead className="pr-4">
+            <TableHead>
+              <SortHeader label="Health" k="health" headerSort={headerSort} onClick={cycleHeader} />
+            </TableHead>
+            <TableHead className="text-right">
+              <SortHeader label="Win rate" k="win_rate" headerSort={headerSort} onClick={cycleHeader} align="right" />
+            </TableHead>
+            <TableHead className="text-right">
+              <SortHeader label="Booked" k="booked" headerSort={headerSort} onClick={cycleHeader} align="right" />
+            </TableHead>
+            <TableHead className="text-right">
+              <SortHeader label="Rejected" k="rejected" headerSort={headerSort} onClick={cycleHeader} align="right" />
+            </TableHead>
+            <TableHead className="text-right">
+              <SortHeader label="Days since" k="days_since" headerSort={headerSort} onClick={cycleHeader} align="right" />
+            </TableHead>
+            <TableHead className="pr-2">
               <div className="flex items-center justify-between gap-2">
                 <span>{activityMonths}-month activity</span>
-                <Segmented
-                  value={String(activityMonths) as "12" | "7" | "3"}
-                  onChange={(v) => setActivityMonths(Number(v) as ActivityMonths)}
-                  options={ACTIVITY_MONTHS.map((m) => ({ value: String(m) as "12" | "7" | "3", label: String(m) }))}
-                  className="h-6 p-0.5"
-                />
+                <div className="inline-flex overflow-hidden rounded-sm border border-border bg-background">
+                  {ACTIVITY_MONTHS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setActivityMonths(m)}
+                      className={cn(
+                        "px-1.5 text-[0.65rem] font-medium",
+                        m === activityMonths ? "bg-asphalt text-white" : "hover:bg-muted",
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
               </div>
             </TableHead>
+            <TableHead>Suggested action</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.map((r) => (
-            <TableRow key={r.id} data-state={selected.has(r.id) ? "selected" : undefined} className="data-[state=selected]:bg-accent">
-              <TableCell className="pl-4">
-                <Checkbox checked={selected.has(r.id)} onCheckedChange={() => toggle(r.id)} aria-label={`Select ${r.name}`} />
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
+                Loading real broker leads…
               </TableCell>
-              <TableCell className="max-w-[320px]">
-                <Link href={`/brokers/${r.id}`} className="block truncate font-semibold hover:underline">{r.name}</Link>
-                <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Plate region={r.region} value={r.registration.replace(/^[A-Z]{2}(?=\d)/, "")} country={r.country} className="scale-90 origin-left" />
-                  <span className="truncate">{r.hq} · {r.contact}</span>
-                </div>
-              </TableCell>
-              <TableCell><SegmentBadge segment={r.segment} /></TableCell>
-              <TableCell><HealthPill value={r.health} delta={r.healthDelta} /></TableCell>
-              <TableCell className="num text-right font-mono">{r.booked}</TableCell>
-              <TableCell className="num text-right font-mono">{r.booked + r.rejected ? pct(r.winRate) : "–"}</TableCell>
-              <TableCell className="num text-right font-mono">{money(r.revenue, r.region, true)}</TableCell>
-              <TableCell className={cn("num text-right font-mono", r.daysSinceLast > 90 && "text-bad")}>{r.daysSinceLast}d</TableCell>
-              <TableCell className="pr-4"><Sparkline values={r.monthly.slice(-activityMonths)} color={SEGMENT_COLOR[r.segment]} /></TableCell>
             </TableRow>
-          ))}
+          ) : sorted.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
+                Nothing matches these filters. Clear them or run the FMCSA crawler to pull in fresh rows.
+              </TableCell>
+            </TableRow>
+          ) : (
+            sorted.map((r) => {
+              const om = r.overview ?? null
+              const series = om
+                ? om.monthly_series.slice(-activityMonths).map((p) => p.booked + p.rejected)
+                : [0, 0, 0]
+              return (
+                <TableRow key={r.id}>
+                  <TableCell className="max-w-[320px]">
+                    <Link
+                      href={`/brokers/${encodeURIComponent(r.id)}`}
+                      className="block truncate font-semibold hover:underline"
+                    >
+                      {r.name}
+                    </Link>
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-mono">
+                        {r.mc ? `MC-${r.mc}` : r.dot ? `DOT-${r.dot}` : "—"}
+                      </span>
+                      <span className="truncate">
+                        {r.city ? `${r.city}, ` : ""}
+                        {r.state}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {om ? (
+                      <HealthPill
+                        value={om.health_score}
+                        delta={om.health_delta ?? undefined}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="num text-right font-mono">
+                    {om && om.win_rate !== null && om.win_rate !== undefined
+                      ? pct(om.win_rate)
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="num text-right font-mono">
+                    {om ? om.booked_12m : "—"}
+                  </TableCell>
+                  <TableCell className="num text-right font-mono">
+                    {om ? om.rejected_12m : "—"}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "num text-right font-mono",
+                      om && om.days_since_last_contact !== null && om.days_since_last_contact !== undefined && om.days_since_last_contact > 90 && "text-bad",
+                    )}
+                  >
+                    {om && om.days_since_last_contact !== null && om.days_since_last_contact !== undefined
+                      ? `${om.days_since_last_contact}d`
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="pr-2">
+                    <Sparkline values={series.length ? series : [0]} />
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-[3px] px-2 py-0.5 text-[0.68rem] font-bold tracking-wider uppercase",
+                        ACTION_STYLE[r.next_action.kind],
+                      )}
+                      title={r.next_action.reason}
+                    >
+                      {ACTION_LABEL[r.next_action.kind]}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              )
+            })
+          )}
         </TableBody>
       </Table>
+
+      {cursor ? (
+        <div className="flex justify-center border-t border-border p-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loadingMore}
+            onClick={() => void load(true, cursor)}
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
 
-/** Clickable / keyboardable sort header. Renders a real <button> so tab + enter/space work. */
+/** Clickable, keyboardable sort header — real <button> so tab + enter/space
+ * work. The arrow icon is ArrowUpDown when inactive, ArrowDown/ArrowUp when
+ * active. */
 function SortHeader({
   label,
   k,
@@ -228,15 +488,17 @@ function SortHeader({
   align = "left",
 }: {
   label: string
-  k: HeaderKey
+  k: BrokerSortKey
   headerSort: HeaderSort | null
-  onClick: (k: HeaderKey) => void
+  onClick: (k: BrokerSortKey) => void
   align?: "left" | "right"
 }) {
   const active = headerSort?.key === k
   const dir = active ? headerSort!.dir : null
   const Icon = dir === "desc" ? ArrowDown : dir === "asc" ? ArrowUp : ArrowUpDown
-  const ariaLabel = dir ? `${label}, sorted ${dir === "desc" ? "descending" : "ascending"}` : `${label}, click to sort`
+  const ariaLabel = dir
+    ? `${label}, sorted ${dir === "desc" ? "descending" : "ascending"}`
+    : `${label}, click to sort`
   return (
     <button
       type="button"

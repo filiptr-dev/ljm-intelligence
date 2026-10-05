@@ -444,6 +444,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/brokers.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Brokers Csv
+         * @description CSV export of the current overview — flat columns matching the restored
+         *     table. Writes the full result set (no cursor paging) so ops teams can pull
+         *     one segment at a time without clicking "Load more".
+         */
+        get: operations["export_brokers_csv_brokers_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/brokers/{broker_id}": {
         parameters: {
             query?: never;
@@ -1808,6 +1830,7 @@ export interface components {
             next_action: components["schemas"]["NextActionOut"];
             /** Last Activity At */
             last_activity_at?: string | null;
+            overview?: components["schemas"]["OverviewMetricsOut"] | null;
             address: components["schemas"]["ContactFieldOut"];
             /** Linkedin Company Url */
             linkedin_company_url?: string | null;
@@ -1823,6 +1846,7 @@ export interface components {
             /** Activity */
             activity: (components["schemas"]["ActivityCallOut"] | components["schemas"]["ActivityEmailOut"])[];
             summary: components["schemas"]["BrokerSummaryOut"];
+            overview_metrics?: components["schemas"]["OverviewMetricsOut"] | null;
         };
         /** BrokerKpiOut */
         BrokerKpiOut: {
@@ -1845,6 +1869,7 @@ export interface components {
             next_cursor?: string | null;
             /** Total */
             total: number;
+            segments_count?: components["schemas"]["SegmentsCountOut"] | null;
         };
         /** BrokerPredictionOut */
         BrokerPredictionOut: {
@@ -1893,6 +1918,7 @@ export interface components {
             next_action: components["schemas"]["NextActionOut"];
             /** Last Activity At */
             last_activity_at?: string | null;
+            overview?: components["schemas"]["OverviewMetricsOut"] | null;
         };
         /** BrokerSummaryOut */
         BrokerSummaryOut: {
@@ -2988,6 +3014,19 @@ export interface components {
             /** Rejected */
             rejected: number;
         };
+        /** MonthlyPointOut */
+        MonthlyPointOut: {
+            /** Month */
+            month: string;
+            /** Booked */
+            booked: number;
+            /** Rejected */
+            rejected: number;
+            /** Sent */
+            sent: number;
+            /** Replied */
+            replied: number;
+        };
         /** NamedContactOut */
         NamedContactOut: {
             /** Id */
@@ -3126,6 +3165,52 @@ export interface components {
             /** Tiles */
             tiles: components["schemas"]["KpiBlockOut"][];
             booked_vs_rejected: components["schemas"]["BookedVsRejectedOut"];
+        };
+        /** OverviewMetricsOut */
+        OverviewMetricsOut: {
+            /** Health Score */
+            health_score: number;
+            /** Health Delta */
+            health_delta?: number | null;
+            /** Health Thin */
+            health_thin: boolean;
+            /** Health Components */
+            health_components: {
+                [key: string]: number;
+            };
+            /** Win Rate */
+            win_rate?: number | null;
+            /** Win Rate Thin */
+            win_rate_thin: boolean;
+            /** Booked 12M */
+            booked_12m: number;
+            /** Rejected 12M */
+            rejected_12m: number;
+            /** Sent 30D */
+            sent_30d: number;
+            /** Replied 30D */
+            replied_30d: number;
+            /** Reply Rate */
+            reply_rate?: number | null;
+            /** Avg Reply Hours */
+            avg_reply_hours?: number | null;
+            /** Tone 30D */
+            tone_30d?: number | null;
+            /** Has Bounce */
+            has_bounce: boolean;
+            /** Has Suppression */
+            has_suppression: boolean;
+            /** Monthly Series */
+            monthly_series: components["schemas"]["MonthlyPointOut"][];
+            /** Last Contact At */
+            last_contact_at?: string | null;
+            /** Days Since Last Contact */
+            days_since_last_contact?: number | null;
+            /**
+             * Segment
+             * @enum {string}
+             */
+            segment: "all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral";
         };
         /** OverviewTodayOut */
         OverviewTodayOut: {
@@ -3388,6 +3473,44 @@ export interface components {
              * @default
              */
             brief: string;
+        };
+        /** SegmentsCountOut */
+        SegmentsCountOut: {
+            /**
+             * All
+             * @default 0
+             */
+            all: number;
+            /**
+             * Hot
+             * @default 0
+             */
+            hot: number;
+            /**
+             * Warm
+             * @default 0
+             */
+            warm: number;
+            /**
+             * Payment Issues
+             * @default 0
+             */
+            payment_issues: number;
+            /**
+             * Dormant
+             * @default 0
+             */
+            dormant: number;
+            /**
+             * Not Interested
+             * @default 0
+             */
+            not_interested: number;
+            /**
+             * Neutral
+             * @default 0
+             */
+            neutral: number;
         };
         /** SendIn */
         SendIn: {
@@ -4785,6 +4908,10 @@ export interface operations {
                 q?: string | null;
                 limit?: number;
                 cursor?: string | null;
+                /** @description Comma-sep. 'overview_metrics' adds the per-row overview block + segments_count. */
+                include?: string | null;
+                segment?: ("all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral") | null;
+                sort?: ("health" | "win_rate" | "booked" | "rejected" | "days_since" | "name") | null;
             };
             header?: {
                 authorization?: string | null;
@@ -4801,6 +4928,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrokerListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_brokers_csv_brokers_csv_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                min_fit?: number | null;
+                has_email?: boolean | null;
+                has_phone?: boolean | null;
+                next_action?: ("call" | "email" | "follow_up" | "wait") | null;
+                q?: string | null;
+                segment?: ("all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral") | null;
+                sort?: ("health" | "win_rate" | "booked" | "rejected" | "days_since" | "name") | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -15,6 +15,11 @@ export type NamedContact = components["schemas"]["NamedContactOut"]
 export type BrokerRow = components["schemas"]["BrokerRowOut"]
 export type BrokerList = components["schemas"]["BrokerListOut"]
 export type BrokerDetail = components["schemas"]["BrokerDetailOut"]
+export type OverviewMetrics = components["schemas"]["OverviewMetricsOut"]
+export type MonthlyPoint = components["schemas"]["MonthlyPointOut"]
+export type SegmentsCount = components["schemas"]["SegmentsCountOut"]
+export type BrokerSegment = NonNullable<OverviewMetrics>["segment"]
+export type BrokerSortKey = "health" | "win_rate" | "booked" | "rejected" | "days_since" | "name"
 export type ActivityEvent =
   | components["schemas"]["ActivityCallOut"]
   | components["schemas"]["ActivityEmailOut"]
@@ -33,6 +38,9 @@ export type ListBrokersQuery = {
   q?: string
   cursor?: string
   limit?: number
+  include?: string
+  segment?: BrokerSegment | "all"
+  sort?: BrokerSortKey
 }
 
 function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path: string): T {

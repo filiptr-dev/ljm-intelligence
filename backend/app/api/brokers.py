@@ -26,6 +26,7 @@ from app.prospecting.brokers_service import (
     ContactField,
     NamedContactRow,
     NotFoundError,
+    OverviewMetricsRow,
     get_activity_page as svc_get_activity_page,
     get_detail as svc_get_detail,
     get_objections as svc_get_objections,
@@ -63,6 +64,38 @@ class NamedContactOut(BaseModel):
     linkedin_url: str | None = None
 
 
+class MonthlyPointOut(BaseModel):
+    month: str
+    booked: int
+    rejected: int
+    sent: int
+    replied: int
+
+
+class OverviewMetricsOut(BaseModel):
+    health_score: int
+    health_delta: int | None = None
+    health_thin: bool
+    health_components: dict[str, float]
+    win_rate: float | None = None
+    win_rate_thin: bool
+    booked_12m: int
+    rejected_12m: int
+    sent_30d: int
+    replied_30d: int
+    reply_rate: float | None = None
+    avg_reply_hours: float | None = None
+    tone_30d: float | None = None
+    has_bounce: bool
+    has_suppression: bool
+    monthly_series: list[MonthlyPointOut]
+    last_contact_at: str | None = None
+    days_since_last_contact: int | None = None
+    segment: Literal[
+        "all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral"
+    ]
+
+
 class BrokerRowOut(BaseModel):
     id: str
     name: str
@@ -75,12 +108,26 @@ class BrokerRowOut(BaseModel):
     fit_score: int | None = None
     next_action: NextActionOut
     last_activity_at: str | None = None
+    # Opt-in via ?include=overview_metrics on GET /brokers. None otherwise so
+    # the default list payload stays byte-identical to pre-overview callers.
+    overview: OverviewMetricsOut | None = None
+
+
+class SegmentsCountOut(BaseModel):
+    all: int = 0
+    hot: int = 0
+    warm: int = 0
+    payment_issues: int = 0
+    dormant: int = 0
+    not_interested: int = 0
+    neutral: int = 0
 
 
 class BrokerListOut(BaseModel):
     items: list[BrokerRowOut]
     next_cursor: str | None = None
     total: int
+    segments_count: SegmentsCountOut | None = None
 
 
 class ActivityCallOut(BaseModel):
@@ -166,6 +213,7 @@ class BrokerDetailOut(BaseModel):
     broker: BrokerDetailBody
     activity: list[ActivityCallOut | ActivityEmailOut]
     summary: BrokerSummaryOut
+    overview_metrics: OverviewMetricsOut | None = None
 
 
 # ---------- cursor helpers --------------------------------------------------
@@ -192,7 +240,34 @@ def _field_out(f: ContactField) -> ContactFieldOut:
     return ContactFieldOut(**f.__dict__)
 
 
-def _row_out(r: BrokerRowData) -> BrokerRowOut:
+def _overview_out(om: OverviewMetricsRow) -> OverviewMetricsOut:
+    return OverviewMetricsOut(
+        health_score=om.health_score,
+        health_delta=om.health_delta,
+        health_thin=om.health_thin,
+        health_components=om.health_components,
+        win_rate=om.win_rate,
+        win_rate_thin=om.win_rate_thin,
+        booked_12m=om.booked_12m,
+        rejected_12m=om.rejected_12m,
+        sent_30d=om.sent_30d,
+        replied_30d=om.replied_30d,
+        reply_rate=om.reply_rate,
+        avg_reply_hours=om.avg_reply_hours,
+        tone_30d=om.tone_30d,
+        has_bounce=om.has_bounce,
+        has_suppression=om.has_suppression,
+        monthly_series=[
+            MonthlyPointOut(month=p.month, booked=p.booked, rejected=p.rejected, sent=p.sent, replied=p.replied)
+            for p in om.monthly_series
+        ],
+        last_contact_at=om.last_contact_at,
+        days_since_last_contact=om.days_since_last_contact,
+        segment=om.segment,  # type: ignore[arg-type]
+    )
+
+
+def _row_out(r: BrokerRowData, overview: OverviewMetricsRow | None = None) -> BrokerRowOut:
     return BrokerRowOut(
         id=r.id,
         name=r.name,
@@ -209,6 +284,7 @@ def _row_out(r: BrokerRowData) -> BrokerRowOut:
             due_at=r.next_action.due_at,
         ),
         last_activity_at=r.last_activity_at,
+        overview=_overview_out(overview) if overview is not None else None,
     )
 
 
@@ -252,7 +328,13 @@ async def list_brokers(
     q: str | None = Query(default=None, max_length=128),
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = Query(default=None),
+    include: str | None = Query(default=None, description="Comma-sep. 'overview_metrics' adds the per-row overview block + segments_count."),
+    segment: Literal["all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral"] | None = Query(default=None),
+    sort: Literal["health", "win_rate", "booked", "rejected", "days_since", "name"] | None = Query(default=None),
 ) -> BrokerListOut:
+    include_set = {s.strip() for s in (include or "").split(",") if s.strip()}
+    include_overview = "overview_metrics" in include_set
+
     result = await svc_list_brokers(
         request.app.state.sessionmaker,
         state=state,
@@ -261,6 +343,9 @@ async def list_brokers(
         has_phone=has_phone,
         next_action=next_action,
         q=q,
+        include_overview=include_overview,
+        segment=segment if include_overview else None,
+        sort=sort if include_overview else None,
     )
 
     # Cursor is the lead id to start AFTER.
@@ -278,10 +363,97 @@ async def list_brokers(
         last_id = result.sort_keys[start + limit - 1][3]
         next_cursor = _encode_cursor(last_id)
 
+    seg_count_out: SegmentsCountOut | None = None
+    if include_overview and result.overview_segments_count:
+        seg_count_out = SegmentsCountOut(**result.overview_segments_count)
+
     return BrokerListOut(
-        items=[_row_out(r) for r in page],
+        items=[
+            _row_out(r, result.overview.get(r.id) if include_overview else None)
+            for r in page
+        ],
         next_cursor=next_cursor,
         total=result.total,
+        segments_count=seg_count_out,
+    )
+
+
+# ---------- GET /brokers.csv ----------------------------------------------
+
+
+@router.get(".csv")
+async def export_brokers_csv(
+    request: Request,
+    state: str | None = Query(default=None, min_length=2, max_length=2),
+    min_fit: int | None = Query(default=None, ge=0, le=100),
+    has_email: bool | None = Query(default=None),
+    has_phone: bool | None = Query(default=None),
+    next_action: Literal["call", "email", "follow_up", "wait"] | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=128),
+    segment: Literal["all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral"] | None = Query(default=None),
+    sort: Literal["health", "win_rate", "booked", "rejected", "days_since", "name"] | None = Query(default=None),
+):
+    """CSV export of the current overview — flat columns matching the restored
+    table. Writes the full result set (no cursor paging) so ops teams can pull
+    one segment at a time without clicking "Load more"."""
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import StreamingResponse
+
+    result = await svc_list_brokers(
+        request.app.state.sessionmaker,
+        state=state,
+        min_fit=min_fit,
+        has_email=has_email,
+        has_phone=has_phone,
+        next_action=next_action,
+        q=q,
+        include_overview=True,
+        segment=segment,
+        sort=sort,
+    )
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(
+        [
+            "id", "name", "mc", "dot", "state", "city",
+            "health_score", "health_delta", "win_rate",
+            "booked_12m", "rejected_12m",
+            "sent_30d", "replied_30d", "reply_rate", "avg_reply_hours",
+            "days_since_last_contact", "segment",
+            "has_bounce", "has_suppression",
+            "next_action_kind", "next_action_reason",
+            "phone", "primary_email",
+        ]
+    )
+    for r in result.items:
+        om = result.overview.get(r.id)
+        w.writerow(
+            [
+                r.id, r.name, r.mc or "", r.dot or "", r.state, r.city or "",
+                om.health_score if om else "",
+                om.health_delta if om and om.health_delta is not None else "",
+                f"{om.win_rate:.4f}" if om and om.win_rate is not None else "",
+                om.booked_12m if om else "",
+                om.rejected_12m if om else "",
+                om.sent_30d if om else "",
+                om.replied_30d if om else "",
+                f"{om.reply_rate:.4f}" if om and om.reply_rate is not None else "",
+                f"{om.avg_reply_hours:.2f}" if om and om.avg_reply_hours is not None else "",
+                om.days_since_last_contact if om and om.days_since_last_contact is not None else "",
+                om.segment if om else "",
+                "1" if om and om.has_bounce else "0",
+                "1" if om and om.has_suppression else "0",
+                r.next_action.kind, r.next_action.reason,
+                r.phone.value or "", r.primary_email.value or "",
+            ]
+        )
+    buf.seek(0)
+    filename = f"brokers-{segment or 'all'}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -322,6 +494,11 @@ async def get_broker(request: Request, broker_id: str) -> BrokerDetailOut:
         broker=detail,
         activity=[_event_out(e) for e in result.activity],
         summary=summary,
+        overview_metrics=(
+            _overview_out(result.overview_metrics)
+            if result.overview_metrics is not None
+            else None
+        ),
     )
 
 

@@ -35,6 +35,7 @@ import { SingleEmailBuilder } from "@/components/app/single-email-builder"
 import { singleSendAdapter } from "@/lib/api/email-send"
 import { InboxCards } from "./inbox-cards"
 import { BrokerKpis } from "./broker-kpis"
+import { BrokerOverviewSections } from "./overview-sections"
 import {
   getBroker,
   getBrokerActivity,
@@ -676,6 +677,9 @@ export default function BrokerDetailPage() {
         {/* ---- right rail ---- */}
         <div className="space-y-4">
           {b.main_lane ? <MainLaneCard lane={b.main_lane} /> : null}
+
+          {/* Restored (ba15198^): health gauge, 6-tile stats, 12-month chart. */}
+          <BrokerOverviewSections metrics={data.overview_metrics ?? null} />
 
           <BrokerKpis brokerId={b.id} />
 

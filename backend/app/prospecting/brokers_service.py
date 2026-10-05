@@ -21,6 +21,8 @@ from app.models import (
     Lead,
     LeadContact,
     LeadContactProvenance,
+    MailMessage,
+    MessageInsight,
     SentLog,
     Suppression,
 )
@@ -29,6 +31,14 @@ from app.pipeline.broker_next_action import (
     NextAction,
     NextActionInput,
     compute,
+)
+from app.prospecting.broker_health import (
+    HealthInputs,
+    HealthScore,
+    TONE_WINDOW_DAYS,
+    VOLUME_WINDOW_DAYS,
+    WIN_RATE_WINDOW_DAYS,
+    compute_health,
 )
 
 
@@ -107,6 +117,11 @@ class BrokerListResult:
     # Enriched tuples sorted deterministically so the router can slice by
     # cursor without re-sorting.
     sort_keys: list[tuple[int, int, str, str]] = field(default_factory=list)
+    # Opt-in overview block, keyed by lead id. Empty when the caller does not
+    # pass ``include_overview=True`` — keeps the default list payload
+    # byte-identical to the pre-overview response.
+    overview: dict[str, "OverviewMetricsRow"] = field(default_factory=dict)
+    overview_segments_count: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -148,6 +163,7 @@ class BrokerDetailResult:
     activity: list[ActivityCallEvent | ActivityEmailEvent]
     summary: SummaryRow
     main_lane: MainLaneRow | None
+    overview_metrics: "OverviewMetricsRow | None" = None
 
 
 # ---------- helpers ---------------------------------------------------------
@@ -353,6 +369,9 @@ async def list_brokers(
     has_phone: bool | None = None,
     next_action: str | None = None,
     q: str | None = None,
+    include_overview: bool = False,
+    segment: str | None = None,
+    sort: str | None = None,
 ) -> BrokerListResult:
     """Fetch all matching brokers, compute next-action per row, return
     deterministically sorted ``(priority, -fit_score, name, row, lead_id)``
@@ -415,10 +434,72 @@ async def list_brokers(
             )
         )
     enriched.sort(key=lambda t: (t[0], t[1], t[2], t[4]))
+    items = [t[3] for t in enriched]
+    keys = [(t[0], t[1], t[2], t[4]) for t in enriched]
+
+    overview: dict[str, OverviewMetricsRow] = {}
+    seg_counts: dict[str, int] = {}
+    if include_overview:
+        action_by_lead: dict[str, NextAction] = {}
+        latest_call_by_lead: dict[str, CallOutcome | None] = {}
+        last_activity_by_lead: dict[str, datetime | None] = {}
+        # Rebuild per-row state from the enriched tuples. The _compute_action_for
+        # inputs are deterministic from (lead, latest_call, latest_sent, …) so
+        # we can look up by lead_id here.
+        for lead in leads:
+            lc = latest_call.get(lead.id)
+            ls = latest_sent.get(lead.id)
+            pcb = pending_cb.get(lead.id)
+            a = agg.get(lead.id, _ContactAgg())
+            action = _compute_action_for(
+                lead, lc, ls, pcb, a,
+                totals_call.get(lead.id, 0),
+                totals_sent.get(lead.id, 0),
+                now, today,
+            )
+            action_by_lead[lead.id] = action
+            latest_call_by_lead[lead.id] = lc
+            la: datetime | None = None
+            for cand in (lc.logged_at if lc else None, ls.sent_at if ls else None):
+                if cand is None:
+                    continue
+                if la is None or cand > la:
+                    la = cand
+            last_activity_by_lead[lead.id] = la
+
+        overview = await get_overview_metrics(
+            sessionmaker,
+            [l.id for l in leads],
+            action_by_lead=action_by_lead,
+            latest_call_by_lead=latest_call_by_lead,
+            last_activity_by_lead=last_activity_by_lead,
+        )
+        seg_counts = segments_count(overview)
+        # Segment filter (post-compute; segment is derived from overview).
+        if segment and segment != "all":
+            keep: list[tuple[BrokerRowData, tuple[int, int, str, str]]] = []
+            for row, key in zip(items, keys):
+                om = overview.get(row.id)
+                if om is not None and om.segment == segment:
+                    keep.append((row, key))
+            items = [k[0] for k in keep]
+            keys = [k[1] for k in keep]
+        # Overview-driven sort override (health / win_rate / booked / rejected
+        # / days_since / name). The default remains the next-action priority
+        # ordering above when no sort is requested.
+        if sort and sort in SORT_KEYS:
+            items = resort(items, overview, sort)
+            # Rebuild sort_keys to match the new order (cursor paging stays
+            # stable because sort_keys[idx][3] = lead_id).
+            key_by_id = {k[3]: k for k in keys}
+            keys = [key_by_id[r.id] for r in items]
+
     return BrokerListResult(
-        items=[t[3] for t in enriched],
-        total=len(enriched),
-        sort_keys=[(t[0], t[1], t[2], t[4]) for t in enriched],
+        items=items,
+        total=len(items),
+        sort_keys=keys,
+        overview=overview,
+        overview_segments_count=seg_counts,
     )
 
 
@@ -558,6 +639,14 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
             last_seen_at=_iso(lead.lane_last_seen_at),
         )
 
+    overview_map = await get_overview_metrics(
+        sessionmaker,
+        [lead.id],
+        action_by_lead={lead.id: action},
+        latest_call_by_lead={lead.id: lc},
+        last_activity_by_lead={lead.id: last_activity},
+    )
+
     return BrokerDetailResult(
         broker=broker_row,
         address=_field(lead.address, lead.address_source),
@@ -567,6 +656,7 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         activity=activity,
         summary=summary,
         main_lane=main_lane,
+        overview_metrics=overview_map.get(lead.id),
     )
 
 
@@ -691,3 +781,436 @@ async def get_activity_page(
     if has_more:
         events = events[:limit]
     return events, has_more
+
+
+# ---------- overview metrics (restore of pre-ba15198 /brokers surface) ----
+
+Segment = str  # Literal["all","hot","warm","payment_issues","dormant","not_interested","neutral"]
+
+
+@dataclass
+class MonthlyPoint:
+    month: str          # "YYYY-MM"
+    booked: int
+    rejected: int
+    sent: int
+    replied: int
+
+
+@dataclass
+class OverviewMetricsRow:
+    """One broker's dense overview block. Nullable fields for brand-new brokers."""
+
+    health_score: int
+    health_delta: int | None
+    health_thin: bool
+    health_components: dict[str, float]
+    win_rate: float | None
+    win_rate_thin: bool
+    booked_12m: int
+    rejected_12m: int
+    sent_30d: int
+    replied_30d: int
+    reply_rate: float | None
+    avg_reply_hours: float | None
+    tone_30d: float | None
+    has_bounce: bool
+    has_suppression: bool
+    monthly_series: list[MonthlyPoint]
+    last_contact_at: str | None
+    days_since_last_contact: int | None
+    segment: Segment
+
+
+# Available server-side sorts (`sort=` query param). The deterministic
+# tiebreaker (-fit_score, name, id) is always appended so pagination stays
+# stable.
+SORT_KEYS = ("health", "win_rate", "booked", "rejected", "days_since", "name")
+
+
+def _month_bucket(dt: datetime) -> str:
+    return dt.strftime("%Y-%m")
+
+
+def _month_sequence(now: datetime, months: int = 12) -> list[str]:
+    """Return the last ``months`` month-keys, oldest first, timezone-independent.
+
+    Walks calendar months by (year, month) arithmetic — no dateutil needed.
+    """
+    y, m = now.year, now.month
+    out: list[str] = []
+    for _ in range(months):
+        out.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    return list(reversed(out))
+
+
+def _derive_segment(
+    *,
+    health: int,
+    next_action_kind: str,
+    has_bounce: bool,
+    has_suppression: bool,
+    days_since: int | None,
+    latest_call_outcome: str | None,
+) -> Segment:
+    """Rule table — matches the plan's definitions. First-match-wins.
+
+    Order matters: not_interested + payment_issues bite first so a broker who
+    said "no" or bounced doesn't get surfaced as "hot".
+    """
+    if latest_call_outcome == "not_interested":
+        return "not_interested"
+    if has_bounce or has_suppression:
+        return "payment_issues"
+    if days_since is not None and days_since >= 60:
+        return "dormant"
+    if next_action_kind in ("call", "email") and health >= 70:
+        return "hot"
+    if next_action_kind in ("call", "email") and 40 <= health < 70:
+        return "warm"
+    return "neutral"
+
+
+async def get_overview_metrics(
+    sessionmaker: Any,
+    lead_ids: list[str],
+    *,
+    action_by_lead: dict[str, NextAction] | None = None,
+    latest_call_by_lead: dict[str, CallOutcome | None] | None = None,
+    last_activity_by_lead: dict[str, datetime | None] | None = None,
+) -> dict[str, OverviewMetricsRow]:
+    """Compute the overview block per broker in one trip.
+
+    ``action_by_lead`` + ``latest_call_by_lead`` + ``last_activity_by_lead``
+    are optional pre-computed inputs — if the caller already has them (the
+    list route always does), we avoid a second round-trip. Otherwise this
+    function does nothing fancy about reloading them; segmentation will fall
+    back to "neutral" when we have no action signal.
+    """
+    if not lead_ids:
+        return {}
+
+    now = _now()
+    year_cutoff = now - timedelta(days=WIN_RATE_WINDOW_DAYS)
+    thirty_cutoff = now - timedelta(days=VOLUME_WINDOW_DAYS)
+    tone_cutoff = now - timedelta(days=TONE_WINDOW_DAYS)
+    months = _month_sequence(now, 12)
+    month_set = set(months)
+
+    async with sessionmaker() as s:
+        # Call outcomes: group by lead + month + outcome (booked/not_interested
+        # count toward win-rate; also drive the sparkline).
+        call_rows = (
+            await s.execute(
+                select(CallOutcome.lead_id, CallOutcome.outcome, CallOutcome.logged_at)
+                .where(CallOutcome.lead_id.in_(lead_ids))
+                .where(CallOutcome.logged_at >= year_cutoff)
+            )
+        ).all()
+
+        # Sent / replied, with reply latency for the detail-page tile.
+        sent_rows = (
+            await s.execute(
+                select(SentLog.lead_id, SentLog.sent_at, SentLog.replied_at)
+                .where(SentLog.lead_id.in_(lead_ids))
+            )
+        ).all()
+
+        # Contacts for bounce + email → mail-messages join.
+        contact_rows = (
+            await s.execute(
+                select(LeadContact.lead_id, LeadContact.email, LeadContact.pipeline_status)
+                .where(LeadContact.lead_id.in_(lead_ids))
+            )
+        ).all()
+
+        # Suppressions keyed off any known email.
+        emails_by_lead: dict[str, set[str]] = {}
+        for lid, email, _st in contact_rows:
+            if email:
+                emails_by_lead.setdefault(lid, set()).add(email.lower())
+        all_emails = sorted({e for es in emails_by_lead.values() for e in es})
+        suppressed: set[str] = set()
+        if all_emails:
+            suppressed = {
+                e.lower() for e in (
+                    await s.execute(select(Suppression.email).where(Suppression.email.in_(all_emails)))
+                ).scalars().all()
+            }
+
+        # Sentiment join: MessageInsight.from_email_normalized ∈ our emails,
+        # replies in TONE_WINDOW_DAYS. Falls back to joining via MailMessage
+        # when the normalised field is blank (pre-0018 rows).
+        tone_rows: list[tuple[str, float, datetime]] = []
+        if all_emails:
+            tone_rows_norm = (
+                await s.execute(
+                    select(MessageInsight.from_email_normalized, MessageInsight.sentiment, MessageInsight.created_at)
+                    .where(MessageInsight.from_email_normalized.in_(all_emails))
+                    .where(MessageInsight.created_at >= tone_cutoff)
+                )
+            ).all()
+            tone_rows = [(e, float(s_), t) for e, s_, t in tone_rows_norm if e]
+
+    # Aggregate booked / rejected / monthly series per lead.
+    booked_12m: dict[str, int] = {lid: 0 for lid in lead_ids}
+    rejected_12m: dict[str, int] = {lid: 0 for lid in lead_ids}
+    monthly: dict[str, dict[str, dict[str, int]]] = {
+        lid: {m: {"booked": 0, "rejected": 0, "sent": 0, "replied": 0} for m in months}
+        for lid in lead_ids
+    }
+
+    for lid, outcome, logged_at in call_rows:
+        if lid not in monthly:
+            continue
+        mb = _month_bucket(logged_at)
+        if outcome == "booked":
+            booked_12m[lid] += 1
+            if mb in month_set:
+                monthly[lid][mb]["booked"] += 1
+        elif outcome == "not_interested":
+            rejected_12m[lid] += 1
+            if mb in month_set:
+                monthly[lid][mb]["rejected"] += 1
+
+    sent_30d: dict[str, int] = {lid: 0 for lid in lead_ids}
+    replied_30d: dict[str, int] = {lid: 0 for lid in lead_ids}
+    reply_hours_sum: dict[str, float] = {lid: 0.0 for lid in lead_ids}
+    reply_hours_n: dict[str, int] = {lid: 0 for lid in lead_ids}
+    for lid, sent_at, replied_at in sent_rows:
+        if lid not in monthly:
+            continue
+        mb = _month_bucket(sent_at)
+        if mb in month_set:
+            monthly[lid][mb]["sent"] += 1
+            if replied_at:
+                monthly[lid][mb]["replied"] += 1
+        if sent_at >= thirty_cutoff:
+            sent_30d[lid] += 1
+            if replied_at and replied_at >= thirty_cutoff:
+                replied_30d[lid] += 1
+        if replied_at:
+            delta_h = max(0.0, (replied_at - sent_at).total_seconds() / 3600.0)
+            reply_hours_sum[lid] += delta_h
+            reply_hours_n[lid] += 1
+
+    # Bounce + suppression flags.
+    has_bounce: dict[str, bool] = {lid: False for lid in lead_ids}
+    has_suppression: dict[str, bool] = {lid: False for lid in lead_ids}
+    for lid, _email, pipeline_status in contact_rows:
+        if lid in has_bounce and pipeline_status == "bounced":
+            has_bounce[lid] = True
+    for lid, emails in emails_by_lead.items():
+        if any(e in suppressed for e in emails):
+            has_suppression[lid] = True
+
+    # Tone — join by email → lead_id.
+    lead_by_email: dict[str, list[str]] = {}
+    for lid, emails in emails_by_lead.items():
+        for e in emails:
+            lead_by_email.setdefault(e, []).append(lid)
+    tone_vals: dict[str, list[float]] = {lid: [] for lid in lead_ids}
+    for email, sentiment, _t in tone_rows:
+        for lid in lead_by_email.get(email.lower(), ()):
+            tone_vals[lid].append(sentiment)
+
+    # Deltas — build a 30-day-prior score from the same inputs windowed back.
+    # "Prior" booked/rejected = calls [t-120, t-30]; prior sent_30d = sent in
+    # [t-60, t-30]; prior tone = sentiment in [t-TONE-30, t-30]; prior days-
+    # since-last = days to latest activity before t-30.
+    prior_cutoff_hi = now - timedelta(days=30)
+    prior_cutoff_lo_year = now - timedelta(days=WIN_RATE_WINDOW_DAYS + 30)
+    prior_cutoff_lo_vol = now - timedelta(days=VOLUME_WINDOW_DAYS + 30)
+
+    prior_booked: dict[str, int] = {lid: 0 for lid in lead_ids}
+    prior_rejected: dict[str, int] = {lid: 0 for lid in lead_ids}
+    prior_sent_30d: dict[str, int] = {lid: 0 for lid in lead_ids}
+    prior_last_contact: dict[str, datetime | None] = {lid: None for lid in lead_ids}
+
+    for lid, outcome, logged_at in call_rows:
+        if lid not in prior_booked:
+            continue
+        if prior_cutoff_lo_year <= logged_at < prior_cutoff_hi:
+            if outcome == "booked":
+                prior_booked[lid] += 1
+            elif outcome == "not_interested":
+                prior_rejected[lid] += 1
+        if logged_at < prior_cutoff_hi:
+            cur = prior_last_contact.get(lid)
+            if cur is None or logged_at > cur:
+                prior_last_contact[lid] = logged_at
+
+    for lid, sent_at, _replied_at in sent_rows:
+        if lid not in prior_sent_30d:
+            continue
+        if prior_cutoff_lo_vol <= sent_at < prior_cutoff_hi:
+            prior_sent_30d[lid] += 1
+        if sent_at < prior_cutoff_hi:
+            cur = prior_last_contact.get(lid)
+            if cur is None or sent_at > cur:
+                prior_last_contact[lid] = sent_at
+
+    prior_tone: dict[str, list[float]] = {lid: [] for lid in lead_ids}
+    for email, sentiment, t in tone_rows:
+        if not (now - timedelta(days=TONE_WINDOW_DAYS + 30) <= t < prior_cutoff_hi):
+            continue
+        for lid in lead_by_email.get(email.lower(), ()):
+            prior_tone[lid].append(sentiment)
+
+    # Build final per-lead row.
+    result: dict[str, OverviewMetricsRow] = {}
+    for lid in lead_ids:
+        la = (last_activity_by_lead or {}).get(lid)
+        days_since: int | None = None
+        if la is not None:
+            days_since = max(0, (now - la).days)
+
+        avg_tone = sum(tone_vals[lid]) / len(tone_vals[lid]) if tone_vals[lid] else None
+        current = compute_health(
+            HealthInputs(
+                days_since_last_contact=days_since,
+                booked_12m=booked_12m[lid],
+                rejected_12m=rejected_12m[lid],
+                avg_sentiment=avg_tone,
+                sent_30d=sent_30d[lid],
+            )
+        )
+
+        prior_la = prior_last_contact.get(lid)
+        prior_days_since: int | None = None
+        if prior_la is not None:
+            prior_days_since = max(0, (prior_cutoff_hi - prior_la).days)
+        prior_avg_tone = (
+            sum(prior_tone[lid]) / len(prior_tone[lid]) if prior_tone[lid] else None
+        )
+        # Delta is None when we cannot form a prior snapshot at all.
+        health_delta: int | None = None
+        if prior_la is not None or prior_booked[lid] + prior_rejected[lid] > 0 or prior_sent_30d[lid] > 0:
+            prior = compute_health(
+                HealthInputs(
+                    days_since_last_contact=prior_days_since,
+                    booked_12m=prior_booked[lid],
+                    rejected_12m=prior_rejected[lid],
+                    avg_sentiment=prior_avg_tone,
+                    sent_30d=prior_sent_30d[lid],
+                )
+            )
+            health_delta = current.score - prior.score
+
+        decided = booked_12m[lid] + rejected_12m[lid]
+        win_rate = (booked_12m[lid] / decided) if decided > 0 else None
+        reply_rate = (replied_30d[lid] / sent_30d[lid]) if sent_30d[lid] > 0 else None
+        avg_reply_hours = (
+            (reply_hours_sum[lid] / reply_hours_n[lid]) if reply_hours_n[lid] > 0 else None
+        )
+
+        series = [
+            MonthlyPoint(
+                month=m,
+                booked=monthly[lid][m]["booked"],
+                rejected=monthly[lid][m]["rejected"],
+                sent=monthly[lid][m]["sent"],
+                replied=monthly[lid][m]["replied"],
+            )
+            for m in months
+        ]
+
+        action = (action_by_lead or {}).get(lid)
+        latest_call = (latest_call_by_lead or {}).get(lid)
+        segment = _derive_segment(
+            health=current.score,
+            next_action_kind=action.kind if action else "wait",
+            has_bounce=has_bounce[lid],
+            has_suppression=has_suppression[lid],
+            days_since=days_since,
+            latest_call_outcome=latest_call.outcome if latest_call else None,
+        )
+
+        result[lid] = OverviewMetricsRow(
+            health_score=current.score,
+            health_delta=health_delta,
+            health_thin=current.thin,
+            health_components=current.components,
+            win_rate=win_rate,
+            win_rate_thin=decided < 5,
+            booked_12m=booked_12m[lid],
+            rejected_12m=rejected_12m[lid],
+            sent_30d=sent_30d[lid],
+            replied_30d=replied_30d[lid],
+            reply_rate=reply_rate,
+            avg_reply_hours=avg_reply_hours,
+            tone_30d=avg_tone,
+            has_bounce=has_bounce[lid],
+            has_suppression=has_suppression[lid],
+            monthly_series=series,
+            last_contact_at=_iso(la),
+            days_since_last_contact=days_since,
+            segment=segment,
+        )
+    return result
+
+
+# ---------- segment + sort helpers (used by the router) --------------------
+
+
+def filter_by_segment(
+    sort_keys: list[tuple[int, int, str, str]],
+    items: list[BrokerRowData],
+    overview: dict[str, OverviewMetricsRow],
+    segment: str | None,
+) -> tuple[list[BrokerRowData], list[tuple[int, int, str, str]]]:
+    """Return (items, sort_keys) kept to the requested segment. "all"/None → pass-through."""
+    if not segment or segment == "all":
+        return items, sort_keys
+    keep_items: list[BrokerRowData] = []
+    keep_keys: list[tuple[int, int, str, str]] = []
+    for row, key in zip(items, sort_keys):
+        om = overview.get(row.id)
+        if om is not None and om.segment == segment:
+            keep_items.append(row)
+            keep_keys.append(key)
+    return keep_items, keep_keys
+
+
+def resort(
+    items: list[BrokerRowData],
+    overview: dict[str, OverviewMetricsRow],
+    sort: str | None,
+) -> list[BrokerRowData]:
+    """Re-sort by an overview-driven key. Deterministic tiebreakers: name, id."""
+    if not sort or sort not in SORT_KEYS:
+        return items
+
+    def key_fn(r: BrokerRowData) -> tuple:
+        om = overview.get(r.id)
+        tie = ((r.name or "").lower(), r.id)
+        if sort == "name":
+            return (tie[0], tie[1])
+        if om is None:
+            # No overview data → push to the bottom.
+            return (10**9, *tie)
+        if sort == "health":
+            return (-om.health_score, *tie)
+        if sort == "win_rate":
+            return (-(om.win_rate or -1.0), *tie)
+        if sort == "booked":
+            return (-om.booked_12m, *tie)
+        if sort == "rejected":
+            return (-om.rejected_12m, *tie)
+        if sort == "days_since":
+            return ((om.days_since_last_contact if om.days_since_last_contact is not None else 10**9), *tie)
+        return tie
+    return sorted(items, key=key_fn)
+
+
+def segments_count(overview: dict[str, OverviewMetricsRow]) -> dict[str, int]:
+    """Per-segment broker counts, used for the pill-row badges."""
+    out = {k: 0 for k in ("all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral")}
+    out["all"] = len(overview)
+    for om in overview.values():
+        out[om.segment] = out.get(om.segment, 0) + 1
+    return out
