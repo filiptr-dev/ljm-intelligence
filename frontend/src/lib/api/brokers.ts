@@ -19,6 +19,8 @@ export type ActivityEvent =
   | components["schemas"]["ActivityCallOut"]
   | components["schemas"]["ActivityEmailOut"]
 export type ActivityPage = components["schemas"]["ActivityPageOut"]
+export type ObjectionItem = components["schemas"]["ObjectionItemOut"]
+export type Objections = components["schemas"]["ObjectionsOut"]
 
 export type NextActionKind = NextActionOut["kind"]
 
@@ -68,4 +70,16 @@ export async function getBrokerActivity(
     signal,
   })
   return unwrap(res, `/brokers/${id}/activity`)
+}
+
+/** GET /brokers/{id}/objections — "Why they said no" roll-up. */
+export async function getBrokerObjections(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Objections> {
+  const res = await api.GET("/brokers/{broker_id}/objections", {
+    params: { path: { broker_id: id } },
+    signal,
+  })
+  return unwrap(res, `/brokers/${id}/objections`)
 }

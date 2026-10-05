@@ -74,6 +74,13 @@ class Lead(TenantMixin, Base):
     primary_email_source: Mapped[str | None] = mapped_column(String(32))
     phone_source: Mapped[str | None] = mapped_column(String(32))
     address_source: Mapped[str | None] = mapped_column(String(32))
+    # Main lane — restored by migration 0021 for the broker detail "Main lane"
+    # card. All nullable; the UI renders the card only when at least one is
+    # set, so pre-migration rows stay silent (not faked).
+    lane_origin_region: Mapped[str | None] = mapped_column(String(64))
+    lane_destination_region: Mapped[str | None] = mapped_column(String(64))
+    lane_miles_band: Mapped[str | None] = mapped_column(String(32))
+    lane_last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         # Partial-unique dedupe: MC → DOT → domain (plan rule).

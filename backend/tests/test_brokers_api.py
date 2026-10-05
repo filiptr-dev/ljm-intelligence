@@ -276,3 +276,107 @@ async def test_detail_rule1_pending_callback(client: AsyncClient):
     r = await client.get("/brokers/L-cb")
     assert r.json()["broker"]["next_action"]["kind"] == "call"
     assert "Callback" in r.json()["broker"]["next_action"]["reason"]
+
+
+# ---------- /brokers/{id}/objections --------------------------------------
+
+
+async def _seed_suppression(sm, email: str, reason: str = "do_not_contact") -> None:
+    from app.models import Suppression
+
+    async with sm() as s:
+        s.add(Suppression(email=email, reason=reason))
+        await s.commit()
+
+
+async def test_objections_fires_for_not_interested_with_note(client: AsyncClient):
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-ni")
+    await _seed_call(sm, "L-obj-ni", "not_interested", days_ago=2, note="Rate too low for lanes.")
+
+    r = await client.get("/brokers/L-obj-ni/objections")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["source"] == "call"
+    assert item["text"] == "Rate too low for lanes."
+
+
+async def test_objections_fires_for_suppression_hit(client: AsyncClient):
+    """A suppression row keyed to one of the broker's emails appears, even
+    when there is no call_outcome."""
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-sup")
+    await _seed_contact(sm, "L-obj-sup", email="dispatch@acme.test", name="Dispatch")
+    await _seed_suppression(sm, "dispatch@acme.test")
+
+    r = await client.get("/brokers/L-obj-sup/objections")
+    assert r.status_code == 200
+    body = r.json()
+    assert any(
+        i["source"] == "suppression" and "dispatch@acme.test" in i["text"]
+        for i in body["items"]
+    )
+
+
+async def test_objections_not_interested_without_note_shows_literal(client: AsyncClient):
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-nn")
+    await _seed_call(sm, "L-obj-nn", "not_interested", days_ago=1)
+
+    r = await client.get("/brokers/L-obj-nn/objections")
+    body = r.json()
+    assert body["items"][0]["text"] == "Not interested"
+
+
+async def test_objections_empty_for_untouched_broker(client: AsyncClient):
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-empty")
+
+    r = await client.get("/brokers/L-obj-empty/objections")
+    assert r.status_code == 200
+    assert r.json() == {"items": []}
+
+
+async def test_objections_404_for_missing_broker(client: AsyncClient):
+    r = await client.get("/brokers/does-not-exist/objections")
+    assert r.status_code == 404
+
+
+async def test_objections_404_for_shipper(client: AsyncClient):
+    """Only brokers — a Shipper lead with the same id must 404."""
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-shp", kind="Shipper", name="Shp Co", mc="99")
+
+    r = await client.get("/brokers/L-obj-shp/objections")
+    assert r.status_code == 404
+
+
+async def test_objections_requires_owner(client: AsyncClient):
+    """The mount applies the owner-only guard — clear the override to confirm 401."""
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-auth")
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.dependency_overrides.pop(current_user, None)
+    try:
+        r = await client.get("/brokers/L-obj-auth/objections")
+        assert r.status_code in (401, 403)
+    finally:
+        app.dependency_overrides[current_user] = lambda: UserPrincipal(
+            id="u1", email="owner@test", role="owner"
+        )
+
+
+async def test_objections_newest_first_across_sources(client: AsyncClient):
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-obj-ord")
+    await _seed_contact(sm, "L-obj-ord", email="x@acme.test", name="X")
+    # Old call, newer suppression — suppression should come first.
+    await _seed_call(sm, "L-obj-ord", "not_interested", days_ago=30, note="old")
+    await _seed_suppression(sm, "x@acme.test")
+
+    r = await client.get("/brokers/L-obj-ord/objections")
+    items = r.json()["items"]
+    assert items[0]["source"] == "suppression"

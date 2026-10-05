@@ -36,7 +36,13 @@ const baseUrl = IS_SERVER ? SERVER_BASE_URL : BROWSER_BASE_URL
 
 export const apiConfigured = IS_SERVER ? SERVER_BASE_URL !== "" : true
 
-const TIMEOUT_MS = 8_000
+// Render free-tier cold-starts routinely take 20–50s to boot FastAPI. The
+// previous 8_000 ms budget aborted every first request after idle, which
+// bubbled up as "timed out" in PROD while local never tripped (dev FastAPI
+// is already warm). 35s is comfortably over p95 cold-start and still well
+// under Vercel's hobby 60s route limit. Do not lower without a keep-alive
+// cron in place.
+const TIMEOUT_MS = 35_000
 const RETRY_BACKOFF_MS = 400
 const RETRY_STATUSES = new Set([502, 503, 504])
 
@@ -72,10 +78,23 @@ async function apiFetch(req: Request): Promise<Response> {
     return fetch(prepared.clone(), init)
   }
 
-  const first = await once()
-  if (!isRetryable || !RETRY_STATUSES.has(first.status)) return first
-  await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS))
-  return once()
+  try {
+    const first = await once()
+    if (!isRetryable || !RETRY_STATUSES.has(first.status)) return first
+    await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS))
+    return once()
+  } catch (err) {
+    // Retry once on AbortError for GET/HEAD — covers the window where the
+    // FastAPI dyno woke up mid-request but didn't answer before TIMEOUT_MS.
+    // Non-retryable methods or non-abort errors bubble up unchanged.
+    if (!isRetryable) throw err
+    const isAbort =
+      err instanceof DOMException && err.name === "AbortError"
+      || (typeof err === "object" && err !== null && (err as { name?: string }).name === "AbortError")
+    if (!isAbort) throw err
+    await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * 2))
+    return once()
+  }
 }
 
 export const api = createClient<paths>({ baseUrl, fetch: apiFetch })

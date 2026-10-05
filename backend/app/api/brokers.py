@@ -28,6 +28,7 @@ from app.prospecting.brokers_service import (
     NotFoundError,
     get_activity_page as svc_get_activity_page,
     get_detail as svc_get_detail,
+    get_objections as svc_get_objections,
     list_brokers as svc_list_brokers,
 )
 
@@ -103,6 +104,25 @@ class ActivityPageOut(BaseModel):
     next_cursor: str | None = None
 
 
+class ObjectionItemOut(BaseModel):
+    """One entry on the "Why they said no" card.
+
+    ``source`` tells the UI which icon / tone to render ("call" | "suppression").
+    No bounce source yet — ``sent_log`` has no bounce flag today; added when
+    the Gmail connector lands bounce signals (plan: bounce source goes here
+    without a shape change).
+    """
+
+    source: Literal["call", "suppression"]
+    logged_at: str
+    text: str
+    contact_name: str | None = None
+
+
+class ObjectionsOut(BaseModel):
+    items: list[ObjectionItemOut]
+
+
 class LastCallOut(BaseModel):
     outcome: str
     logged_at: str
@@ -121,11 +141,25 @@ class BrokerSummaryOut(BaseModel):
     last_email: LastEmailOut | None = None
 
 
+class MainLaneOut(BaseModel):
+    """Origin → destination summary rendered on the detail-page right rail.
+
+    All fields optional. The card is hidden entirely when every field is
+    null, so we never render dead air.
+    """
+
+    origin: str | None = None
+    destination: str | None = None
+    miles_band: str | None = None
+    last_seen_at: str | None = None
+
+
 class BrokerDetailBody(BrokerRowOut):
     address: ContactFieldOut
     linkedin_company_url: str | None = None
     website_url: str | None = None
     contacts: list[NamedContactOut]
+    main_lane: MainLaneOut | None = None
 
 
 class BrokerDetailOut(BaseModel):
@@ -262,12 +296,21 @@ async def get_broker(request: Request, broker_id: str) -> BrokerDetailOut:
         raise HTTPException(status_code=404, detail="broker not found") from exc
 
     base = _row_out(result.broker)
+    main_lane_out: MainLaneOut | None = None
+    if result.main_lane is not None:
+        main_lane_out = MainLaneOut(
+            origin=result.main_lane.origin,
+            destination=result.main_lane.destination,
+            miles_band=result.main_lane.miles_band,
+            last_seen_at=result.main_lane.last_seen_at,
+        )
     detail = BrokerDetailBody(
         **base.model_dump(),
         address=_field_out(result.address),
         linkedin_company_url=result.linkedin_company_url,
         website_url=result.website_url,
         contacts=[_named_contact_out(c) for c in result.contacts],
+        main_lane=main_lane_out,
     )
     summary = BrokerSummaryOut(
         sent_count_30d=result.summary.sent_count_30d,
@@ -314,3 +357,32 @@ async def get_broker_activity(
         next_cursor = _encode_cursor(last_at)
 
     return ActivityPageOut(items=[_event_out(e) for e in events], next_cursor=next_cursor)
+
+
+# ---------- GET /brokers/{id}/objections ----------------------------------
+
+
+@router.get("/{broker_id}/objections", response_model=ObjectionsOut)
+async def get_broker_objections(request: Request, broker_id: str) -> ObjectionsOut:
+    """Why they said no — reasons rolled up for the detail card.
+
+    Reads from ``call_outcomes`` where ``outcome='not_interested'`` with the
+    operator-authored note, plus ``suppression`` rows keyed to any of the
+    broker's known email addresses (opt-outs, do-not-contact). Newest first,
+    capped at 25.
+    """
+    try:
+        items = await svc_get_objections(request.app.state.sessionmaker, broker_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="broker not found") from exc
+    return ObjectionsOut(
+        items=[
+            ObjectionItemOut(
+                source=i.source,  # type: ignore[arg-type]
+                logged_at=i.logged_at,
+                text=i.text,
+                contact_name=i.contact_name,
+            )
+            for i in items
+        ]
+    )

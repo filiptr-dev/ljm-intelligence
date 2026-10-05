@@ -478,6 +478,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/brokers/{broker_id}/objections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Broker Objections
+         * @description Why they said no — reasons rolled up for the detail card.
+         *
+         *     Reads from ``call_outcomes`` where ``outcome='not_interested'`` with the
+         *     operator-authored note, plus ``suppression`` rows keyed to any of the
+         *     broker's known email addresses (opt-outs, do-not-contact). Newest first,
+         *     capped at 25.
+         */
+        get: operations["get_broker_objections_brokers__broker_id__objections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tools/shipper-finder": {
         parameters: {
             query?: never;
@@ -1745,6 +1770,7 @@ export interface components {
             website_url?: string | null;
             /** Contacts */
             contacts: components["schemas"]["NamedContactOut"][];
+            main_lane?: components["schemas"]["MainLaneOut"] | null;
         };
         /** BrokerDetailOut */
         BrokerDetailOut: {
@@ -1917,6 +1943,8 @@ export interface components {
             message_id?: string | null;
             /** Thread Id */
             thread_id?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConnectionTestOut */
         ConnectionTestOut: {
@@ -2878,6 +2906,23 @@ export interface components {
             /** Items */
             items: components["schemas"]["MailboxOut"][];
         };
+        /**
+         * MainLaneOut
+         * @description Origin → destination summary rendered on the detail-page right rail.
+         *
+         *     All fields optional. The card is hidden entirely when every field is
+         *     null, so we never render dead air.
+         */
+        MainLaneOut: {
+            /** Origin */
+            origin?: string | null;
+            /** Destination */
+            destination?: string | null;
+            /** Miles Band */
+            miles_band?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+        };
         /** MetricPointOut */
         MetricPointOut: {
             /** Bucket */
@@ -2956,6 +3001,28 @@ export interface components {
             /** Suggested Nudge */
             suggested_nudge: string;
         };
+        /**
+         * ObjectionItemOut
+         * @description One entry on the "Why they said no" card.
+         *
+         *     ``source`` tells the UI which icon / tone to render ("call" | "suppression").
+         *     No bounce source yet — ``sent_log`` has no bounce flag today; added when
+         *     the Gmail connector lands bounce signals (plan: bounce source goes here
+         *     without a shape change).
+         */
+        ObjectionItemOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "call" | "suppression";
+            /** Logged At */
+            logged_at: string;
+            /** Text */
+            text: string;
+            /** Contact Name */
+            contact_name?: string | null;
+        };
         /** ObjectionOut */
         ObjectionOut: {
             /** Broker Domain */
@@ -2966,6 +3033,11 @@ export interface components {
             count: number;
             /** Exemplar */
             exemplar: string | null;
+        };
+        /** ObjectionsOut */
+        ObjectionsOut: {
+            /** Items */
+            items: components["schemas"]["ObjectionItemOut"][];
         };
         /** OutcomeHistoryOut */
         OutcomeHistoryOut: {
@@ -4753,6 +4825,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivityPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_broker_objections_brokers__broker_id__objections_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                broker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObjectionsOut"];
                 };
             };
             /** @description Validation Error */

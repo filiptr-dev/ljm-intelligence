@@ -1,15 +1,16 @@
 "use client"
 
 /**
- * Broker detail — /brokers/[id]  (real-data v1)
+ * Broker detail — /brokers/[id]  (restored v2)
  *
- * Full contact block + server-computed next-action chip + merged activity
- * timeline, all from the typed `lib/api/brokers` client. The seeded
- * email-analytics card is deliberately kept as a dashed "Sample data" strip
- * at the bottom until the inbox connector lands real reply-rate data.
+ * Rewires the real-data v1 page to also carry the sections that commit
+ * `ba15198` silently dropped from the pre-rewire page: Recommended next
+ * step, inline Draft email (reusing `SingleEmailBuilder` + the real-send
+ * adapter), Email timeline, Main lane, Why they said no. KPIs are
+ * promoted into the right rail.
  *
  * Honest-by-design: a missing field renders as "—" with no source badge.
- * Never fake anything.
+ * Hidden-by-default when a section has no data. We never fake anything.
  */
 
 import * as React from "react"
@@ -18,24 +19,32 @@ import { useParams } from "next/navigation"
 import { toast } from "sonner"
 import {
   ArrowLeft,
-  Mail,
-  Phone,
-  MapPin,
+  Ban,
   ExternalLink,
+  Mail,
+  MapPin,
+  Phone,
+  PhoneForwarded,
+  Send,
 } from "lucide-react"
 import { Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import type { ContactOption } from "@/components/app/email-composer"
+import { SingleEmailBuilder } from "@/components/app/single-email-builder"
+import { singleSendAdapter } from "@/lib/api/email-send"
 import { InboxCards } from "./inbox-cards"
 import { BrokerKpis } from "./broker-kpis"
 import {
   getBroker,
   getBrokerActivity,
-  type BrokerDetail,
+  getBrokerObjections,
   type ActivityEvent,
+  type BrokerDetail,
   type ContactField,
   type NamedContact,
   type NextActionKind,
+  type ObjectionItem,
 } from "@/lib/api/brokers"
 
 const ACTION_LABEL: Record<NextActionKind, string> = {
@@ -50,6 +59,9 @@ const ACTION_STYLE: Record<NextActionKind, string> = {
   follow_up: "bg-warn text-asphalt",
   wait: "bg-muted text-muted-foreground",
 }
+
+// Anchor id the "Email" next-step button scrolls to.
+const DRAFT_ANCHOR = "broker-draft-email"
 
 function SourceBadge({ source }: { source: string | null | undefined }) {
   if (!source) return null
@@ -175,6 +187,215 @@ function ActivityRow({ e }: { e: ActivityEvent }) {
   )
 }
 
+/**
+ * Recommended next step — the primary CTA card the pre-ba15198 page
+ * carried. Fed by the server-computed `broker.next_action` so the
+ * frontend never re-infers which action is next. Button targets:
+ *   call       → tel: link (v1; logging a call-outcome shell is deferred)
+ *   email      → scrolls to the inline Draft email section
+ *   follow_up  → disabled with the reason tooltip
+ *   wait       → disabled with the reason tooltip
+ */
+function RecommendedNextStep({
+  broker,
+}: {
+  broker: BrokerDetail["broker"]
+}) {
+  const na = broker.next_action
+  const label = ACTION_LABEL[na.kind]
+  const phone = broker.phone.value
+  const email = broker.primary_email.value
+
+  let button: React.ReactNode = null
+  if (na.kind === "call" && phone) {
+    button = (
+      <a
+        href={`tel:${phone}`}
+        className="inline-flex h-10 items-center gap-1.5 rounded-sm bg-safety px-4 text-sm font-semibold text-asphalt hover:opacity-90"
+      >
+        <PhoneForwarded className="size-4" />
+        Call {phone}
+      </a>
+    )
+  } else if (na.kind === "email" && email) {
+    button = (
+      <a
+        href={`#${DRAFT_ANCHOR}`}
+        className="inline-flex h-10 items-center gap-1.5 rounded-sm bg-chart-2 px-4 text-sm font-semibold text-white hover:opacity-90"
+      >
+        <Send className="size-4" />
+        Draft email
+      </a>
+    )
+  } else {
+    button = (
+      <span className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-sm bg-muted px-4 text-sm font-medium text-muted-foreground">
+        <Ban className="size-4" />
+        {label}
+      </span>
+    )
+  }
+
+  return (
+    <Panel
+      title={
+        <span className="flex items-center gap-2">
+          Recommended next step
+          <span
+            className={cn(
+              "inline-flex items-center rounded-[3px] px-2 py-0.5 text-[0.68rem] font-bold tracking-wider uppercase",
+              ACTION_STYLE[na.kind],
+            )}
+          >
+            {label}
+          </span>
+        </span>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-3 rounded-sm border-l-4 border-safety bg-accent px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">{label}</div>
+          <div className="text-sm text-muted-foreground">{na.reason}</div>
+          {na.due_at ? (
+            <div className="mt-0.5 text-[0.68rem] text-muted-foreground">
+              due {new Date(na.due_at).toLocaleDateString()}
+            </div>
+          ) : null}
+        </div>
+        {button}
+      </div>
+    </Panel>
+  )
+}
+
+/**
+ * Main lane — origin → destination summary. Hidden entirely when the
+ * backend returns null (we never render dead air; the pre-rewire page
+ * only had this card when the demo store knew a lane).
+ */
+function MainLaneCard({ lane }: { lane: NonNullable<BrokerDetail["broker"]["main_lane"]> }) {
+  const dash = <span className="text-muted-foreground">—</span>
+  return (
+    <Panel title="Main lane">
+      <div className="flex flex-wrap items-baseline gap-2 text-base font-semibold">
+        <span>{lane.origin ?? dash}</span>
+        <span className="text-muted-foreground">→</span>
+        <span>{lane.destination ?? dash}</span>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {lane.miles_band ? <span>{lane.miles_band} mi</span> : null}
+        {lane.last_seen_at ? (
+          <span>last seen {new Date(lane.last_seen_at).toLocaleDateString()}</span>
+        ) : null}
+      </div>
+    </Panel>
+  )
+}
+
+/**
+ * Email timeline — email-only view of the activity feed (filters out
+ * call_outcomes). Fed by the same `activity[]` already on the detail
+ * payload; "Load more" uses the existing /brokers/{id}/activity cursor.
+ */
+function EmailTimeline({ emails }: { emails: ActivityEvent[] }) {
+  if (emails.length === 0) {
+    return (
+      <Panel title="Email timeline" description="No emails sent to this broker yet.">
+        <p className="text-sm text-muted-foreground">—</p>
+      </Panel>
+    )
+  }
+  return (
+    <Panel
+      title="Email timeline"
+      description={`${emails.length} email${emails.length === 1 ? "" : "s"}, newest first.`}
+      bodyClassName="p-0"
+    >
+      <ol className="divide-y divide-border">
+        {emails.map((e, i) => {
+          if (e.kind !== "email_sent") return null
+          return (
+            <li key={`${e.sent_at}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
+              <span className="w-10 shrink-0 font-mono text-[0.65rem] font-semibold text-muted-foreground">
+                OUT
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm">
+                {e.subject || "(no subject)"}
+              </span>
+              <span className="truncate text-xs text-muted-foreground">→ {e.to_email}</span>
+              {e.replied_at ? (
+                <span className="rounded-[3px] bg-good/15 px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase text-good">
+                  replied
+                </span>
+              ) : null}
+              <span className="rounded-[3px] bg-muted px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase text-muted-foreground">
+                {e.mode}
+              </span>
+              <span className="w-28 text-right text-xs text-muted-foreground">
+                {new Date(e.sent_at).toLocaleString()}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+    </Panel>
+  )
+}
+
+/**
+ * Why they said no — only shown when the backend has at least one item.
+ * Reads `/brokers/{id}/objections`.
+ */
+function WhyTheySaidNo({ items }: { items: ObjectionItem[] }) {
+  if (items.length === 0) return null
+  return (
+    <Panel title="Why they said no" description={`${items.length} on file`}>
+      <ul className="space-y-2">
+        {items.map((o, i) => (
+          <li key={`${o.logged_at}-${i}`} className="border-l-2 border-bad pl-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="rounded-[3px] bg-muted px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase text-muted-foreground">
+                {o.source}
+              </span>
+              {o.contact_name ? (
+                <span className="text-xs text-muted-foreground">{o.contact_name}</span>
+              ) : null}
+              <span className="ml-auto text-[0.68rem] text-muted-foreground">
+                {new Date(o.logged_at).toLocaleDateString()}
+              </span>
+            </div>
+            <div className="mt-0.5">{o.text}</div>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  )
+}
+
+/**
+ * Build the preselected recipient for the inline SingleEmailBuilder from
+ * the detail payload. We synthesise a `ContactOption` from the broker
+ * header rather than forking the component — same seam `/emails/compose`
+ * uses when `?to=<email>` is passed in.
+ */
+function buildInitialRecipient(b: BrokerDetail["broker"]): ContactOption | undefined {
+  const email = b.primary_email.value
+  if (!email) return undefined
+  const contactName = b.contacts[0]?.name.value ?? b.name
+  return {
+    id: `broker:${b.id}`,
+    kind: "broker",
+    name: b.name,
+    contactName,
+    email,
+    // The region VO is required on `Recipient`; the broker row carries only
+    // a US state so we pass it through — the builder only displays this
+    // string, never routes on it.
+    region: b.state as ContactOption["region"],
+    sub: `Broker · ${b.city ? `${b.city}, ` : ""}${b.state}`,
+  }
+}
+
 export default function BrokerDetailPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
@@ -185,16 +406,17 @@ export default function BrokerDetailPage() {
   const [moreCursor, setMoreCursor] = React.useState<string | null>(null)
   const [moreLoading, setMoreLoading] = React.useState(false)
   const [extraActivity, setExtraActivity] = React.useState<ActivityEvent[]>([])
+  const [objections, setObjections] = React.useState<ObjectionItem[]>([])
 
   React.useEffect(() => {
     let cancelled = false
     ;(async () => {
       setLoading(true)
       try {
-        const d = await getBroker(id)
+        const [d, obj] = await Promise.all([getBroker(id), getBrokerObjections(id)])
         if (!cancelled) {
           setData(d)
-          // Prime the "load more" cursor using the oldest timestamp we already have.
+          setObjections(obj.items)
           const items = d.activity ?? []
           if (items.length > 0) {
             const last = items[items.length - 1]
@@ -259,6 +481,11 @@ export default function BrokerDetailPage() {
 
   const b = data.broker
   const activityAll = [...data.activity, ...extraActivity]
+  const emailOnly = activityAll.filter((e) => e.kind === "email_sent")
+  const initialRecipient = buildInitialRecipient(b)
+  // Email is the suggested purpose only when the server picked `email` as
+  // the next action; otherwise let the builder's own heuristic choose.
+  const initialPurpose = b.next_action.kind === "email" ? ("intro" as const) : undefined
 
   return (
     <>
@@ -270,6 +497,7 @@ export default function BrokerDetailPage() {
       </Link>
       <InboxCards email={b.primary_email?.value ?? null} />
 
+      {/* Hero header — unchanged from v1 */}
       <div className="mb-5 flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -352,7 +580,10 @@ export default function BrokerDetailPage() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        {/* ---- main column ---- */}
         <div className="space-y-5">
+          <RecommendedNextStep broker={b} />
+
           <Panel
             title="Contact block"
             description="Every field with a visible source. Missing data stays missing — we don't fake it."
@@ -391,7 +622,40 @@ export default function BrokerDetailPage() {
             )}
           </Panel>
 
-          <BrokerKpis brokerId={b.id} />
+          {/* Draft email — SingleEmailBuilder mounted inline against the
+              real-send adapter. Same component used by /emails/compose
+              and the thread reply surface; no fork. */}
+          <section
+            id={DRAFT_ANCHOR}
+            aria-label="Draft email"
+            className="rounded-sm border border-border bg-card"
+          >
+            <header className="border-b border-border px-4 py-2.5">
+              <h2 className="text-sm font-semibold">Draft email</h2>
+              <p className="text-xs text-muted-foreground">
+                Composes to {b.primary_email.value ?? "this broker"} via the real send path.
+              </p>
+            </header>
+            <div className="p-3">
+              {initialRecipient ? (
+                <SingleEmailBuilder
+                  contacts={[]}
+                  backHref={`/brokers/${b.id}`}
+                  backLabel={`Back to ${b.name}`}
+                  initialRecipient={initialRecipient}
+                  initialToId={initialRecipient.id}
+                  initialPurpose={initialPurpose}
+                  onSend={singleSendAdapter}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No email on file — add one on the Named contacts list to enable drafting.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <EmailTimeline emails={emailOnly} />
 
           <Panel
             title="Email analytics"
@@ -409,7 +673,12 @@ export default function BrokerDetailPage() {
           </Panel>
         </div>
 
+        {/* ---- right rail ---- */}
         <div className="space-y-4">
+          {b.main_lane ? <MainLaneCard lane={b.main_lane} /> : null}
+
+          <BrokerKpis brokerId={b.id} />
+
           <Panel
             title="Activity"
             description={activityAll.length === 0 ? "No activity yet." : "Newest first — calls + emails merged."}
@@ -468,6 +737,8 @@ export default function BrokerDetailPage() {
               ) : null}
             </ul>
           </Panel>
+
+          <WhyTheySaidNo items={objections} />
         </div>
       </div>
     </>

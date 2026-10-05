@@ -131,6 +131,14 @@ class SummaryRow:
 
 
 @dataclass
+class MainLaneRow:
+    origin: str | None
+    destination: str | None
+    miles_band: str | None
+    last_seen_at: str | None
+
+
+@dataclass
 class BrokerDetailResult:
     broker: BrokerRowData
     address: ContactField
@@ -139,6 +147,7 @@ class BrokerDetailResult:
     contacts: list[NamedContactRow]
     activity: list[ActivityCallEvent | ActivityEmailEvent]
     summary: SummaryRow
+    main_lane: MainLaneRow | None
 
 
 # ---------- helpers ---------------------------------------------------------
@@ -532,6 +541,23 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         ),
     )
 
+    main_lane: MainLaneRow | None = None
+    if any(
+        getattr(lead, name) is not None
+        for name in (
+            "lane_origin_region",
+            "lane_destination_region",
+            "lane_miles_band",
+            "lane_last_seen_at",
+        )
+    ):
+        main_lane = MainLaneRow(
+            origin=lead.lane_origin_region,
+            destination=lead.lane_destination_region,
+            miles_band=lead.lane_miles_band,
+            last_seen_at=_iso(lead.lane_last_seen_at),
+        )
+
     return BrokerDetailResult(
         broker=broker_row,
         address=_field(lead.address, lead.address_source),
@@ -540,10 +566,110 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         contacts=contacts,
         activity=activity,
         summary=summary,
+        main_lane=main_lane,
     )
 
 
 # ---------- activity (paged) -----------------------------------------------
+
+
+@dataclass
+class ObjectionItem:
+    """One objection on the "Why they said no" card.
+
+    * ``call`` — a ``call_outcomes`` row with ``outcome='not_interested'``
+      and the operator-authored ``note`` (if any). ``text`` falls back to
+      the literal ``"Not interested"`` when no note was logged.
+    * ``suppression`` — a ``suppression`` row matching one of this broker's
+      known email addresses. The ``text`` is the reason (``do_not_contact``
+      or similar) with the email appended for operator context.
+    """
+
+    source: str
+    logged_at: str
+    text: str
+    contact_name: str | None = None
+
+
+_MAX_OBJECTIONS = 25
+
+
+async def get_objections(sessionmaker: Any, broker_id: str) -> list[ObjectionItem]:
+    """Return up to 25 objection items for ``broker_id``, newest first.
+
+    Reads from two sources, no new tables:
+      * ``call_outcomes.outcome='not_interested'`` on this lead.
+      * ``suppression`` on any of this lead's contact emails.
+
+    The sent_log bounce source listed in the plan is deferred — ``sent_log``
+    has no bounce flag today; when the Gmail connector lands bounce
+    signals, add a third branch that selects ``source='bounce'`` without
+    shape changes.
+    """
+    async with sessionmaker() as s:
+        lead = (
+            await s.execute(select(Lead).where(Lead.id == broker_id, Lead.kind == "Broker"))
+        ).scalar_one_or_none()
+        if lead is None:
+            raise NotFoundError("broker not found")
+
+        contact_rows = (
+            await s.execute(
+                select(LeadContact.email, LeadContact.name)
+                .where(LeadContact.lead_id == lead.id, LeadContact.email.isnot(None))
+            )
+        ).all()
+        emails = sorted({(e or "").lower() for e, _ in contact_rows if e})
+        name_by_email: dict[str, str | None] = {
+            (e or "").lower(): n for e, n in contact_rows if e
+        }
+
+        call_rows = (
+            await s.execute(
+                select(CallOutcome)
+                .where(CallOutcome.lead_id == lead.id, CallOutcome.outcome == "not_interested")
+                .order_by(desc(CallOutcome.logged_at))
+                .limit(_MAX_OBJECTIONS)
+            )
+        ).scalars().all()
+
+        supp_rows: list[Suppression] = []
+        if emails:
+            supp_rows = list(
+                (
+                    await s.execute(
+                        select(Suppression)
+                        .where(Suppression.email.in_(emails))
+                        .order_by(desc(Suppression.added_at))
+                        .limit(_MAX_OBJECTIONS)
+                    )
+                ).scalars().all()
+            )
+
+    items: list[ObjectionItem] = []
+    for c in call_rows:
+        items.append(
+            ObjectionItem(
+                source="call",
+                logged_at=_iso(c.logged_at) or "",
+                text=(c.note or "").strip() or "Not interested",
+                contact_name=c.logged_by,
+            )
+        )
+    for sup in supp_rows:
+        reason = (sup.reason or "do_not_contact").strip()
+        items.append(
+            ObjectionItem(
+                source="suppression",
+                logged_at=_iso(sup.added_at) or "",
+                text=f"{reason} — {sup.email}",
+                contact_name=name_by_email.get((sup.email or "").lower()),
+            )
+        )
+
+    # Newest first across both sources, capped at 25.
+    items.sort(key=lambda i: i.logged_at, reverse=True)
+    return items[:_MAX_OBJECTIONS]
 
 
 async def get_activity_page(
