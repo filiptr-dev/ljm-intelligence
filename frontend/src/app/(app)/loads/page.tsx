@@ -1,5 +1,6 @@
 import { LoadsBoard } from "./loads-board"
 import { PageHeader } from "@/components/app/ui"
+import { LaneStrip } from "@/components/analytics/LaneStrip"
 
 export const dynamic = "force-dynamic"
 
@@ -11,6 +12,7 @@ export default function LoadsPage() {
         title="Loads board"
         description="One internal view across every load source we have signed up for. Vendors you have not activated show as 'needs credentials' — enable them in Settings → Load sources."
       />
+      <LaneStrip />
       <LoadsBoard />
     </>
   )

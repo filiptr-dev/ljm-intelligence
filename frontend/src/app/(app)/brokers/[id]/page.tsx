@@ -27,6 +27,7 @@ import { Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { InboxCards } from "./inbox-cards"
+import { BrokerKpis } from "./broker-kpis"
 import {
   getBroker,
   getBrokerActivity,
@@ -389,6 +390,8 @@ export default function BrokerDetailPage() {
               </div>
             )}
           </Panel>
+
+          <BrokerKpis brokerId={b.id} />
 
           <Panel
             title="Email analytics"

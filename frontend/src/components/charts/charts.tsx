@@ -1,6 +1,6 @@
 "use client"
 
-import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, ComposedChart, LabelList, Line, LineChart, XAxis, YAxis } from "recharts"
 import {
   ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from "@/components/ui/chart"
@@ -14,20 +14,32 @@ type Month = { month: string; booked: number; rejected: number; decided: number;
 const outcomeConfig = {
   booked: { label: "Booked", color: "var(--chart-1)" },
   rejected: { label: "Rejected by broker", color: "var(--chart-3)" },
+  winRatePct: { label: "Win rate", color: "var(--chart-2)" },
 } satisfies ChartConfig
 
+/**
+ * Booked + rejected bars with a win-rate overlay line.
+ *
+ * The stacked-bar + line combo answers both questions at once: "how much
+ * activity?" (bar heights) and "how are we closing?" (line angle). The win
+ * rate uses the right-side axis so months with zero decided calls plot at 0%,
+ * never NaN.
+ */
 export function OutcomeColumns({ data, className = "h-64 w-full" }: { data: Month[]; className?: string }) {
+  const withPct = data.map((d) => ({ ...d, winRatePct: Math.round(d.winRate * 100) }))
   return (
     <ChartContainer config={outcomeConfig} className={className}>
-      <BarChart data={data} margin={{ left: -18, right: 4, top: 8 }} barCategoryGap="22%">
+      <ComposedChart data={withPct} margin={{ left: -18, right: 10, top: 8 }} barCategoryGap="22%">
         {grid}
         <XAxis dataKey="month" tickFormatter={monthLabel} {...axisProps} minTickGap={12} />
-        <YAxis {...axisProps} allowDecimals={false} />
+        <YAxis yAxisId="count" {...axisProps} allowDecimals={false} label={{ value: "Loads", angle: -90, position: "insideLeft", offset: 20, style: { fill: "var(--muted-foreground)", fontSize: 11 } }} />
+        <YAxis yAxisId="pct" orientation="right" {...axisProps} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={40} />
         <ChartTooltip cursor={{ fill: "var(--muted)" }} content={<ChartTooltipContent labelFormatter={(l) => monthLabel(String(l))} />} />
         <ChartLegend content={<ChartLegendContent />} />
-        <Bar dataKey="booked" stackId="a" fill="var(--color-booked)" maxBarSize={24} stroke="var(--card)" strokeWidth={1} />
-        <Bar dataKey="rejected" stackId="a" fill="var(--color-rejected)" radius={[4, 4, 0, 0]} maxBarSize={24} stroke="var(--card)" strokeWidth={1} />
-      </BarChart>
+        <Bar yAxisId="count" dataKey="booked" stackId="a" fill="var(--color-booked)" maxBarSize={24} stroke="var(--card)" strokeWidth={1} />
+        <Bar yAxisId="count" dataKey="rejected" stackId="a" fill="var(--color-rejected)" radius={[4, 4, 0, 0]} maxBarSize={24} stroke="var(--card)" strokeWidth={1} />
+        <Line yAxisId="pct" dataKey="winRatePct" stroke="var(--color-winRatePct)" strokeWidth={2} dot={{ r: 3, fill: "var(--color-winRatePct)" }} />
+      </ComposedChart>
     </ChartContainer>
   )
 }

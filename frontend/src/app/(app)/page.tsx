@@ -17,9 +17,13 @@ import * as React from "react"
 import Link from "next/link"
 import { ArrowRight, Phone, PhoneCall, Sparkles, Truck, UserPlus, Zap } from "lucide-react"
 import { PageHeader, Panel, StatTile } from "@/components/app/ui"
+import { FilterBar } from "@/components/analytics/FilterBar"
+import { readFilters, filtersToQuery } from "@/components/analytics/useFilters"
+import { KpiTile } from "@/components/charts/primitives"
 import { OutcomeColumns } from "@/components/charts/charts"
 import { buttonVariants } from "@/components/ui/button"
 import { getToday, type DoNextRow, type OverviewToday } from "@/lib/api/overview"
+import * as analysis from "@/lib/api/analysis"
 import * as inbox from "@/lib/api/inbox"
 import { cn } from "@/lib/utils"
 import { OverviewRetryButton } from "./overview-retry"
@@ -93,7 +97,14 @@ function HeaderActions({ data }: { data: OverviewToday | null }) {
   )
 }
 
-export default async function OverviewPage() {
+export default async function OverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const sp = await searchParams
+  const filters = readFilters(sp)
+
   let data: OverviewToday | null = null
   let error: string | null = null
   try {
@@ -102,20 +113,44 @@ export default async function OverviewPage() {
     error = e instanceof Error ? e.message : String(e)
   }
   const inboxKpis = await inbox.overviewKpis().catch(() => null)
+  const kpi = await analysis.getOverviewKpi(filtersToQuery(filters)).catch(() => null)
 
   const tiles = data?.tiles
   const doNext = data?.do_next ?? []
-  const chart = data?.booked_vs_rejected
 
-  const chartData = (chart?.series ?? []).map((p) => ({
-    month: p.month,
-    booked: p.booked,
-    rejected: p.rejected,
-    decided: p.booked + p.rejected,
-    winRate: p.booked / Math.max(1, p.booked + p.rejected),
-    usdPerMile: null as number | null,
-    eurPerKm: null as number | null,
-  }))
+  // Prefer the KPI service's monthly series when it has data (period-aware);
+  // fall back to the legacy 90d booked_vs_rejected block so the chart still
+  // renders when a new tenant has nothing in the current window.
+  const legacy = data?.booked_vs_rejected
+  const kpiSeries = kpi?.booked_vs_rejected?.series ?? []
+  const useKpi = kpiSeries.length > 0
+  const chartData = useKpi
+    ? kpiSeries.map((p: analysis.MetricPoint, i: number) => {
+        const booked = p.value
+        const n = p.n
+        const rejected = Math.max(0, n - booked)
+        const wrPoint = kpi?.booked_vs_rejected?.win_rate?.[i]
+        return {
+          month: p.key,
+          booked,
+          rejected,
+          decided: n,
+          winRate: wrPoint?.value ?? (n ? booked / n : 0),
+          usdPerMile: null as number | null,
+          eurPerKm: null as number | null,
+        }
+      })
+    : (legacy?.series ?? []).map((p) => ({
+        month: p.month,
+        booked: p.booked,
+        rejected: p.rejected,
+        decided: p.booked + p.rejected,
+        winRate: p.booked / Math.max(1, p.booked + p.rejected),
+        usdPerMile: null as number | null,
+        eurPerKm: null as number | null,
+      }))
+
+  const chartIsDemo = !useKpi && legacy?.demo === true
 
   return (
     <>
@@ -126,6 +161,15 @@ export default async function OverviewPage() {
         actions={<HeaderActions data={data} />}
       />
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <FilterBar />
+        {kpi ? (
+          <span className="text-xs text-muted-foreground">
+            Comparing {filters.period === "today" ? "today" : filters.period} vs prior period
+          </span>
+        ) : null}
+      </div>
+
       {error ? (
         <div className="mb-5 rounded-sm border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <div className="flex items-center justify-between gap-3">
@@ -135,7 +179,7 @@ export default async function OverviewPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           label="To call today"
           value={tiles?.to_call_today.value ?? 0}
@@ -145,36 +189,40 @@ export default async function OverviewPage() {
             </Link>
           }
         />
-        <StatTile
-          label="New leads since last crawl"
-          value={tiles?.new_leads_since_last_crawl.value ?? 0}
-          sub={
-            <span className="block">
-              <span className="block text-muted-foreground">
-                {formatSince(tiles?.new_leads_since_last_crawl.since ?? null)}
-              </span>
-              <Link href={tiles?.new_leads_since_last_crawl.href ?? "/leads"} className="hover:underline">
-                View leads <ArrowRight className="inline size-3" />
-              </Link>
-            </span>
-          }
-        />
-        <StatTile
-          label="Loads booked · 90 days"
-          value={tiles?.loads_booked_90d.value ?? 0}
-          sub={
-            <span className="flex flex-wrap items-center gap-2">
-              {tiles?.loads_booked_90d.demo ? (
-                <span className="inline-flex items-center rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold tracking-wide uppercase">
-                  demo
+        {kpi ? (
+          <>
+            <KpiTile block={kpi.tiles[0]} href="/leads" footer={<span>{formatSince(tiles?.new_leads_since_last_crawl.since ?? null)}</span>} />
+            <KpiTile block={kpi.tiles[1]} href="/call-list" />
+            <KpiTile block={kpi.tiles[2]} upIsGood={false} />
+          </>
+        ) : (
+          <>
+            <StatTile
+              label="New leads since last crawl"
+              value={tiles?.new_leads_since_last_crawl.value ?? 0}
+              sub={
+                <span className="block">
+                  <span className="block text-muted-foreground">
+                    {formatSince(tiles?.new_leads_since_last_crawl.since ?? null)}
+                  </span>
+                  <Link href={tiles?.new_leads_since_last_crawl.href ?? "/leads"} className="hover:underline">
+                    View leads <ArrowRight className="inline size-3" />
+                  </Link>
                 </span>
-              ) : null}
-              <Link href={tiles?.loads_booked_90d.href ?? "/intelligence"} className="hover:underline">
-                Open intelligence <ArrowRight className="inline size-3" />
-              </Link>
-            </span>
-          }
-        />
+              }
+            />
+            <StatTile
+              label="Loads booked · 90 days"
+              value={tiles?.loads_booked_90d.value ?? 0}
+              sub={
+                <Link href={tiles?.loads_booked_90d.href ?? "/intelligence"} className="hover:underline">
+                  Open intelligence <ArrowRight className="inline size-3" />
+                </Link>
+              }
+            />
+            <div />
+          </>
+        )}
       </div>
 
       {inboxKpis ? (
@@ -263,21 +311,21 @@ export default async function OverviewPage() {
         </Panel>
 
         <Panel
-          title="Booked vs rejected · 90 days"
+          title="Booked vs rejected"
           description={
-            chart?.demo
+            chartIsDemo
               ? "Not enough outcomes logged yet — chart is a placeholder."
-              : "Every booked / rejected outcome, by month."
+              : "Monthly bars with the win-rate overlay (right axis)."
           }
           action={
-            chart?.demo ? (
+            chartIsDemo ? (
               <span className="inline-flex items-center rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[0.65rem] font-semibold tracking-wide uppercase">
                 demo
               </span>
             ) : null
           }
         >
-          {chart?.demo || chartData.length === 0 ? (
+          {chartIsDemo || chartData.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
               <p className="text-sm text-muted-foreground">
                 Log a few call outcomes and the real trend lands here.

@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Segmented } from "@/components/app/segmented"
 import { ScoreChip } from "@/components/app/live-feed"
+import { CapacityStrip } from "@/components/analytics/CapacityStrip"
 import { api } from "@/lib/api/client"
 
 type PostOut = {
@@ -245,6 +246,8 @@ export default function CapacityPage() {
         title="Post trucks and loads"
         description="Post empty trucks or the freight you're carrying — the crawler ranks brokers to send it to, so nothing goes to dead inboxes."
       />
+
+      <CapacityStrip />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,460px)]">
         <div className="space-y-5">

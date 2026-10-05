@@ -14,7 +14,9 @@
  */
 
 import { api } from "@/lib/api/server"
+import * as analysis from "@/lib/api/analysis"
 import CallListClient, { type CallListEnvelope } from "./call-list-client"
+import { DayPulse } from "./day-pulse"
 
 export const dynamic = "force-dynamic"
 
@@ -26,5 +28,11 @@ export default async function CallListPage() {
   } catch {
     initial = null
   }
-  return <CallListClient initial={initial} />
+  const pulse = await analysis.getDayPulse().catch(() => null)
+  return (
+    <>
+      {pulse ? <DayPulse pulse={pulse} /> : null}
+      <CallListClient initial={initial} />
+    </>
+  )
 }

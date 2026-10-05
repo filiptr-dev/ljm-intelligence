@@ -1146,6 +1146,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analysis/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Overview Kpi Endpoint */
+        get: operations["overview_kpi_endpoint_analysis_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/crawler": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Crawler Kpi Endpoint */
+        get: operations["crawler_kpi_endpoint_analysis_crawler_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/call-outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Call Outcome Kpi Endpoint */
+        get: operations["call_outcome_kpi_endpoint_analysis_call_outcomes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/day-pulse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Day Pulse Endpoint */
+        get: operations["day_pulse_endpoint_analysis_day_pulse_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lanes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lane Kpi Endpoint */
+        get: operations["lane_kpi_endpoint_analysis_lanes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Capacity Kpi Endpoint */
+        get: operations["capacity_kpi_endpoint_analysis_capacity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/broker-kpis/{broker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Broker Kpi Endpoint */
+        get: operations["broker_kpi_endpoint_analysis_broker_kpis__broker_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mail/backfill": {
         parameters: {
             query?: never;
@@ -1474,6 +1593,31 @@ export interface components {
             /** Series */
             series: components["schemas"]["MonthPoint"][];
         };
+        /** BookedVsRejectedOut */
+        BookedVsRejectedOut: {
+            /** Series */
+            series: components["schemas"]["MetricPointOut"][];
+            /** Win Rate */
+            win_rate: components["schemas"]["MetricPointOut"][];
+        };
+        /** BreakdownOut */
+        BreakdownOut: {
+            /** Dimension */
+            dimension: string;
+            /** Rows */
+            rows: components["schemas"]["BreakdownRowOut"][];
+        };
+        /** BreakdownRowOut */
+        BreakdownRowOut: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: number;
+            /** N */
+            n: number;
+            /** Share */
+            share: number;
+        };
         /** BrokerDetailBody */
         BrokerDetailBody: {
             /** Id */
@@ -1509,6 +1653,19 @@ export interface components {
             /** Activity */
             activity: (components["schemas"]["ActivityCallOut"] | components["schemas"]["ActivityEmailOut"])[];
             summary: components["schemas"]["BrokerSummaryOut"];
+        };
+        /** BrokerKpiOut */
+        BrokerKpiOut: {
+            /** Broker Id */
+            broker_id: string;
+            /** Period */
+            period: {
+                [key: string]: unknown;
+            };
+            /** Tiles */
+            tiles: components["schemas"]["KpiBlockOut"][];
+            /** Thin */
+            thin: boolean;
         };
         /** BrokerListOut */
         BrokerListOut: {
@@ -1585,6 +1742,18 @@ export interface components {
             /** Logged Outcome Id */
             logged_outcome_id?: number | null;
         };
+        /** CallOutcomeKpiOut */
+        CallOutcomeKpiOut: {
+            /** Period */
+            period: {
+                [key: string]: unknown;
+            };
+            /** Tiles */
+            tiles: components["schemas"]["KpiBlockOut"][];
+            mix: components["schemas"]["BreakdownOut"];
+            /** Trend */
+            trend: components["schemas"]["MetricPointOut"][];
+        };
         /** CallRowOut */
         CallRowOut: {
             /** Lead Id */
@@ -1606,6 +1775,16 @@ export interface components {
             /** Opener */
             opener: string;
             last_outcome: components["schemas"]["LastOutcomeOut"] | null;
+        };
+        /** CapacityKpiOut */
+        CapacityKpiOut: {
+            /** Period */
+            period: {
+                [key: string]: unknown;
+            };
+            /** Tiles */
+            tiles: components["schemas"]["KpiBlockOut"][];
+            funnel: components["schemas"]["FunnelOut"];
         };
         /** ComposeIn */
         ComposeIn: {
@@ -1677,6 +1856,35 @@ export interface components {
             };
             /** Error */
             error?: string | null;
+        };
+        /** CrawlerKpiOut */
+        CrawlerKpiOut: {
+            /** Period */
+            period: {
+                [key: string]: unknown;
+            };
+            /** Tiles */
+            tiles: components["schemas"]["KpiBlockOut"][];
+            by_state: components["schemas"]["BreakdownOut"];
+            /** Last Crawl Finished At */
+            last_crawl_finished_at: string | null;
+        };
+        /** DayPulseOut */
+        DayPulseOut: {
+            /** Today Et */
+            today_et: string;
+            /** Today */
+            today: {
+                [key: string]: unknown;
+            };
+            /** Yesterday */
+            yesterday: {
+                [key: string]: unknown;
+            };
+            /** Conversion Today */
+            conversion_today: number;
+            /** Conversion Yesterday */
+            conversion_yesterday: number;
         };
         /** DecisionMakerOut */
         DecisionMakerOut: {
@@ -2022,6 +2230,20 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /** FunnelOut */
+        FunnelOut: {
+            /** Steps */
+            steps: components["schemas"]["FunnelStepOut"][];
+        };
+        /** FunnelStepOut */
+        FunnelStepOut: {
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+            /** Drop Pct */
+            drop_pct: number | null;
+        };
         /** GmailConnectorIn */
         GmailConnectorIn: {
             /** Sa Json */
@@ -2170,6 +2392,35 @@ export interface components {
             /** Negative */
             negative: number;
         };
+        /** KpiBlockOut */
+        KpiBlockOut: {
+            /** Label */
+            label: string;
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: number;
+            /** Prev */
+            prev: number;
+            /** Delta Pct */
+            delta_pct: number | null;
+            /** Direction */
+            direction: string;
+            /** Series */
+            series: components["schemas"]["MetricPointOut"][];
+            /** Thin */
+            thin: boolean;
+        };
+        /** LaneKpiOut */
+        LaneKpiOut: {
+            /** Period */
+            period: {
+                [key: string]: unknown;
+            };
+            /** Rows */
+            rows: components["schemas"]["LaneRow"][];
+            top: components["schemas"]["BreakdownOut"];
+        };
         /** LanePredictionOut */
         LanePredictionOut: {
             /** Origin */
@@ -2195,6 +2446,19 @@ export interface components {
              * Format: date-time
              */
             computed_at: string;
+        };
+        /** LaneRow */
+        LaneRow: {
+            /** Lane */
+            lane: string;
+            /** Loads */
+            loads: number;
+            /** Avg Rate Usd */
+            avg_rate_usd: number | null;
+            /** Avg Usd Per Mile */
+            avg_usd_per_mile: number | null;
+            /** N */
+            n: number;
         };
         /** LastCallOut */
         LastCallOut: {
@@ -2469,6 +2733,17 @@ export interface components {
             /** Items */
             items: components["schemas"]["MailboxOut"][];
         };
+        /** MetricPointOut */
+        MetricPointOut: {
+            /** Bucket */
+            bucket: string;
+            /** Key */
+            key: string;
+            /** Value */
+            value: number;
+            /** N */
+            n: number;
+        };
         /** MonthPoint */
         MonthPoint: {
             /** Month */
@@ -2579,6 +2854,16 @@ export interface components {
             callback_at?: string | null;
             /** Note */
             note?: string | null;
+        };
+        /** OverviewKpiOut */
+        OverviewKpiOut: {
+            /** Period */
+            period: {
+                [key: string]: unknown;
+            };
+            /** Tiles */
+            tiles: components["schemas"]["KpiBlockOut"][];
+            booked_vs_rejected: components["schemas"]["BookedVsRejectedOut"];
         };
         /** OverviewTodayOut */
         OverviewTodayOut: {
@@ -5593,6 +5878,250 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FirstTouchOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_kpi_endpoint_analysis_overview_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "7d" | "30d" | "90d" | "custom";
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    crawler_kpi_endpoint_analysis_crawler_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "7d" | "30d" | "90d" | "custom";
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrawlerKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    call_outcome_kpi_endpoint_analysis_call_outcomes_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "7d" | "30d" | "90d" | "custom";
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallOutcomeKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    day_pulse_endpoint_analysis_day_pulse_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DayPulseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lane_kpi_endpoint_analysis_lanes_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "7d" | "30d" | "90d" | "custom";
+                region?: string | null;
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LaneKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    capacity_kpi_endpoint_analysis_capacity_get: {
+        parameters: {
+            query?: {
+                period?: "today" | "7d" | "30d" | "90d" | "custom";
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapacityKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    broker_kpi_endpoint_analysis_broker_kpis__broker_id__get: {
+        parameters: {
+            query?: {
+                period?: "today" | "7d" | "30d" | "90d" | "custom";
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                broker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrokerKpiOut"];
                 };
             };
             /** @description Validation Error */
