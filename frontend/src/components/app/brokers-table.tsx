@@ -180,6 +180,7 @@ export function BrokersTable() {
             })
             .catch((e) => {
               if (reqId !== loadReqIdRef.current) return
+              setOverviewMap({})
               // Companion is secondary — fail quiet. The overview columns
               // fall back to their existing "—" / empty render path, and
               // the segment pills keep their current (possibly null)

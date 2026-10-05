@@ -1072,6 +1072,7 @@ async def get_overview_metrics(
 
     prior_tone: dict[str, list[float]] = {lid: [] for lid in lead_ids}
     for email, sentiment, t in tone_rows:
+        t = _as_utc(t)
         if not (now - timedelta(days=TONE_WINDOW_DAYS + 30) <= t < prior_cutoff_hi):
             continue
         for lid in lead_by_email.get(email.lower(), ()):
