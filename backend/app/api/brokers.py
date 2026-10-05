@@ -19,6 +19,10 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from app.prospecting.broker_rank_service import (
+    RankFilters,
+    rank_brokers as svc_rank_brokers,
+)
 from app.prospecting.brokers_service import (
     ActivityCallEvent,
     ActivityEmailEvent,
@@ -335,6 +339,34 @@ async def list_brokers(
     include_set = {s.strip() for s in (include or "").split(",") if s.strip()}
     include_overview = "overview_metrics" in include_set
 
+    # Hot path: default list (no overview block, no segment, no overview-driven
+    # sort) → SQL-ranked + keyset-paged via ``broker_rank_service``. The old
+    # Python-ranked service (which eagerly loads every broker to compute the
+    # overview block for segment/sort) stays wired for the ``include=
+    # overview_metrics`` surface — that work is bounded by the broker count,
+    # not by paging, and the perf-sensitive callers (brokers island, overview
+    # tile, CSV export without overview) never hit it. See plan 2026-10-01.
+    if not include_overview and segment is None and sort is None:
+        page = await svc_rank_brokers(
+            request.app.state.sessionmaker,
+            filters=RankFilters(
+                state=state,
+                min_fit=min_fit,
+                has_email=has_email,
+                has_phone=has_phone,
+                next_action=next_action,
+                q=q,
+            ),
+            limit=limit,
+            cursor=cursor,
+        )
+        return BrokerListOut(
+            items=[_row_out(r) for r in page.rows],
+            next_cursor=page.next_cursor,
+            total=page.total,
+            segments_count=None,
+        )
+
     result = await svc_list_brokers(
         request.app.state.sessionmaker,
         state=state,
@@ -398,6 +430,7 @@ async def export_brokers_csv(
     one segment at a time without clicking "Load more"."""
     import csv as _csv
     import io as _io
+
     from fastapi.responses import StreamingResponse
 
     # CSV formula-injection guard: Excel / Sheets / Numbers all evaluate a

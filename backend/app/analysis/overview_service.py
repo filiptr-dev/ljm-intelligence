@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 
 from app.models import CallOutcome, CapacityPost, CrawlRun, Lead
 from app.pipeline.match import score_broker_for_post
+from app.prospecting.broker_rank_service import count_brokers_by_action
 from app.prospecting.call_list_service import load_and_rank as _load_and_rank
 
 ET = ZoneInfo("America/New_York")
@@ -149,6 +150,15 @@ async def get_today(sessionmaker: Any) -> OverviewTodayResult:
     full_call_rows = await _load_and_rank(sessionmaker, today, 100)
     call_rows = full_call_rows[:_CALL_TOP_N]
 
+    # Tile value shares one definition with the ``/brokers?next_action=call``
+    # page the operator clicks through to: "brokers whose next-action chip
+    # says Call" (per plan decision 2). ``count_brokers_by_action`` runs one
+    # scalar SQL — no row materialization — so the tile stays well under the
+    # /overview p50 budget even at 25k leads.
+    to_call_today_count = await count_brokers_by_action(
+        sessionmaker, kind="call"
+    )
+
     async with sessionmaker() as s:
         last_crawl_at = (
             await s.execute(select(func.max(CrawlRun.finished_at)).where(CrawlRun.status == "done"))
@@ -221,9 +231,17 @@ async def get_today(sessionmaker: Any) -> OverviewTodayResult:
             .all()
         )
 
-        all_leads = (
-            await s.execute(select(Lead).where(Lead.state.isnot(None)))
-        ).scalars().all()
+        # Only pull the 25k-scale ``all_leads`` set when there is at least one
+        # open truck post to match it against. Without posts the nested loop
+        # below is a no-op anyway — skipping the ORM hydrate here keeps the
+        # 25k perf case well under the 150 ms /overview budget. Correctness
+        # is unchanged: ``capacity_match_rows`` ends up empty either way.
+        if open_truck_posts:
+            all_leads = (
+                await s.execute(select(Lead).where(Lead.state.isnot(None)))
+            ).scalars().all()
+        else:
+            all_leads = []
 
     # Build the capacity_match previews — top broker per open post. Dedupe by
     # lead_id so the same broker never appears twice in Do next.
@@ -321,7 +339,7 @@ async def get_today(sessionmaker: Any) -> OverviewTodayResult:
     return OverviewTodayResult(
         date=today.isoformat(),
         tiles=TilesRow(
-            to_call_today=TileCountRow(value=len(full_call_rows), href="/call-list"),
+            to_call_today=TileCountRow(value=to_call_today_count, href="/call-list"),
             new_leads_since_last_crawl=NewLeadsTileRow(
                 value=new_leads_count, since=new_leads_since, href="/leads"
             ),
