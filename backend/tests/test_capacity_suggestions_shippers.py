@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.auth.deps import UserPrincipal, current_user
 from app.db import Base
@@ -19,6 +20,36 @@ from app.models import CapacityPost, Lead, ShipperCandidate
 from app.shared.orm import LJM_TENANT_ID
 
 OTHER_TENANT = "01OTHERTENANT0000000000000"
+
+
+async def _as_admin(s: AsyncSession) -> None:
+    """Bind the admin sentinel on the session so cross-tenant seeding inserts
+    pass the RLS WITH CHECK policy on PG16. Mirrors `uow_admin` in
+    `app/shared/db.py`; sqlite is a no-op (no RLS, no `set_config`).
+
+    Needed because test seeders stamp an explicit `tenant_id=OTHER_TENANT` to
+    deliberately plant cross-tenant rows — exactly what the production RLS
+    policy forbids for a tenant-scoped session. The pattern is the same as
+    `tests/test_tenancy_isolation.py`'s `pg_setup` (which uses the superuser
+    URL to bypass RLS before seeding its two tenants). Setting
+    `app.tenant_id=''` is the policy's own escape hatch and keeps us on the
+    same session the ORM `before_insert` listener will see.
+    """
+    bind = s.get_bind()
+    if getattr(getattr(bind, "dialect", None), "name", "") == "postgresql":
+        await s.execute(text("SELECT set_config('app.tenant_id', '', true)"))
+
+    # Also plant the OTHER_TENANT org row so the FK on `tenant_id` resolves.
+    # ON CONFLICT keeps this idempotent across tests.
+    if getattr(getattr(bind, "dialect", None), "name", "") == "postgresql":
+        await s.execute(
+            text(
+                "INSERT INTO organizations (id, slug, name, plan, settings, created_at) "
+                "VALUES (:id, 'other', 'Other Co', 'standard', '{}', now()) "
+                "ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": OTHER_TENANT},
+        )
 
 
 @pytest.fixture
@@ -30,9 +61,7 @@ async def client() -> AsyncClient:
 
     app = create_app()
     app.state.sessionmaker = sessionmaker
-    app.dependency_overrides[current_user] = lambda: UserPrincipal(
-        id="u1", email="owner@test", role="owner"
-    )
+    app.dependency_overrides[current_user] = lambda: UserPrincipal(id="u1", email="owner@test", role="owner")
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
@@ -77,6 +106,8 @@ async def _seed_shipper(sm, *, tenant_id: str = LJM_TENANT_ID, **kw) -> ShipperC
     }
     defaults.update(kw)
     async with sm() as s:
+        if tenant_id != LJM_TENANT_ID:
+            await _as_admin(s)
         row = ShipperCandidate(**defaults)
         s.add(row)
         await s.commit()
@@ -100,6 +131,8 @@ async def _seed_broker(sm, *, tenant_id: str = LJM_TENANT_ID, **kw) -> Lead:
     }
     defaults.update(kw)
     async with sm() as s:
+        if tenant_id != LJM_TENANT_ID:
+            await _as_admin(s)
         row = Lead(**defaults)
         s.add(row)
         await s.commit()
@@ -137,9 +170,7 @@ async def test_truck_post_shippers_populated_with_lane_matches(client):
 @pytest.mark.asyncio
 async def test_load_post_shippers_drop_state(client):
     sm = client._sm  # type: ignore[attr-defined]
-    post = await _seed_post(
-        sm, id="CP-load1", kind="load", destinations=[], dest_state="GA", dest_city="Atlanta"
-    )
+    post = await _seed_post(sm, id="CP-load1", kind="load", destinations=[], dest_state="GA", dest_city="Atlanta")
     await _seed_shipper(sm, id="01GAX000000000000000000001", state="GA", name="GA Drop Co")
 
     r = await client.get(f"/capacity/posts/{post.id}/suggestions")
@@ -155,9 +186,7 @@ async def test_tenant_isolation_shipper_candidates(client):
     sm = client._sm  # type: ignore[attr-defined]
     post = await _seed_post(sm, id="CP-tenant")
     # Other-tenant NJ candidate — must NOT appear.
-    await _seed_shipper(
-        sm, id="01OTHER000000000000000000A", state="NJ", name="Other Tenant Co", tenant_id=OTHER_TENANT
-    )
+    await _seed_shipper(sm, id="01OTHER000000000000000000A", state="NJ", name="Other Tenant Co", tenant_id=OTHER_TENANT)
     # Our tenant has none.
     r = await client.get(f"/capacity/posts/{post.id}/suggestions")
     assert r.status_code == 200
