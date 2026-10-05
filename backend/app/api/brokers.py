@@ -400,6 +400,19 @@ async def export_brokers_csv(
     import io as _io
     from fastapi.responses import StreamingResponse
 
+    # CSV formula-injection guard: Excel / Sheets / Numbers all evaluate a
+    # cell whose first character is one of these as a formula, so a broker
+    # named "=SUM(1+1)" or a note starting with "@" or "-" could be exploited
+    # by an operator opening the export. Prefix with a single quote so the
+    # spreadsheet renders the text literally; we apply this to every string
+    # field that could carry operator- or crawler-sourced text.
+    _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _csv_safe(v: str | None) -> str:
+        if v is None:
+            return ""
+        return f"'{v}" if v and v[0] in _CSV_FORMULA_PREFIXES else v
+
     result = await svc_list_brokers(
         request.app.state.sessionmaker,
         state=state,
@@ -430,7 +443,7 @@ async def export_brokers_csv(
         om = result.overview.get(r.id)
         w.writerow(
             [
-                r.id, r.name, r.mc or "", r.dot or "", r.state, r.city or "",
+                r.id, _csv_safe(r.name), r.mc or "", r.dot or "", r.state, _csv_safe(r.city),
                 om.health_score if om else "",
                 om.health_delta if om and om.health_delta is not None else "",
                 f"{om.win_rate:.4f}" if om and om.win_rate is not None else "",
@@ -444,8 +457,8 @@ async def export_brokers_csv(
                 om.segment if om else "",
                 "1" if om and om.has_bounce else "0",
                 "1" if om and om.has_suppression else "0",
-                r.next_action.kind, r.next_action.reason,
-                r.phone.value or "", r.primary_email.value or "",
+                r.next_action.kind, _csv_safe(r.next_action.reason),
+                _csv_safe(r.phone.value), _csv_safe(r.primary_email.value),
             ]
         )
     buf.seek(0)

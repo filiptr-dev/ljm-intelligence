@@ -282,9 +282,24 @@ async def test_detail_includes_overview_metrics(client):
 
 
 async def test_csv_export_streams_segment(client):
-    await _seed_broker(client._sm, "L-X")
+    # Seed a formula-injection probe: the exported cell for a broker named
+    # "=SUM(1+1)" must be prefixed with a single quote so Excel / Sheets /
+    # Numbers render it as text instead of evaluating it.
+    await _seed_broker(client._sm, "L-X", name="=SUM(1+1)")
     r = await client.get("/brokers.csv?segment=all")
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
-    assert "health_score" in r.text
-    assert "L-X" in r.text
+    import csv as _csv
+    import io as _io
+    reader = _csv.reader(_io.StringIO(r.text))
+    rows = list(reader)
+    header = rows[0]
+    assert "health_score" in header
+    # 23 columns in the exported row (see router _csv.writer header list).
+    assert len(header) == 23
+    data_rows = [row for row in rows[1:] if row and row[0] == "L-X"]
+    assert len(data_rows) == 1
+    data = data_rows[0]
+    assert len(data) == len(header)
+    # name is the 2nd column (index 1); must be the escaped form.
+    assert data[1] == "'=SUM(1+1)"
