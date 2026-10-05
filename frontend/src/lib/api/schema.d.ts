@@ -444,6 +444,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/brokers/overview-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Brokers Overview Summary
+         * @description Overview block + segment counts for the brokers island.
+         *
+         *     Shares every filter with ``GET /brokers`` so the two calls return a
+         *     consistent set. ``segment``/``sort`` are honoured when present — the
+         *     segment pills' active state and overview-sorted columns both route
+         *     through here.
+         */
+        get: operations["get_brokers_overview_summary_brokers_overview_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/brokers.csv": {
         parameters: {
             query?: never;
@@ -3212,6 +3237,28 @@ export interface components {
              */
             segment: "all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral";
         };
+        /**
+         * OverviewSummaryOut
+         * @description Companion payload for the brokers island.
+         *
+         *     ``items`` is a map keyed by ``lead_id`` so the frontend can fire this in
+         *     parallel with the fast ``GET /brokers`` list and splice overview columns
+         *     (health, win-rate, sparkline, segment) onto the already-rendered rows.
+         *     ``segments_count`` feeds the pill-row above the table.
+         *
+         *     This endpoint exists because the slow ``include=overview_metrics`` path
+         *     on ``GET /brokers`` fully computes per-broker overview blocks over the
+         *     whole filtered set — too expensive to block LCP on. The split keeps
+         *     the list route on the sub-sub-second SQL ranker without dropping any
+         *     UI column.
+         */
+        OverviewSummaryOut: {
+            /** Items */
+            items: {
+                [key: string]: components["schemas"]["OverviewMetricsOut"];
+            };
+            segments_count: components["schemas"]["SegmentsCountOut"];
+        };
         /** OverviewTodayOut */
         OverviewTodayOut: {
             /** Date */
@@ -4928,6 +4975,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrokerListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_brokers_overview_summary_brokers_overview_summary_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                min_fit?: number | null;
+                has_email?: boolean | null;
+                has_phone?: boolean | null;
+                next_action?: ("call" | "email" | "follow_up" | "wait") | null;
+                q?: string | null;
+                segment?: ("all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral") | null;
+                sort?: ("health" | "win_rate" | "booked" | "rejected" | "days_since" | "name") | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewSummaryOut"];
                 };
             };
             /** @description Validation Error */

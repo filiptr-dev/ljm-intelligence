@@ -18,6 +18,7 @@ export type BrokerDetail = components["schemas"]["BrokerDetailOut"]
 export type OverviewMetrics = components["schemas"]["OverviewMetricsOut"]
 export type MonthlyPoint = components["schemas"]["MonthlyPointOut"]
 export type SegmentsCount = components["schemas"]["SegmentsCountOut"]
+export type OverviewSummary = components["schemas"]["OverviewSummaryOut"]
 export type BrokerSegment = NonNullable<OverviewMetrics>["segment"]
 export type BrokerSortKey = "health" | "win_rate" | "booked" | "rejected" | "days_since" | "name"
 export type ActivityEvent =
@@ -55,6 +56,31 @@ export async function listBrokers(
 ): Promise<BrokerList> {
   const res = await api.GET("/brokers", { params: { query }, signal })
   return unwrap(res, "/brokers")
+}
+
+export type OverviewSummaryQuery = {
+  state?: string
+  min_fit?: number
+  has_email?: boolean
+  has_phone?: boolean
+  next_action?: NextActionKind
+  q?: string
+  segment?: BrokerSegment | "all"
+  sort?: BrokerSortKey
+}
+
+/** GET /brokers/overview-summary — companion payload for the brokers island.
+ *
+ * Shares every filter with ``listBrokers``. Returns ``{items: {leadId:
+ * OverviewMetrics}, segments_count}`` so the UI can fire this in parallel
+ * with the fast list fetch and splice overview columns onto already-rendered
+ * rows without blocking first paint on the slow aggregate. */
+export async function listBrokersOverviewSummary(
+  query: OverviewSummaryQuery = {},
+  signal?: AbortSignal,
+): Promise<OverviewSummary> {
+  const res = await api.GET("/brokers/overview-summary", { params: { query }, signal })
+  return unwrap(res, "/brokers/overview-summary")
 }
 
 /** GET /brokers/{id} — full contact block + computed next action + timeline. */

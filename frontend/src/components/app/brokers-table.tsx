@@ -37,10 +37,12 @@ import { cn } from "@/lib/utils"
 import { pct } from "@/lib/format"
 import {
   listBrokers,
+  listBrokersOverviewSummary,
   type BrokerRow,
   type BrokerSegment,
   type BrokerSortKey,
   type NextActionKind,
+  type OverviewMetrics,
   type SegmentsCount,
 } from "@/lib/api/brokers"
 
@@ -100,6 +102,7 @@ const DEFAULT_DIR: Record<BrokerSortKey, SortDir> = {
 
 export function BrokersTable() {
   const [rows, setRows] = React.useState<BrokerRow[]>([])
+  const [overviewMap, setOverviewMap] = React.useState<Record<string, OverviewMetrics>>({})
   const [total, setTotal] = React.useState(0)
   const [segmentsCount, setSegmentsCount] = React.useState<SegmentsCount | null>(null)
   const [cursor, setCursor] = React.useState<string | null>(null)
@@ -114,34 +117,84 @@ export function BrokersTable() {
   const [hasPhone, setHasPhone] = React.useState(false)
   const [q, setQ] = React.useState("")
 
-  const [headerSort, setHeaderSort] = React.useState<HeaderSort | null>({ key: "health", dir: "desc" })
+  // Default sort: server's own next-action-priority order, which is what
+  // the fast SQL-ranked ``GET /brokers`` returns. Clicking a header opts
+  // the user into the slow overview-sorted path (which still works, just
+  // does the full per-broker overview compute). This split keeps initial
+  // LCP sub-sub-second — the SQL path returns the row list without
+  // blocking on health/win-rate aggregates.
+  const [headerSort, setHeaderSort] = React.useState<HeaderSort | null>(null)
   const [activityMonths, setActivityMonths] = React.useState<ActivityMonths>(12)
   const [exporting, setExporting] = React.useState(false)
 
-  // Server-side sort / segment via query params; we rely on the backend's
-  // deterministic order so "load more" pagination stays stable.
+  // Fast path trigger: no overview-driven sort and no segment narrowing →
+  // fire the SQL-ranked list + the overview-summary companion in parallel.
+  // Any other state (segment narrow or overview-sort) stays on the legacy
+  // single-call path because the server has to compute the overview to
+  // honour either anyway.
+  const useFastPath = headerSort === null && segment === "all"
+
   const load = React.useCallback(
     async (append: boolean, cursorOverride?: string | null) => {
       if (append) setLoadingMore(true)
       else setLoading(true)
       try {
-        const data = await listBrokers({
+        const sharedFilters = {
           state: state || undefined,
           min_fit: minFit > 0 ? minFit : undefined,
           has_email: hasEmail || undefined,
           has_phone: hasPhone || undefined,
           next_action: action === "all" ? undefined : action,
           q: q.trim() || undefined,
-          cursor: append ? (cursorOverride ?? undefined) : undefined,
-          limit: 50,
-          include: "overview_metrics",
-          segment,
-          sort: headerSort?.key,
-        })
-        setRows((prev) => (append ? [...prev, ...data.items] : data.items))
-        setCursor(data.next_cursor ?? null)
-        setTotal(data.total)
-        setSegmentsCount(data.segments_count ?? null)
+        }
+        if (useFastPath) {
+          // Two parallel calls: the SQL ranker renders rows immediately;
+          // the companion fills overview columns + segment pill counts.
+          const [list, companion] = await Promise.all([
+            listBrokers({
+              ...sharedFilters,
+              cursor: append ? (cursorOverride ?? undefined) : undefined,
+              limit: 50,
+            }),
+            // Pagination doesn't apply to the companion — it summarises the
+            // whole filtered set. Only fire on the first page; "Load more"
+            // keeps the companion we already have.
+            append
+              ? Promise.resolve(null)
+              : listBrokersOverviewSummary(sharedFilters),
+          ])
+          setRows((prev) => (append ? [...prev, ...list.items] : list.items))
+          setCursor(list.next_cursor ?? null)
+          setTotal(list.total)
+          if (companion) {
+            setOverviewMap(companion.items)
+            setSegmentsCount(companion.segments_count)
+          }
+        } else {
+          // Legacy slow path: segment filter or overview-driven sort. The
+          // server must materialise every broker's overview to honour
+          // either, so we hit the single endpoint and read overview off
+          // each row.
+          const list = await listBrokers({
+            ...sharedFilters,
+            cursor: append ? (cursorOverride ?? undefined) : undefined,
+            limit: 50,
+            include: "overview_metrics",
+            segment,
+            sort: headerSort?.key,
+          })
+          setRows((prev) => (append ? [...prev, ...list.items] : list.items))
+          setCursor(list.next_cursor ?? null)
+          setTotal(list.total)
+          setSegmentsCount(list.segments_count ?? null)
+          // Fold overview rows into the map so the render function can
+          // read them uniformly on both paths.
+          setOverviewMap((prev) => {
+            const next = append ? { ...prev } : {}
+            for (const r of list.items) if (r.overview) next[r.id] = r.overview
+            return next
+          })
+        }
       } catch (e) {
         toast.error("Couldn't load brokers", { description: String(e) })
       } finally {
@@ -149,7 +202,7 @@ export function BrokersTable() {
         setLoadingMore(false)
       }
     },
-    [state, minFit, hasEmail, hasPhone, action, q, segment, headerSort],
+    [state, minFit, hasEmail, hasPhone, action, q, segment, headerSort, useFastPath],
   )
 
   React.useEffect(() => {
@@ -386,7 +439,10 @@ export function BrokersTable() {
             </TableRow>
           ) : (
             sorted.map((r) => {
-              const om = r.overview ?? null
+              // Overview data arrives in parallel on the fast path; fall
+              // back to the row-attached ``overview`` for the legacy path
+              // so segment/overview-sorted views keep rendering unchanged.
+              const om = overviewMap[r.id] ?? r.overview ?? null
               const series = om
                 ? om.monthly_series.slice(-activityMonths).map((p) => p.booked + p.rejected)
                 : [0, 0, 0]

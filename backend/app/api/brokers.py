@@ -410,6 +410,66 @@ async def list_brokers(
     )
 
 
+# ---------- GET /brokers/overview-summary ---------------------------------
+
+
+class OverviewSummaryOut(BaseModel):
+    """Companion payload for the brokers island.
+
+    ``items`` is a map keyed by ``lead_id`` so the frontend can fire this in
+    parallel with the fast ``GET /brokers`` list and splice overview columns
+    (health, win-rate, sparkline, segment) onto the already-rendered rows.
+    ``segments_count`` feeds the pill-row above the table.
+
+    This endpoint exists because the slow ``include=overview_metrics`` path
+    on ``GET /brokers`` fully computes per-broker overview blocks over the
+    whole filtered set — too expensive to block LCP on. The split keeps
+    the list route on the sub-sub-second SQL ranker without dropping any
+    UI column.
+    """
+
+    items: dict[str, OverviewMetricsOut]
+    segments_count: SegmentsCountOut
+
+
+@router.get("/overview-summary", response_model=OverviewSummaryOut)
+async def get_brokers_overview_summary(
+    request: Request,
+    state: str | None = Query(default=None, min_length=2, max_length=2),
+    min_fit: int | None = Query(default=None, ge=0, le=100),
+    has_email: bool | None = Query(default=None),
+    has_phone: bool | None = Query(default=None),
+    next_action: Literal["call", "email", "follow_up", "wait"] | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=128),
+    segment: Literal["all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral"] | None = Query(default=None),
+    sort: Literal["health", "win_rate", "booked", "rejected", "days_since", "name"] | None = Query(default=None),
+) -> OverviewSummaryOut:
+    """Overview block + segment counts for the brokers island.
+
+    Shares every filter with ``GET /brokers`` so the two calls return a
+    consistent set. ``segment``/``sort`` are honoured when present — the
+    segment pills' active state and overview-sorted columns both route
+    through here.
+    """
+    result = await svc_list_brokers(
+        request.app.state.sessionmaker,
+        state=state,
+        min_fit=min_fit,
+        has_email=has_email,
+        has_phone=has_phone,
+        next_action=next_action,
+        q=q,
+        include_overview=True,
+        segment=segment,
+        sort=sort,
+    )
+    segments = SegmentsCountOut(**(result.overview_segments_count or {}))
+    return OverviewSummaryOut(
+        items={lid: _overview_out(om) for lid, om in result.overview.items()},
+        segments_count=segments,
+    )
+
+
 # ---------- GET /brokers.csv ----------------------------------------------
 
 

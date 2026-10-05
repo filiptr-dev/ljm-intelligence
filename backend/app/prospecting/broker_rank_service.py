@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import json
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -43,6 +44,28 @@ from app.pipeline.broker_next_action import (
     compute,
 )
 from app.prospecting.brokers_service import BrokerRowData, ContactField, NextActionRow
+from app.shared.db import uow, uow_admin
+from app.shared.tenant import ADMIN_SENTINEL, _tenant_ctx
+
+
+@asynccontextmanager
+async def _bound_session(sessionmaker: Any):
+    """Open a session with the tenant bound for RLS.
+
+    Reads the tenant off the module's context var (set by the FastAPI
+    ``current_tenant`` dep in HTTP flows, by ``uow()`` in jobs, and by
+    tests). Admin-sentinel or absent → ``uow_admin``; otherwise ``uow``.
+    The two helpers each ``session.begin()`` and ``SET LOCAL
+    app.tenant_id`` so the RLS policy sees the right value for every
+    query opened here. See ``app/shared/db.py``.
+    """
+    tenant = _tenant_ctx.get()
+    if tenant is None or tenant == ADMIN_SENTINEL:
+        async with uow_admin(sessionmaker) as s:
+            yield s
+        return
+    async with uow(sessionmaker, tenant) as s:
+        yield s
 
 # ---------- filters + cursor -----------------------------------------------
 
@@ -449,7 +472,7 @@ async def rank_brokers(
             )
         total_sql = "SELECT COUNT(*) FROM leads l\n" + "\n".join(where_bits)
 
-    async with sessionmaker() as s:
+    async with _bound_session(sessionmaker) as s:
         res = await s.execute(text(page_sql), params)
         rows = res.fetchall()
         total_res = await s.execute(text(total_sql), params)
@@ -559,7 +582,7 @@ async def count_brokers_by_action(
     sql = (
         f"SELECT COUNT(*) FROM (\n  {base}\n  WHERE a.next_action_kind = :p_next_action\n) t"
     )
-    async with sessionmaker() as s:
+    async with _bound_session(sessionmaker) as s:
         res = await s.execute(text(sql), params)
         return int(res.scalar_one() or 0)
 
