@@ -9,12 +9,15 @@ than page views.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.analysis import kpi_service as kpi
 from app.analysis import service as svc
 from app.db import Session
+from app.shared.tenant import current_tenant
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
@@ -174,3 +177,202 @@ async def loss_reasons_endpoint(session: Session) -> list[LossReasonOut]:
 async def first_touch_endpoint(session: Session) -> list[FirstTouchOut]:
     rows = await svc.first_touch_latency(session)
     return [FirstTouchOut(broker_domain=r.broker_domain, latency_days=r.latency_days) for r in rows]
+
+
+# ---- shared KPI (foundation) endpoints -------------------------------------
+#
+# Every endpoint here goes through ``app.analysis.kpi_service``. The service
+# applies the ``Period`` VO (ET day-snap, 365d cap) and the 60s in-process
+# cache; the router just resolves the window from query args.
+
+
+class MetricPointOut(BaseModel):
+    bucket: str
+    key: str
+    value: float
+    n: int
+
+
+class KpiBlockOut(BaseModel):
+    label: str
+    unit: str
+    value: float
+    prev: float
+    delta_pct: float | None
+    direction: str
+    series: list[MetricPointOut]
+    thin: bool
+
+
+class BreakdownRowOut(BaseModel):
+    key: str
+    value: float
+    n: int
+    share: float
+
+
+class BreakdownOut(BaseModel):
+    dimension: str
+    rows: list[BreakdownRowOut]
+
+
+class FunnelStepOut(BaseModel):
+    label: str
+    count: int
+    drop_pct: float | None
+
+
+class FunnelOut(BaseModel):
+    steps: list[FunnelStepOut]
+
+
+class PeriodOut(BaseModel):
+    from_: datetime
+    to: datetime
+    label: str
+
+    model_config = {"populate_by_name": True}
+
+
+def _resolve_period(
+    period: str, from_: datetime | None, to: datetime | None
+) -> kpi.Period:
+    if from_ and to:
+        return kpi.Period(**{"from": from_, "to": to, "label": "custom"})
+    return kpi.period_from_label(period)
+
+
+class BookedVsRejectedOut(BaseModel):
+    series: list[MetricPointOut]
+    win_rate: list[MetricPointOut]
+
+
+class OverviewKpiOut(BaseModel):
+    period: dict
+    tiles: list[KpiBlockOut]
+    booked_vs_rejected: BookedVsRejectedOut
+
+
+@router.get("/overview", response_model=OverviewKpiOut)
+async def overview_kpi_endpoint(
+    session: Session,
+    period: Literal["today", "7d", "30d", "90d", "custom"] = Query(default="7d"),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = Query(default=None),
+) -> Any:
+    p = _resolve_period(period, from_, to)
+    return await kpi.overview_kpis(session, current_tenant(), p)
+
+
+class CrawlerKpiOut(BaseModel):
+    period: dict
+    tiles: list[KpiBlockOut]
+    by_state: BreakdownOut
+    last_crawl_finished_at: str | None
+
+
+@router.get("/crawler", response_model=CrawlerKpiOut)
+async def crawler_kpi_endpoint(
+    session: Session,
+    period: Literal["today", "7d", "30d", "90d", "custom"] = Query(default="7d"),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = Query(default=None),
+) -> Any:
+    p = _resolve_period(period, from_, to)
+    return await kpi.crawler_kpis(session, current_tenant(), p)
+
+
+class CallOutcomeKpiOut(BaseModel):
+    period: dict
+    tiles: list[KpiBlockOut]
+    mix: BreakdownOut
+    trend: list[MetricPointOut]
+
+
+@router.get("/call-outcomes", response_model=CallOutcomeKpiOut)
+async def call_outcome_kpi_endpoint(
+    session: Session,
+    period: Literal["today", "7d", "30d", "90d", "custom"] = Query(default="7d"),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = Query(default=None),
+) -> Any:
+    p = _resolve_period(period, from_, to)
+    return await kpi.call_outcome_kpis(session, current_tenant(), p)
+
+
+class DayPulseOut(BaseModel):
+    today_et: str
+    today: dict
+    yesterday: dict
+    conversion_today: float
+    conversion_yesterday: float
+
+
+@router.get("/day-pulse", response_model=DayPulseOut)
+async def day_pulse_endpoint(session: Session) -> Any:
+    return await kpi.day_pulse(session, current_tenant())
+
+
+class LaneRow(BaseModel):
+    lane: str
+    loads: int
+    avg_rate_usd: float | None
+    avg_usd_per_mile: float | None
+    n: int
+
+
+class LaneKpiOut(BaseModel):
+    period: dict
+    rows: list[LaneRow]
+    top: BreakdownOut
+
+
+@router.get("/lanes", response_model=LaneKpiOut)
+async def lane_kpi_endpoint(
+    session: Session,
+    period: Literal["today", "7d", "30d", "90d", "custom"] = Query(default="90d"),
+    region: str | None = Query(default=None, max_length=4),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = Query(default=None),
+) -> Any:
+    p = _resolve_period(period, from_, to)
+    return await kpi.lane_performance(session, current_tenant(), p, region)
+
+
+class CapacityKpiOut(BaseModel):
+    period: dict
+    tiles: list[KpiBlockOut]
+    funnel: FunnelOut
+
+
+@router.get("/capacity", response_model=CapacityKpiOut)
+async def capacity_kpi_endpoint(
+    session: Session,
+    period: Literal["today", "7d", "30d", "90d", "custom"] = Query(default="30d"),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = Query(default=None),
+) -> Any:
+    p = _resolve_period(period, from_, to)
+    return await kpi.capacity_kpis(session, current_tenant(), p)
+
+
+class BrokerKpiOut(BaseModel):
+    broker_id: str
+    period: dict
+    tiles: list[KpiBlockOut]
+    thin: bool
+
+
+@router.get("/broker-kpis/{broker_id}", response_model=BrokerKpiOut)
+async def broker_kpi_endpoint(
+    session: Session,
+    broker_id: str,
+    period: Literal["today", "7d", "30d", "90d", "custom"] = Query(default="30d"),
+    from_: datetime | None = Query(default=None, alias="from"),
+    to: datetime | None = Query(default=None),
+) -> Any:
+    p = _resolve_period(period, from_, to)
+    out = await kpi.broker_kpis(session, current_tenant(), broker_id, p)
+    if out.get("error") == "not_found":
+        raise HTTPException(status_code=404, detail="broker_not_found")
+    return out
