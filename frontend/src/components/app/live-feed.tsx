@@ -7,6 +7,7 @@ import { Road } from "@/components/brand/marks"
 import { cn } from "@/lib/utils"
 import { num, timeAgo } from "@/lib/format"
 import { useEngine, type FeedEvent } from "./engine"
+import { useTodayCounters } from "./use-today-counters"
 import { RegionTag } from "./ui"
 
 const ICON: Record<FeedEvent["kind"], React.ComponentType<{ className?: string }>> = {
@@ -66,7 +67,8 @@ export function LiveFeed({ limit = 12, className, filter }: { limit?: number; cl
 }
 
 export function MonitoringHero({ sources }: { sources: number }) {
-  const { counters, liveLeads } = useEngine()
+  const { liveLeads } = useEngine()
+  const counters = useTodayCounters()
   const us = liveLeads[0]?.region !== "EU"
   return (
     <section className="relative overflow-hidden rounded-sm bg-asphalt text-white">

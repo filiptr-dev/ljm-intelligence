@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CallOutcome, CapacityPost, CrawlRun, Lead, Load, SentLog
+from app.models import CallOutcome, CapacityPost, CrawlRun, Lead, Load, MailMessage, SentLog
 
 ET = ZoneInfo("America/New_York")
 
@@ -663,6 +663,66 @@ async def day_pulse(session: AsyncSession, tenant: str) -> dict:
         "yesterday": yesterday,
         "conversion_today": _conv(today),
         "conversion_yesterday": _conv(yesterday),
+    }
+
+
+async def topbar_counters(session: AsyncSession, tenant: str) -> dict:
+    """Today's four top-bar counters — real rows only, never a baseline.
+
+    "Today" is the ET calendar day (same boundary as ``day_pulse``). Every
+    query filters on ``tenant_id`` explicitly — fail closed, RLS is the
+    backstop, not the only guard (sqlite has no RLS at all).
+
+      * scanned — distinct companies the crawler touched today (``last_seen_at``)
+      * found   — companies first seen today (``first_seen_at``)
+      * sent    — outreach sends today (``sent_log``, test sends excluded)
+      * replies — inbound mail received today (``from_addr != mailbox``,
+        the inbox's inbound rule; ``sent_log.replied_at`` is never written)
+    """
+    now = datetime.now(UTC)
+    start = _snap_day_et(now)
+    end = _snap_day_et(now, end=True)
+
+    scanned = await _count_scalar(
+        session,
+        select(func.count(Lead.id)).where(
+            and_(Lead.tenant_id == tenant, Lead.last_seen_at >= start, Lead.last_seen_at <= end)
+        ),
+    )
+    found = await _count_scalar(
+        session,
+        select(func.count(Lead.id)).where(
+            and_(Lead.tenant_id == tenant, Lead.first_seen_at >= start, Lead.first_seen_at <= end)
+        ),
+    )
+    sent = await _count_scalar(
+        session,
+        select(func.count(SentLog.id)).where(
+            and_(
+                SentLog.tenant_id == tenant,
+                SentLog.is_test.is_(False),
+                SentLog.sent_at >= start,
+                SentLog.sent_at <= end,
+            )
+        ),
+    )
+    replies = await _count_scalar(
+        session,
+        select(func.count()).select_from(MailMessage).where(
+            and_(
+                MailMessage.tenant_id == tenant,
+                MailMessage.from_addr != MailMessage.mailbox,
+                MailMessage.received_at >= start,
+                MailMessage.received_at <= end,
+            )
+        ),
+    )
+    return {
+        "today_et": start.astimezone(ET).date().isoformat(),
+        "scanned": scanned,
+        "found": found,
+        "sent": sent,
+        "replies": replies,
     }
 
 

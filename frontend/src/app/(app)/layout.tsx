@@ -3,9 +3,9 @@ import { EngineProvider } from "@/components/app/engine"
 import { Topbar } from "@/components/app/topbar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { getStore } from "@/lib/data/store"
-import { DEMO_NOW, LEAD_KIND_LABEL } from "@/lib/data/types"
+import { LEAD_KIND_LABEL } from "@/lib/data/types"
 
-// render per request so "today" and "min ago" are always relative to the demo moment
+// render per request so the seeded feed's "min ago" stays relative to the demo moment
 export const dynamic = "force-dynamic"
 
 /**
@@ -16,8 +16,6 @@ export const dynamic = "force-dynamic"
  */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const store = await getStore()
-  const today = store.leads.filter((l) => DEMO_NOW.getTime() - new Date(l.discoveredAt).getTime() < 86_400_000).length
-  const baseline = { scanned: 18_240 + today * 37, found: today, sent: 64, replies: 9 }
   const seed = store.leads.slice(0, 8).map((l) => ({
     at: new Date(l.discoveredAt).getTime(),
     text: l.name,
@@ -27,7 +25,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   }))
 
   return (
-    <EngineProvider profile={store.profile} knownNames={store.knownNames} baseline={baseline} seed={seed}>
+    <EngineProvider profile={store.profile} knownNames={store.knownNames} seed={seed}>
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0 bg-background">

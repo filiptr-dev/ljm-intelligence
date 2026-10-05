@@ -30,7 +30,6 @@ export type { Campaign, CampaignRecipient, EmailDesign, Recipient, RecipientStat
 type Engine = {
   feed: FeedEvent[]
   liveLeads: Lead[]
-  counters: { scanned: number; found: number; sent: number; replies: number }
   autoOutreach: boolean
   setAutoOutreach: (v: boolean) => void
   campaigns: Campaign[]
@@ -113,20 +112,17 @@ export function EngineProvider({
   children,
   profile,
   knownNames,
-  baseline,
   seed,
 }: {
   children: React.ReactNode
   profile: LookalikeProfile
   knownNames: string[]
-  baseline: { scanned: number; found: number; sent: number; replies: number }
   seed: { at: number; text: string; detail: string; score: number; region: Region }[]
 }) {
   const [feed, setFeed] = React.useState<FeedEvent[]>(() =>
     seed.map((e, i) => ({ ...e, kind: "found" as const, id: -i - 1 })),
   )
   const [liveLeads, setLiveLeads] = React.useState<Lead[]>([])
-  const [counters, setCounters] = React.useState(baseline)
   const [autoOutreach, setAutoOutreach] = React.useState(true)
   const [campaigns, setCampaigns] = React.useState<Campaign[]>([])
   const autoRef = React.useRef(autoOutreach)
@@ -190,7 +186,6 @@ export function EngineProvider({
         const lead = { ...makeLead(rng, n, used, new Date()), id: `LIVE-${session}-${n}` }
         const scored: Lead = { ...lead, score: lookalikeScore(lead, profile) }
         setLiveLeads((ls) => [scored, ...ls])
-        setCounters((c) => ({ ...c, found: c.found + 1, scanned: c.scanned + 1 }))
         push({
           kind: "found",
           text: scored.name,
@@ -219,13 +214,11 @@ export function EngineProvider({
         }
       } else if (r < 0.32) {
         push({ kind: "duplicate", text: `Skipped ${pick(rng, knownNames)}`, detail: "Already in your broker database" })
-        setCounters((c) => ({ ...c, scanned: c.scanned + 1 }))
       } else {
         const region: Region = "US"
         const source = pick(rng, SOURCE_LIST[region])
         PAGES[source] = (PAGES[source] ?? Math.floor(rng() * 400) + 40) + 1
         const batch = Math.floor(rng() * 20) + 6
-        setCounters((c) => ({ ...c, scanned: c.scanned + batch }))
         push({ kind: "scan", text: `Scanning ${source}`, detail: `page ${PAGES[source]} · ${batch} companies checked`, region })
       }
       timer = setTimeout(tick, 7000 + rng() * 9000)
@@ -246,7 +239,6 @@ export function EngineProvider({
     const rng = createRng(Date.now() % 7919)
     const id = setInterval(() => {
       const now = Date.now()
-      let sentNow = 0
       const replies: string[] = []
       const wins: string[] = []
       const updates = new Map<string, Partial<CampaignRecipient>>()
@@ -260,7 +252,6 @@ export function EngineProvider({
           const key = `${c.id}:${r.id}`
           if (r.status === "queued" && sendBudget > 0) {
             sendBudget--
-            sentNow++
             updates.set(key, { status: r.verified === false && Math.random() < 0.35 ? "bounced" : "sent", at: now })
           } else if (r.status === "sent" && age > (c.single ? 10_000 : 30_000) && Math.random() < (c.single ? 0.04 : 0.006)) {
             updates.set(key, { status: "opened", at: now })
@@ -283,11 +274,7 @@ export function EngineProvider({
             : c,
         ),
       )
-      if (sentNow) setCounters((c) => ({ ...c, sent: c.sent + sentNow }))
-      if (replies.length) {
-        setCounters((c) => ({ ...c, replies: c.replies + replies.length }))
-        replies.forEach((r) => push({ kind: "reply", text: `Reply received: ${r}` }))
-      }
+      replies.forEach((r) => push({ kind: "reply", text: `Reply received: ${r}` }))
       wins.forEach((w) => push({ kind: "reply", text: `New customer won: ${w}`, detail: "First load booked from a campaign reply" }))
     }, 1000)
     return () => clearInterval(id)
@@ -360,8 +347,8 @@ export function EngineProvider({
   )
 
   const value = React.useMemo(
-    () => ({ feed, liveLeads, counters, autoOutreach, setAutoOutreach, campaigns, contacted, sendCampaign, sendFollowUp, sendEmail }),
-    [feed, liveLeads, counters, autoOutreach, campaigns, contacted, sendCampaign, sendFollowUp, sendEmail],
+    () => ({ feed, liveLeads, autoOutreach, setAutoOutreach, campaigns, contacted, sendCampaign, sendFollowUp, sendEmail }),
+    [feed, liveLeads, autoOutreach, campaigns, contacted, sendCampaign, sendFollowUp, sendEmail],
   )
   return <EngineContext.Provider value={value}>{children}</EngineContext.Provider>
 }

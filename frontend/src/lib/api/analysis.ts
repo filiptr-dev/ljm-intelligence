@@ -26,6 +26,7 @@ export type OverviewKpi = components["schemas"]["OverviewKpiOut"]
 export type CrawlerKpi = components["schemas"]["CrawlerKpiOut"]
 export type CallOutcomeKpi = components["schemas"]["CallOutcomeKpiOut"]
 export type DayPulse = components["schemas"]["DayPulseOut"]
+export type TopbarCounters = components["schemas"]["TopbarCountersOut"]
 export type LaneKpi = components["schemas"]["LaneKpiOut"]
 export type CapacityKpi = components["schemas"]["CapacityKpiOut"]
 export type BrokerKpi = components["schemas"]["BrokerKpiOut"]
@@ -70,6 +71,12 @@ export async function getBrokerKpi(brokerId: string, opts: PeriodQuery = {}, sig
     signal,
   })
   return unwrap(res, `/analysis/broker-kpis/${brokerId}`)
+}
+
+/** GET /analysis/topbar-counters — today's (ET) scanned / found / sent / replies for the tenant. */
+export async function getTopbarCounters(signal?: AbortSignal): Promise<TopbarCounters> {
+  const res = await api.GET("/analysis/topbar-counters", { signal })
+  return unwrap(res, "/analysis/topbar-counters")
 }
 
 function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path: string): T {

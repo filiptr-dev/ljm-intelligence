@@ -1214,6 +1214,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analysis/topbar-counters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Topbar Counters Endpoint
+         * @description Top-bar "today" counters (ET, tenant) — replaces the client-side baseline.
+         */
+        get: operations["topbar_counters_endpoint_analysis_topbar_counters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analysis/lanes": {
         parameters: {
             query?: never;
@@ -3481,6 +3501,19 @@ export interface components {
             to_call_today: components["schemas"]["TileCount"];
             new_leads_since_last_crawl: components["schemas"]["NewLeadsTile"];
             loads_booked_90d: components["schemas"]["LoadsBookedTile"];
+        };
+        /** TopbarCountersOut */
+        TopbarCountersOut: {
+            /** Today Et */
+            today_et: string;
+            /** Scanned */
+            scanned: number;
+            /** Found */
+            found: number;
+            /** Sent */
+            sent: number;
+            /** Replies */
+            replies: number;
         };
         /** TriageOut */
         TriageOut: {
@@ -6014,6 +6047,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DayPulseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    topbar_counters_endpoint_analysis_topbar_counters_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopbarCountersOut"];
                 };
             };
             /** @description Validation Error */

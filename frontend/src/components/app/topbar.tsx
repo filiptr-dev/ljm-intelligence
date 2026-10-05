@@ -5,10 +5,10 @@ import { Tire } from "@/components/brand/tire"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useSession } from "@/lib/auth/session"
 import { num } from "@/lib/format"
-import { useEngine } from "./engine"
+import { useTodayCounters } from "./use-today-counters"
 
 export function Topbar() {
-  const { counters } = useEngine()
+  const counters = useTodayCounters()
   const { user, logout, status } = useSession()
 
   async function onLogout() {

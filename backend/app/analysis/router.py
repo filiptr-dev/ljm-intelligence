@@ -313,6 +313,20 @@ async def day_pulse_endpoint(session: Session) -> Any:
     return await kpi.day_pulse(session, current_tenant())
 
 
+class TopbarCountersOut(BaseModel):
+    today_et: str
+    scanned: int
+    found: int
+    sent: int
+    replies: int
+
+
+@router.get("/topbar-counters", response_model=TopbarCountersOut)
+async def topbar_counters_endpoint(session: Session) -> Any:
+    """Top-bar "today" counters (ET, tenant) — replaces the client-side baseline."""
+    return await kpi.topbar_counters(session, current_tenant())
+
+
 class LaneRow(BaseModel):
     lane: str
     loads: int
