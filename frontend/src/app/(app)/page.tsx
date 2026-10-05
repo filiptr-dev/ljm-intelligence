@@ -1,10 +1,14 @@
 /**
  * Overview — the Today desk. SERVER COMPONENT.
  *
- * One aggregate read (`GET /overview/today` via the typed server-side
- * client) powers three honest tiles, one merged "Do next" action list,
- * and one booked-vs-rejected chart. The server owns the ordering and the
- * demo flags — the UI never re-sorts.
+ * The three remote reads (`/overview/today`, `/inbox/overview-kpis`,
+ * `/analysis/overview`) hit the same Render FastAPI. On a cold free dyno
+ * the first one eats the 20–50s boot; the other two then arrive within
+ * milliseconds. We parallelise the three awaits with `Promise.allSettled`
+ * so the cold start pays once, not three times — and we wrap the
+ * data-dependent body in `<Suspense>` so the page shell (header, filters)
+ * streams out immediately. The companion `loading.tsx` serves the same
+ * skeleton while the shell itself is still cold.
  *
  * Why server-first: the typed client reads the HttpOnly session cookie
  * via `next/headers` and attaches the bearer upstream. The browser never
@@ -14,11 +18,12 @@
  */
 
 import * as React from "react"
+import { Suspense } from "react"
 import Link from "next/link"
 import { ArrowRight, Phone, PhoneCall, Sparkles, Truck, UserPlus, Zap } from "lucide-react"
 import { PageHeader, Panel, StatTile } from "@/components/app/ui"
 import { FilterBar } from "@/components/analytics/FilterBar"
-import { readFilters, filtersToQuery } from "@/components/analytics/useFilters"
+import { readFilters, filtersToQuery, type AnalyticsFilters } from "@/components/analytics/useFilters"
 import { KpiTile } from "@/components/charts/primitives"
 import { OutcomeColumns } from "@/components/charts/charts"
 import { buttonVariants } from "@/components/ui/button"
@@ -27,6 +32,7 @@ import * as analysis from "@/lib/api/analysis"
 import * as inbox from "@/lib/api/inbox"
 import { cn } from "@/lib/utils"
 import { OverviewRetryButton } from "./overview-retry"
+import { OverviewSkeleton } from "./overview-skeleton"
 
 export const dynamic = "force-dynamic"
 
@@ -97,23 +103,34 @@ function HeaderActions({ data }: { data: OverviewToday | null }) {
   )
 }
 
-export default async function OverviewPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>
-}) {
-  const sp = await searchParams
-  const filters = readFilters(sp)
+/**
+ * The data-heavy portion of the Overview page. Lives behind `<Suspense>`
+ * so the shell flushes without waiting for the Render dyno to wake up.
+ *
+ * All three remote reads fire in parallel via `Promise.allSettled`: one
+ * cold-start warms the dyno for all three, and a failure in any single
+ * call does not swallow the others. `getToday()` already throws on
+ * failure (used for the top-of-page error banner); the other two already
+ * `.catch(() => null)` for graceful degradation — settling preserves
+ * both shapes without extra try/catch noise.
+ */
+async function OverviewContent({ filters }: { filters: AnalyticsFilters }) {
+  const [todayRes, inboxRes, kpiRes] = await Promise.allSettled([
+    getToday(),
+    inbox.overviewKpis(),
+    analysis.getOverviewKpi(filtersToQuery(filters)),
+  ])
 
-  let data: OverviewToday | null = null
-  let error: string | null = null
-  try {
-    data = await getToday()
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
-  const inboxKpis = await inbox.overviewKpis().catch(() => null)
-  const kpi = await analysis.getOverviewKpi(filtersToQuery(filters)).catch(() => null)
+  const data: OverviewToday | null =
+    todayRes.status === "fulfilled" ? todayRes.value : null
+  const error: string | null =
+    todayRes.status === "rejected"
+      ? todayRes.reason instanceof Error
+        ? todayRes.reason.message
+        : String(todayRes.reason)
+      : null
+  const inboxKpis = inboxRes.status === "fulfilled" ? inboxRes.value : null
+  const kpi = kpiRes.status === "fulfilled" ? kpiRes.value : null
 
   const tiles = data?.tiles
   const doNext = data?.do_next ?? []
@@ -154,22 +171,6 @@ export default async function OverviewPage({
 
   return (
     <>
-      <PageHeader
-        eyebrow="Overview"
-        title="Today"
-        description="Who to call and what to chase today."
-        actions={<HeaderActions data={data} />}
-      />
-
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <FilterBar />
-        {kpi ? (
-          <span className="text-xs text-muted-foreground">
-            Comparing {filters.period === "today" ? "today" : filters.period} vs prior period
-          </span>
-        ) : null}
-      </div>
-
       {error ? (
         <div className="mb-5 rounded-sm border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <div className="flex items-center justify-between gap-3">
@@ -339,6 +340,38 @@ export default async function OverviewPage({
           )}
         </Panel>
       </div>
+    </>
+  )
+}
+
+export default async function OverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const sp = await searchParams
+  const filters = readFilters(sp)
+  const kpiPeriodLabel = filters.period === "today" ? "today" : filters.period
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Overview"
+        title="Today"
+        description="Who to call and what to chase today."
+        actions={<HeaderActions data={null} />}
+      />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <FilterBar />
+        <span className="text-xs text-muted-foreground">
+          Comparing {kpiPeriodLabel} vs prior period
+        </span>
+      </div>
+
+      <Suspense fallback={<OverviewSkeleton />}>
+        <OverviewContent filters={filters} />
+      </Suspense>
     </>
   )
 }
