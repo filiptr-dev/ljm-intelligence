@@ -173,6 +173,17 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """SQLite tosses tz info; treat naive as UTC so arithmetic works everywhere.
+
+    Mirrors ``app/inbox/service.py::_as_utc`` — same shape, kept local to avoid
+    a cross-context import between prospecting and inbox.
+    """
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
@@ -967,6 +978,7 @@ async def get_overview_metrics(
     for lid, outcome, logged_at in call_rows:
         if lid not in monthly:
             continue
+        logged_at = _as_utc(logged_at)
         mb = _month_bucket(logged_at)
         if outcome == "booked":
             booked_12m[lid] += 1
@@ -984,6 +996,8 @@ async def get_overview_metrics(
     for lid, sent_at, replied_at in sent_rows:
         if lid not in monthly:
             continue
+        sent_at = _as_utc(sent_at)
+        replied_at = _as_utc(replied_at)
         mb = _month_bucket(sent_at)
         if mb in month_set:
             monthly[lid][mb]["sent"] += 1
@@ -1034,6 +1048,7 @@ async def get_overview_metrics(
     for lid, outcome, logged_at in call_rows:
         if lid not in prior_booked:
             continue
+        logged_at = _as_utc(logged_at)
         if prior_cutoff_lo_year <= logged_at < prior_cutoff_hi:
             if outcome == "booked":
                 prior_booked[lid] += 1
@@ -1047,6 +1062,7 @@ async def get_overview_metrics(
     for lid, sent_at, _replied_at in sent_rows:
         if lid not in prior_sent_30d:
             continue
+        sent_at = _as_utc(sent_at)
         if prior_cutoff_lo_vol <= sent_at < prior_cutoff_hi:
             prior_sent_30d[lid] += 1
         if sent_at < prior_cutoff_hi:
@@ -1064,7 +1080,7 @@ async def get_overview_metrics(
     # Build final per-lead row.
     result: dict[str, OverviewMetricsRow] = {}
     for lid in lead_ids:
-        la = (last_activity_by_lead or {}).get(lid)
+        la = _as_utc((last_activity_by_lead or {}).get(lid))
         days_since: int | None = None
         if la is not None:
             days_since = max(0, (now - la).days)
