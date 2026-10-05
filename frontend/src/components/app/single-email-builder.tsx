@@ -30,6 +30,8 @@ import { DesignFields, MessageFields, PreviewPanel, Step } from "./email-builder
 import { renderTemplate } from "./email-preview"
 import { useBackendLeads } from "@/lib/backend-leads"
 import { DEFAULT_DESIGN, toRecipient, useEngine, type EmailDesign } from "./engine"
+import type { EmailSendAdapter } from "@/lib/api/email-send"
+import { rewrite as aiRewrite, aiDraftCompose } from "@/lib/api/inbox"
 import { Segmented } from "./segmented"
 import { RegionTag, SegmentBadge } from "./ui"
 
@@ -80,36 +82,58 @@ export type SingleEmailBuilderProps = {
   /** Where the "back" link points, and where we return after sending. */
   backHref: string
   backLabel: string
+  /** Pre-synthesised recipient when `?to=<email>` seeded the composer. */
+  initialRecipient?: ContactOption
+  /** Pre-filled subject (from `?subject=…` or an AI draft). */
+  initialSubject?: string
+  /** Pre-filled body (from `?body=…` or an AI draft). */
+  initialBody?: string
+  /**
+   * Optional real-send adapter. When provided, the builder posts the
+   * subject + body + design through this seam instead of the demo
+   * `useEngine().sendEmail`. `/outreach` leaves it undefined and
+   * keeps the client-side simulated path.
+   */
+  onSend?: EmailSendAdapter
+  /** Starting design — defaults to engine's `DEFAULT_DESIGN`. */
+  defaultDesign?: EmailDesign
+  /** Default tone — defaults to "friendly" (unchanged from before). */
+  defaultTone?: OutreachTone
 }
 
-export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, backHref, backLabel }: SingleEmailBuilderProps) {
+export function SingleEmailBuilder({
+  contacts, initialToId, initialPurpose, backHref, backLabel,
+  initialRecipient, initialSubject, initialBody,
+  onSend, defaultDesign, defaultTone,
+}: SingleEmailBuilderProps) {
   const router = useRouter()
   const { liveLeads, sendEmail } = useEngine()
   const { real: realLeads } = useBackendLeads(200)
 
   const all = React.useMemo<ContactOption[]>(
     () => [
+      ...(initialRecipient ? [initialRecipient] : []),
       ...realLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
       ...liveLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
       ...contacts,
     ],
-    [realLeads, liveLeads, contacts],
+    [initialRecipient, realLeads, liveLeads, contacts],
   )
 
-  const [toId, setToId] = React.useState(initialToId)
+  const [toId, setToId] = React.useState(initialToId ?? initialRecipient?.id)
   const to = all.find((c) => c.id === toId)
   const [q, setQ] = React.useState("")
 
   const [purpose, setPurpose] = React.useState<EmailPurpose>(initialPurpose ?? suggestPurpose(to))
-  const [tone, setTone] = React.useState<OutreachTone>("friendly")
+  const [tone, setTone] = React.useState<OutreachTone>(defaultTone ?? "friendly")
   const [custom, setCustom] = React.useState(false)
   const [brief, setBrief] = React.useState("")
   const [understood, setUnderstood] = React.useState<string[]>([])
-  const [subject, setSubject] = React.useState("")
-  const [body, setBody] = React.useState("")
+  const [subject, setSubject] = React.useState(initialSubject ?? "")
+  const [body, setBody] = React.useState(initialBody ?? "")
   const [writing, setWriting] = React.useState(false)
 
-  const [design, setDesign] = React.useState<EmailDesign>(DEFAULT_DESIGN)
+  const [design, setDesign] = React.useState<EmailDesign>(defaultDesign ?? DEFAULT_DESIGN)
   const [previewIdx, setPreviewIdx] = React.useState(0)
   const [mobile, setMobile] = React.useState(false)
 
@@ -126,6 +150,28 @@ export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, back
     if (!to) return
     setWriting(true)
     try {
+      // Real-send mode: go through the server (`/inbox/ai-draft` for a
+      // fresh draft, `/inbox/rewrite` for a rewrite when the body is
+      // already there). Falls back to the demo `/api/ai/draft` route
+      // when no `onSend` adapter is injected — unchanged `/outreach`
+      // behaviour.
+      if (onSend) {
+        const hasBody = body.trim().length > 0
+        if (hasBody && !custom) {
+          const r = await aiRewrite({ body_text: body, tone, brief: custom ? brief : undefined })
+          await streamInto(r.body_text, setBody)
+        } else {
+          const d = await aiDraftCompose({
+            to: to.email, purpose, tone,
+            brief: custom ? brief : undefined,
+            recipient_name: to.contactName,
+            lane: to.lane, equipment: to.equipment,
+          })
+          setSubject(renderTemplate(d.subject, to))
+          await streamInto(renderTemplate(d.body_text, to), setBody)
+        }
+        return
+      }
       const res = await fetch("/api/ai/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,7 +189,7 @@ export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, back
     } finally {
       setWriting(false)
     }
-  }, [to, purpose, tone, custom, brief])
+  }, [to, purpose, tone, custom, brief, body, onSend])
 
   // redraft when recipient/purpose/tone changes (custom brief waits for "Write it for me")
   const writeRef = React.useRef(write)
@@ -164,15 +210,41 @@ export function SingleEmailBuilder({ contacts, initialToId, initialPurpose, back
   const sendAt = when === "now" ? undefined : when === "tomorrow" ? atNine(1).getTime() : scheduleAt ? new Date(scheduleAt).getTime() : undefined
   const canSend = !!to && !!subject && !!body && !writing && !(when === "scheduled" && !scheduleAt)
 
-  const send = () => {
+  const send = async () => {
     if (!to) return
     const at = sendAt ?? nowMs()
+    // Real-send mode: subject/body (with personal fields pre-rendered in
+    // the editor) go through the injected adapter. Scheduled sends are not
+    // yet implemented server-side — the UI stays, we route "later" through
+    // the simulated path with a visible banner (plan out-of-scope #5).
+    if (onSend && onSend.kind === "single" && when === "now") {
+      try {
+        const res = await onSend.send({
+          to: to.email,
+          subject: renderTemplate(subject, to),
+          body_text: renderTemplate(body, to),
+          design, tone, purpose,
+        })
+        if (!res.ok) {
+          toast.error(res.reason ?? "Send failed")
+          return
+        }
+        toast.success(`Email sent to ${to.contactName}`, {
+          description: `Sent via ${res.mode ?? "simulated"} adapter.`,
+        })
+        router.push(backHref)
+        return
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Send failed")
+        return
+      }
+    }
     sendEmail({
       recipient: to, purpose, tone, brief: custom ? brief : undefined,
       subject, body, at, design,
     })
     toast.success(when === "now" ? `Email sent to ${to.contactName}` : `Email scheduled for ${formatWhen(at)}`, {
-      description: "You'll see when it's opened and what they reply.",
+      description: when === "now" ? "You'll see when it's opened and what they reply." : "Scheduled send is simulated until the queue backend lands.",
     })
     router.push(backHref)
   }

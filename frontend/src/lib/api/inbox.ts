@@ -62,28 +62,110 @@ export async function getAiDraft(threadId: string, signal?: AbortSignal): Promis
   return res.data as AiDraft
 }
 
+/** Design block the rich builder sends alongside the body. */
+export type EmailDesignWire = {
+  accent_hex?: string | null
+  signature?: boolean
+  logo?: boolean
+  cta_label?: string
+  cta_url?: string
+  layout?: string
+  show_truck?: boolean
+}
+
 export async function sendReply(
   threadId: string,
-  body: { body_text: string; body_html?: string },
+  body: {
+    body_text: string
+    body_html?: string
+    design?: EmailDesignWire
+    tone?: string
+    purpose?: string
+  },
   signal?: AbortSignal,
 ): Promise<ReplyOut> {
   const res = await api.POST("/inbox/threads/{thread_id}/reply", {
     params: { path: { thread_id: threadId } },
-    body: { body_text: body.body_text, body_html: body.body_html ?? "" },
+    // openapi-fetch's generated type for POST bodies evolves after `pnpm
+    // gen:api`; we send the extended shape and let the backend ignore
+    // unknown fields until the schema is regenerated.
+    body: {
+      body_text: body.body_text,
+      body_html: body.body_html ?? "",
+      ...(body.design ? { design: body.design } : {}),
+      ...(body.tone ? { tone: body.tone } : {}),
+      ...(body.purpose ? { purpose: body.purpose } : {}),
+    } as never,
     signal,
   })
   return unwrap(res, `/inbox/threads/${threadId}/reply`)
 }
 
 export async function compose(
-  body: { to: string; subject: string; body_text: string; body_html?: string },
+  body: {
+    to: string
+    subject: string
+    body_text: string
+    body_html?: string
+    design?: EmailDesignWire
+    tone?: string
+    purpose?: string
+  },
   signal?: AbortSignal,
 ): Promise<ComposeOut> {
   const res = await api.POST("/inbox/compose", {
-    body: { ...body, body_html: body.body_html ?? "" },
+    body: {
+      to: body.to,
+      subject: body.subject,
+      body_text: body.body_text,
+      body_html: body.body_html ?? "",
+      ...(body.design ? { design: body.design } : {}),
+      ...(body.tone ? { tone: body.tone } : {}),
+      ...(body.purpose ? { purpose: body.purpose } : {}),
+    } as never,
     signal,
   })
   return unwrap(res, "/inbox/compose")
+}
+
+/** Compose-time AI draft — hits the server-side `/inbox/ai-draft`. */
+export async function aiDraftCompose(
+  body: {
+    to: string
+    purpose: string
+    tone: string
+    brief?: string
+    recipient_name?: string
+    lane?: string
+    equipment?: string
+  },
+  signal?: AbortSignal,
+): Promise<AiDraft> {
+  const res = await api.POST("/inbox/ai-draft" as never, {
+    body: {
+      to: body.to,
+      purpose: body.purpose,
+      tone: body.tone,
+      brief: body.brief ?? "",
+      recipient_name: body.recipient_name ?? "",
+      lane: body.lane ?? "",
+      equipment: body.equipment ?? "",
+    } as never,
+    signal,
+  } as never)
+  return unwrap(res as never, "/inbox/ai-draft")
+}
+
+/** Rewrite the body in the given tone — hits the server-side `/inbox/rewrite`. */
+export async function rewrite(
+  body: { body_text: string; tone: string; brief?: string },
+  signal?: AbortSignal,
+): Promise<AiDraft> {
+  const res = await api.POST("/inbox/rewrite" as never, {
+    body: { body_text: body.body_text, tone: body.tone, brief: body.brief ?? "" } as never,
+    signal,
+  } as never)
+  return unwrap(res as never, "/inbox/rewrite")
 }
 
 export async function statusBoard(limit = 200, signal?: AbortSignal): Promise<StatusBoardRow[]> {

@@ -41,6 +41,8 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
   const draft = await inbox.getAiDraft(threadId).catch(() => null)
   const subjectForReply = draft?.subject ?? (thread.subject.toLowerCase().startsWith("re:") ? thread.subject : `Re: ${thread.subject}`)
   const bodyForReply = draft?.body_text ?? ""
+  const lastInbound = [...thread.messages].reverse().find((m) => m.direction === "in")
+  const recipientEmail = lastInbound?.from_addr ?? thread.messages[0]?.from_addr ?? ""
 
   return (
     <>
@@ -90,7 +92,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
       </Panel>
 
       <div className="mt-5">
-        <ThreadReply threadId={threadId} initialSubject={subjectForReply} initialBody={bodyForReply} />
+        <ThreadReply threadId={threadId} initialSubject={subjectForReply} initialBody={bodyForReply} recipientEmail={recipientEmail} />
       </div>
     </>
   )

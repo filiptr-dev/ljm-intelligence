@@ -979,6 +979,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/ai-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Draft Compose Endpoint
+         * @description Compose-time AI draft. Reuses the ``inbox_draft_reply`` AI feature.
+         */
+        post: operations["ai_draft_compose_endpoint_inbox_ai_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/rewrite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Rewrite Endpoint
+         * @description Rewrite the body in the given tone. Falls back to the original body
+         *     on any provider error — never leaves the user with an empty editor.
+         */
+        post: operations["ai_rewrite_endpoint_inbox_rewrite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/forget-contact": {
         parameters: {
             query?: never;
@@ -1559,6 +1600,41 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** AiDraftComposeIn */
+        AiDraftComposeIn: {
+            /**
+             * To
+             * Format: email
+             */
+            to: string;
+            /** Purpose */
+            purpose: string;
+            /**
+             * Tone
+             * @default professional
+             */
+            tone: string;
+            /**
+             * Brief
+             * @default
+             */
+            brief: string;
+            /**
+             * Recipient Name
+             * @default
+             */
+            recipient_name: string;
+            /**
+             * Lane
+             * @default
+             */
+            lane: string;
+            /**
+             * Equipment
+             * @default
+             */
+            equipment: string;
+        };
         /** AiDraftOutModel */
         AiDraftOutModel: {
             /** Subject */
@@ -1825,6 +1901,11 @@ export interface components {
              * @default
              */
             body_html: string;
+            design?: components["schemas"]["EmailDesignIn"] | null;
+            /** Tone */
+            tone?: string | null;
+            /** Purpose */
+            purpose?: string | null;
         };
         /** ComposeOut */
         ComposeOut: {
@@ -2081,6 +2162,47 @@ export interface components {
             skipped_overlap: boolean;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * EmailDesignIn
+         * @description Design block the rich builder sends alongside the body.
+         *
+         *     Field names mirror the frontend ``EmailDesign`` type one-for-one so
+         *     the generated OpenAPI client types stay round-trippable.
+         */
+        EmailDesignIn: {
+            /** Accent Hex */
+            accent_hex?: string | null;
+            /**
+             * Signature
+             * @default true
+             */
+            signature: boolean;
+            /**
+             * Logo
+             * @default true
+             */
+            logo: boolean;
+            /**
+             * Cta Label
+             * @default
+             */
+            cta_label: string;
+            /**
+             * Cta Url
+             * @default
+             */
+            cta_url: string;
+            /**
+             * Layout
+             * @default branded
+             */
+            layout: string;
+            /**
+             * Show Truck
+             * @default true
+             */
+            show_truck: boolean;
         };
         /** EmailListItem */
         EmailListItem: {
@@ -3098,6 +3220,11 @@ export interface components {
              * @default
              */
             body_html: string;
+            design?: components["schemas"]["EmailDesignIn"] | null;
+            /** Tone */
+            tone?: string | null;
+            /** Purpose */
+            purpose?: string | null;
         };
         /** ReplyOut */
         ReplyOut: {
@@ -3129,6 +3256,21 @@ export interface components {
             ok: boolean;
             /** Id */
             id: number;
+        };
+        /** RewriteIn */
+        RewriteIn: {
+            /** Body Text */
+            body_text: string;
+            /**
+             * Tone
+             * @default professional
+             */
+            tone: string;
+            /**
+             * Brief
+             * @default
+             */
+            brief: string;
         };
         /** SendIn */
         SendIn: {
@@ -5495,7 +5637,9 @@ export interface operations {
     };
     ai_draft_endpoint_inbox_threads__thread_id__ai_draft_get: {
         parameters: {
-            query?: never;
+            query?: {
+                tone?: string;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -5585,6 +5729,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComposeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_draft_compose_endpoint_inbox_ai_draft_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiDraftComposeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiDraftOutModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_rewrite_endpoint_inbox_rewrite_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RewriteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiDraftOutModel"];
                 };
             };
             /** @description Validation Error */
