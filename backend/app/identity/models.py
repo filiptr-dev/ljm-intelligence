@@ -6,24 +6,17 @@ Re-exported via `app.models` so Alembic autogenerate still sees the full
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
-    CheckConstraint,
-    Date,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
     LargeBinary,
-    Numeric,
     String,
-    Text,
     UniqueConstraint,
-    false,
     func,
     text,
 )
@@ -31,7 +24,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 from app.shared.orm import JSONType, TenantMixin
-
 
 # ---------- Platform / tenant identity tables (migration 0016) --------------
 #
@@ -200,6 +192,16 @@ class SettingsRow(Base):
     chr_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lb123_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     truckstop_configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Brand settings for the rich email builder (migration 0020). All
+    # nullable — code reads with a CLIENT-shaped fallback so existing rows
+    # need no backfill.
+    brand_company: Mapped[str | None] = mapped_column(String(128))
+    brand_fleet: Mapped[str | None] = mapped_column(String(128))
+    brand_dispatcher: Mapped[str | None] = mapped_column(String(128))
+    brand_phone: Mapped[str | None] = mapped_column(String(64))
+    brand_email: Mapped[str | None] = mapped_column(String(320))
+    brand_logo_url: Mapped[str | None] = mapped_column(String(500))
+    brand_accent_hex: Mapped[str | None] = mapped_column(String(7))
 
 
 class User(TenantMixin, Base):

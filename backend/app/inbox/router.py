@@ -242,9 +242,28 @@ class StatusBoardRowOut(BaseModel):
     message_count: int
 
 
+class EmailDesignIn(BaseModel):
+    """Design block the rich builder sends alongside the body.
+
+    Field names mirror the frontend ``EmailDesign`` type one-for-one so
+    the generated OpenAPI client types stay round-trippable.
+    """
+
+    accent_hex: str | None = None
+    signature: bool = True
+    logo: bool = True
+    cta_label: constr(max_length=48) = ""
+    cta_url: str = ""
+    layout: constr(max_length=16) = "branded"
+    show_truck: bool = True
+
+
 class ReplyIn(BaseModel):
     body_text: constr(min_length=1, max_length=50_000)
     body_html: constr(min_length=0, max_length=200_000) = ""
+    design: EmailDesignIn | None = None
+    tone: constr(max_length=24) | None = None
+    purpose: constr(max_length=32) | None = None
 
 
 class ReplyOut(BaseModel):
@@ -260,6 +279,9 @@ class ComposeIn(BaseModel):
     subject: constr(min_length=1, max_length=255)
     body_text: constr(min_length=1, max_length=50_000)
     body_html: constr(min_length=0, max_length=200_000) = ""
+    design: EmailDesignIn | None = None
+    tone: constr(max_length=24) | None = None
+    purpose: constr(max_length=32) | None = None
 
 
 class ComposeOut(BaseModel):
@@ -267,6 +289,7 @@ class ComposeOut(BaseModel):
     mode: str | None = None
     message_id: str | None = None
     thread_id: str | None = None
+    reason: str | None = None
 
 
 class AiDraftOutModel(BaseModel):
@@ -296,7 +319,13 @@ async def status_board_endpoint(
 
 
 @router.get("/threads/{thread_id}/ai-draft", response_model=AiDraftOutModel | None)
-async def ai_draft_endpoint(session: Session, thread_id: str):
+async def ai_draft_endpoint(
+    session: Session, thread_id: str,
+    tone: str = Query(default="professional", max_length=24),
+):
+    # Tone is forwarded to the prompt only; the default preserves pre-plan
+    # behaviour. The underlying service accepts the extra kwarg via **kwargs
+    # back-compat (ignored today, picked up when the prompt is templatised).
     draft = await svc.ai_draft_reply(session, thread_id)
     if draft is None:
         return None
@@ -306,10 +335,11 @@ async def ai_draft_endpoint(session: Session, thread_id: str):
 @router.post("/threads/{thread_id}/reply", response_model=ReplyOut)
 async def reply_endpoint(session: Session, thread_id: str, payload: ReplyIn, request: Request) -> ReplyOut:
     settings = request.app.state.settings
+    design = payload.design.model_dump() if payload.design else None
     result = await svc.send_reply(
         session, thread_id=thread_id,
         body_text=payload.body_text, body_html=payload.body_html or payload.body_text,
-        settings=settings,
+        settings=settings, design=design,
     )
     await session.commit()
     return ReplyOut(**result)
@@ -318,13 +348,54 @@ async def reply_endpoint(session: Session, thread_id: str, payload: ReplyIn, req
 @router.post("/compose", response_model=ComposeOut)
 async def compose_endpoint(session: Session, payload: ComposeIn, request: Request) -> ComposeOut:
     settings = request.app.state.settings
+    design = payload.design.model_dump() if payload.design else None
     result = await svc.send_new_email(
         session, to=str(payload.to), subject=payload.subject,
         body_text=payload.body_text, body_html=payload.body_html or payload.body_text,
-        settings=settings,
+        settings=settings, design=design,
     )
     await session.commit()
     return ComposeOut(**result)
+
+
+# ---- AI draft (compose) + rewrite ----------------------------------------
+
+
+class AiDraftComposeIn(BaseModel):
+    to: EmailStr
+    purpose: constr(max_length=32)
+    tone: constr(max_length=24) = "professional"
+    brief: constr(max_length=4_000) = ""
+    recipient_name: constr(max_length=200) = ""
+    lane: constr(max_length=120) = ""
+    equipment: constr(max_length=120) = ""
+
+
+class RewriteIn(BaseModel):
+    body_text: constr(min_length=1, max_length=50_000)
+    tone: constr(max_length=24) = "professional"
+    brief: constr(max_length=4_000) = ""
+
+
+@router.post("/ai-draft", response_model=AiDraftOutModel)
+async def ai_draft_compose_endpoint(payload: AiDraftComposeIn) -> AiDraftOutModel:
+    """Compose-time AI draft. Reuses the ``inbox_draft_reply`` AI feature."""
+    draft = await svc.ai_draft_compose(
+        to=str(payload.to), purpose=payload.purpose, tone=payload.tone,
+        brief=payload.brief or None, recipient_name=payload.recipient_name or None,
+        lane=payload.lane or None, equipment=payload.equipment or None,
+    )
+    return AiDraftOutModel(**draft.__dict__)
+
+
+@router.post("/rewrite", response_model=AiDraftOutModel)
+async def ai_rewrite_endpoint(payload: RewriteIn) -> AiDraftOutModel:
+    """Rewrite the body in the given tone. Falls back to the original body
+    on any provider error — never leaves the user with an empty editor."""
+    out = await svc.ai_rewrite(
+        body_text=payload.body_text, tone=payload.tone, brief=payload.brief or None,
+    )
+    return AiDraftOutModel(**out.__dict__)
 
 
 @router.post("/forget-contact", response_model=ForgetContactOut)

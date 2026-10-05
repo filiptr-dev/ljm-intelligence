@@ -722,6 +722,213 @@ async def ai_draft_reply(
     return AiDraftOut(subject=subject, body_text=body, body_html=html)
 
 
+async def ai_draft_compose(
+    *,
+    to: str,
+    purpose: str,
+    tone: str,
+    brief: str | None = None,
+    recipient_name: str | None = None,
+    lane: str | None = None,
+    equipment: str | None = None,
+    provider: Any | None = None,
+) -> AiDraftOut:
+    """Compose-time AI draft. Reuses the ``inbox_draft_reply`` feature slot;
+    the prompt switches on ``purpose`` + ``tone`` + the optional user brief.
+
+    Falls back to a safe template when the provider is null / errors /
+    times out — same bounded pattern as ``ai_draft_reply``.
+    """
+    import asyncio
+    import logging as _log
+
+    _l = _log.getLogger(__name__)
+    broker = (recipient_name or (to.split("@", 1)[0] if to else "there")).title()
+
+    if provider is None:
+        try:
+            from app.config import get_settings
+            from app.integrations.adapters.ai.provider import get_for
+
+            provider = get_for("inbox_draft_reply", settings=get_settings())
+        except Exception as exc:  # noqa: BLE001
+            _l.info("ai_draft_compose: provider resolve failed: %s", type(exc).__name__)
+            provider = None
+
+    body: str | None = None
+    subject = f"{purpose.replace('_', ' ').title()} — LJM International"
+    if provider is not None and getattr(provider, "kind", None) != "null":
+        prompt = (
+            f"You are LJM, a trucking carrier. Draft a short, {tone} outreach email (3-5 "
+            f"sentences) to a company. Keep the signature on its own line as '— LJM'. "
+            f"No preamble, no explanations — just subject + body.\n\n"
+            f"Recipient: {broker}\n"
+            f"Purpose: {purpose}\n"
+            f"Lane: {lane or '?'}\n"
+            f"Equipment: {equipment or '?'}\n"
+            f"User brief: {brief or '-'}\n"
+            f"Return exactly two lines, the first starting with 'Subject:'.\n"
+        )
+        try:
+            call = await asyncio.wait_for(
+                provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
+            )
+            if getattr(call, "status", None) == "ok" and (call.text or "").strip():
+                text = call.text.strip()
+                lines = text.splitlines()
+                if lines and lines[0].lower().startswith("subject:"):
+                    subject = lines[0].split(":", 1)[1].strip() or subject
+                    body = "\n".join(lines[1:]).strip()
+                else:
+                    body = text
+        except TimeoutError:
+            _l.info("ai_draft_compose: provider timeout → template fallback")
+        except Exception as exc:  # noqa: BLE001
+            _l.info("ai_draft_compose: provider error %s → template fallback", type(exc).__name__)
+
+    if not body:
+        body = (
+            f"Hi {broker},\n\n"
+            f"Reaching out from LJM International about {purpose.replace('_', ' ')}. "
+            f"We run freight on {lane or 'your lanes'} and can usually quote within 15 minutes. "
+            f"Reply with the lane + pickup window and I'll come back with a rate.\n\n"
+            f"— LJM"
+        )
+    html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
+    return AiDraftOut(subject=subject, body_text=body, body_html=html)
+
+
+async def ai_rewrite(
+    *,
+    body_text: str,
+    tone: str,
+    brief: str | None = None,
+    provider: Any | None = None,
+) -> AiDraftOut:
+    """Rewrite the body in the given tone, keeping facts + ~length.
+
+    Reuses the ``inbox_draft_reply`` feature slot (plan-gate: one AI
+    feature slot for all three draft/rewrite flows). Falls back to the
+    original body on any provider error.
+    """
+    import asyncio
+    import logging as _log
+
+    _l = _log.getLogger(__name__)
+    if provider is None:
+        try:
+            from app.config import get_settings
+            from app.integrations.adapters.ai.provider import get_for
+
+            provider = get_for("inbox_draft_reply", settings=get_settings())
+        except Exception as exc:  # noqa: BLE001
+            _l.info("ai_rewrite: provider resolve failed: %s", type(exc).__name__)
+            provider = None
+
+    out: str | None = None
+    if provider is not None and getattr(provider, "kind", None) != "null":
+        prompt = (
+            f"Rewrite the following email in a {tone} tone. Keep every fact, "
+            f"keep the length roughly the same. No preamble, no explanations — "
+            f"return only the rewritten body.\n"
+            f"{('User brief: ' + brief) if brief else ''}\n\n"
+            f"--- original ---\n{body_text[:4000]}\n"
+        )
+        try:
+            call = await asyncio.wait_for(
+                provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
+            )
+            if getattr(call, "status", None) == "ok" and (call.text or "").strip():
+                out = call.text.strip()
+        except TimeoutError:
+            _l.info("ai_rewrite: provider timeout → identity fallback")
+        except Exception as exc:  # noqa: BLE001
+            _l.info("ai_rewrite: provider error %s → identity fallback", type(exc).__name__)
+
+    final = out or body_text
+    html = "".join(f"<p>{p}</p>" for p in final.split("\n\n"))
+    return AiDraftOut(subject="", body_text=final, body_html=html)
+
+
+async def _render_and_wrap(
+    *,
+    session: AsyncSession,
+    settings,
+    body_text: str,
+    subject: str,
+    design: Any | None,
+    to: str,
+) -> tuple[str, str, dict[str, str]]:
+    """Build the final MIME-ready (text, html, headers) tuple.
+
+    Delegates to ``email_render.render_email`` for the inline-styled HTML
+    + plain-text alternative, and attaches the CAN-SPAM footer + the
+    ``List-Unsubscribe`` headers the same way ``outreach.service.send``
+    does — so inbox sends get the same compliance surface.
+    """
+    from app.inbox.brand import get_accent, get_brand
+    from app.inbox.email_render import EmailDesignOut, render_email
+    from app.services.unsub_config import (
+        build_unsub_link,
+        effective_unsub,
+        unsub_headers as _unsub_headers,
+        with_unsub_footer,
+    )
+
+    brand = await get_brand(session)
+
+    # Design: honour the builder's picked values; fall back to the brand accent.
+    design_dict: dict[str, Any] = design if isinstance(design, dict) else {}
+    accent_hex = design_dict.get("accent_hex") or await get_accent(session)
+    design_obj = EmailDesignOut(
+        accent_hex=accent_hex,
+        signature=bool(design_dict.get("signature", True)),
+        logo=bool(design_dict.get("logo", True)),
+        cta_label=str(design_dict.get("cta_label", "") or ""),
+        cta_url=str(design_dict.get("cta_url", "") or ""),
+        layout=str(design_dict.get("layout", "branded") or "branded"),
+        show_truck=bool(design_dict.get("show_truck", True)),
+    )
+
+    # Unsub link — reuse the HMAC token helper with a stable per-address
+    # pseudo-id. Verifying this token in `/unsubscribe` is a follow-up; the
+    # headers + visible link are what AC6 requires.
+    row = (
+        await session.execute(
+            # avoid circular import with identity
+            # pragma: inline SQL on settings row
+            __import__(
+                "sqlalchemy", fromlist=["select"]
+            ).select(__import__("app.identity.models", fromlist=["SettingsRow"]).SettingsRow)
+            .where(__import__("app.identity.models", fromlist=["SettingsRow"]).SettingsRow.id == 1)
+        )
+    ).scalar_one_or_none()
+    secret, base_url = effective_unsub(settings, row)
+    unsub_url = ""
+    if secret and base_url:
+        pseudo_id = abs(hash(to.lower())) & 0x7FFFFFFF
+        unsub_url = build_unsub_link(secret, base_url, pseudo_id)
+
+    footer_text = ""
+    if settings.outreach_postal_address:
+        footer_text = with_unsub_footer(
+            "", postal_address=settings.outreach_postal_address, unsub_url=unsub_url or "",
+        ).strip()
+    footer_html = ""
+    if footer_text:
+        # Light HTML version of the plain-text footer.
+        import html as _html
+
+        footer_html = "<br />".join(_html.escape(line) for line in footer_text.splitlines() if line.strip())
+
+    html, text = render_email(
+        body_text=body_text, subject=subject, design=design_obj, brand=brand,
+        footer_html=footer_html, footer_text=footer_text,
+    )
+    headers = _unsub_headers(unsub_url) if unsub_url else {}
+    return text, html, headers
+
+
 async def send_reply(
     session: AsyncSession,
     *,
@@ -729,6 +936,7 @@ async def send_reply(
     body_text: str,
     body_html: str,
     settings,
+    design: Any | None = None,
 ) -> dict:
     """Compose + send a reply inside a thread.
 
@@ -748,14 +956,22 @@ async def send_reply(
     from app.integrations.adapters.email.sender import get_mail_sender
     from app.integrations.mail_service import effective_mode
 
+    # CAN-SPAM gate: no postal address => no send. Mirrors outreach/service.
+    if not (getattr(settings, "outreach_postal_address", "") or "").strip():
+        return {"ok": False, "reason": "no_footer"}
+
+    final_text, final_html, send_headers = await _render_and_wrap(
+        session=session, settings=settings, body_text=body_text, subject=subject, design=design, to=to,
+    )
+
     mode = await effective_mode(session, settings)
     sender = get_mail_sender(settings, mode_override=mode)
     in_reply_to = last_in.message_id if last_in else None
     references = [m.message_id for m in msgs if m.message_id]
     result = await sender.send(
-        to=to, subject=subject, body=body_text, body_html=body_html,
+        to=to, subject=subject, body=final_text, body_html=final_html,
         thread_id=thread_id, in_reply_to=in_reply_to, references=references,
-        from_addr=mailbox,
+        from_addr=mailbox, headers=send_headers,
     )
     # Persist as outbound mail_messages row so the thread view updates and
     # future analyses see it.
@@ -775,8 +991,8 @@ async def send_reply(
         received_at=now,
         in_reply_to=in_reply_to,
         references_hdr=references,
-        body_text=body_text,
-        body_html=body_html,
+        body_text=final_text,
+        body_html=final_html,
         labels=["sent", f"mode:{result.mode}"],
         retention_until=now + timedelta(days=30 * 18),
         raw={"mode": result.mode, "simulated": result.mode == "simulated"},
@@ -796,6 +1012,7 @@ async def send_new_email(
     body_text: str,
     body_html: str,
     settings,
+    design: Any | None = None,
 ) -> dict:
     """Compose + send a brand-new outbound message (no thread parent).
 
@@ -805,13 +1022,21 @@ async def send_new_email(
     from app.integrations.adapters.email.sender import get_mail_sender
     from app.integrations.mail_service import effective_mode
 
+    # CAN-SPAM gate: no postal address => no send. Mirrors outreach/service.
+    if not (getattr(settings, "outreach_postal_address", "") or "").strip():
+        return {"ok": False, "reason": "no_footer"}
+
+    final_text, final_html, send_headers = await _render_and_wrap(
+        session=session, settings=settings, body_text=body_text, subject=subject, design=design, to=to,
+    )
+
     mode = await effective_mode(session, settings)
     sender = get_mail_sender(settings, mode_override=mode)
     mailbox = settings.outreach_from_email
     thread_id = f"t-{uuid4().hex[:16]}"
     result = await sender.send(
-        to=to, subject=subject, body=body_text, body_html=body_html,
-        thread_id=None, from_addr=mailbox,
+        to=to, subject=subject, body=final_text, body_html=final_html,
+        thread_id=None, from_addr=mailbox, headers=send_headers,
     )
     new_msg_id = result.message_id or f"local-{uuid4().hex[:16]}"
     now = datetime.now(UTC)
@@ -829,8 +1054,8 @@ async def send_new_email(
         received_at=now,
         in_reply_to=None,
         references_hdr=[],
-        body_text=body_text,
-        body_html=body_html,
+        body_text=final_text,
+        body_html=final_html,
         labels=["sent", f"mode:{result.mode}"],
         retention_until=now + timedelta(days=30 * 18),
         raw={"mode": result.mode, "simulated": result.mode == "simulated"},
