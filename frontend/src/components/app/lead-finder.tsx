@@ -138,7 +138,7 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
           latest={latestRun}
           triggering={triggering}
           onCrawl={async () => {
-            const jid = await triggerCrawl(20)
+            const jid = await triggerCrawl()
             if (jid != null) setCrawlJobId(jid)
             // Refresh the real-leads panel after a short wait so the freshly-persisted rows show up.
             setTimeout(reloadRealLeads, 4000)

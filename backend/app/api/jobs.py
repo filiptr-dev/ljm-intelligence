@@ -8,9 +8,10 @@
 * ``GET  /admin/jobs`` — owner-only list of queued/running/failed.
 * ``POST /jobs/{id}/retry`` — owner-only one-click retry.
 
-Queueing lock: the drain itself uses ``queueing_lock='jobs.drain'`` so two
-overlapping GitHub Actions runs no-op the second caller instead of double-
-draining. Combined with ``SKIP LOCKED`` on the workers this is belt + braces.
+Overlap: an in-process ``asyncio.Lock`` plus a transaction-scoped advisory
+lock on ``hashtext('jobs.drain')`` make a second concurrent caller return
+``skipped_overlap`` instead of sharing (and closing) the procrastinate app.
+Combined with ``SKIP LOCKED`` on the workers this is belt + braces.
 """
 
 from __future__ import annotations
@@ -77,70 +78,130 @@ async def _queue_installed(sessionmaker) -> bool:
         return False
 
 
+# In-process gate. The procrastinate ``App`` is a module-level singleton and
+# ``open_async()`` is a no-op when already open while ``close_async()`` closes
+# the pool for *every* user — so two drains in one process must never overlap,
+# or the first to finish closes the app under the other (``AppNotOpen``: a 500
+# on ``/jobs/drain`` and jobs left in ``doing`` because their final status can't
+# be persisted). Checked-then-acquired with no ``await`` in between, so the
+# check is atomic on the event loop.
+_DRAIN_LOCK = asyncio.Lock()
+
+# Cross-process gate (cron drain vs. a separate API / worker process). A
+# *transaction*-scoped advisory lock held on one checked-out connection for the
+# whole drain: it can't be re-entered by another drain that happens to reuse a
+# pooled connection (the old session-level lock was taken on a connection that
+# went straight back to the pool, and advisory locks are re-entrant per
+# connection), it survives PgBouncer transaction mode, and it is released by
+# the rollback when the session closes — no unlock on the wrong connection.
+_TRY_LOCK_SQL = text("SELECT pg_try_advisory_xact_lock(hashtext('jobs.drain'))")
+
+
+async def _skipped(sessionmaker) -> DrainOut:
+    remaining = await _count_queued(sessionmaker)
+    return DrainOut(
+        ran=0, succeeded=0, failed=0, remaining=remaining,
+        skipped_overlap=True, reason="another drain in progress",
+    )
+
+
 async def _drain_once(sessionmaker, *, seconds: int) -> DrainOut:
     """Bounded in-process drain. Reused by `/jobs/drain` AND by on-demand
     HTTP routes that need the worker to pick up their fresh job within
     seconds (not up to 5 min when waiting for the cron drain).
 
-    The advisory lock on ``hashtext('jobs.drain')`` is the single
-    serialising point: a background kick that fires in the same instant
-    as a GitHub Actions cron tick sees ``got_lock=False`` and no-ops.
+    Overlap contract: a second caller — same process or another one — gets
+    ``skipped_overlap=True`` and never touches the shared procrastinate app.
     """
     if not await _queue_installed(sessionmaker):
         return DrainOut(ran=0, succeeded=0, failed=0, remaining=0, reason="queue schema not installed")
 
-    async with sessionmaker() as s:
-        lock_row = (
-            await s.execute(text("SELECT pg_try_advisory_lock(hashtext('jobs.drain'))"))
-        ).first()
-        got_lock = bool(lock_row and lock_row[0])
+    if _DRAIN_LOCK.locked():
+        return await _skipped(sessionmaker)
 
-    if not got_lock:
-        remaining = await _count_queued(sessionmaker)
-        return DrainOut(
-            ran=0, succeeded=0, failed=0, remaining=remaining,
-            skipped_overlap=True, reason="another drain in progress",
-        )
+    async with _DRAIN_LOCK, sessionmaker() as lock_session:
+        got_lock = bool((await lock_session.execute(_TRY_LOCK_SQL)).scalar())
+        if not got_lock:
+            return await _skipped(sessionmaker)
+        # Lock is held until ``lock_session`` closes (rollback releases it).
+        return await _drain_locked(sessionmaker, seconds=seconds)
+
+
+async def _drain_locked(sessionmaker, *, seconds: int) -> DrainOut:
+    from app.shared.queue import app as queue_app
+
+    before = await _status_counts(sessionmaker)
+
+    async with queue_app.open_async():
+        # Jobs whose worker died (process killed, or an earlier overlap closed
+        # the app under it) sit in ``doing`` forever. Fail them so they show up
+        # in /admin/jobs with one-click retry, and close their crawl run.
+        await _fail_stalled_jobs(queue_app, sessionmaker)
+
+        # Enqueue any periodic jobs whose run_at has passed. On an
+        # always-on worker this is automatic; on free we poke it here.
+        try:
+            await queue_app._register_builtin_tasks()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — older/newer procrastinate paths
+            pass
+
+        try:
+            # procrastinate shields its run loop from cancellation: on timeout
+            # it stops fetching and waits for the in-flight job to finish, so a
+            # bounded tick never tears a job in half.
+            await asyncio.wait_for(
+                queue_app.run_worker_async(
+                    queues=["default"],
+                    wait=False,
+                    install_signal_handlers=False,
+                    listen_notify=False,
+                ),
+                timeout=float(seconds),
+            )
+        except asyncio.TimeoutError:
+            pass  # expected — bounded tick ending
+
+    after = await _status_counts(sessionmaker)
+    succeeded = max(0, after.get("succeeded", 0) - before.get("succeeded", 0))
+    failed = max(0, after.get("failed", 0) - before.get("failed", 0))
+    return DrainOut(
+        ran=succeeded + failed, succeeded=succeeded, failed=failed,
+        remaining=after.get("todo", 0),
+    )
+
+
+async def _fail_stalled_jobs(queue_app, sessionmaker) -> int:
+    """Mark ``doing`` jobs with a dead worker (no heartbeat for 30s) as failed.
+
+    Failed, not retried: a stalled job may already have sent mail or written
+    half its rows, so re-running it is an operator decision (``/jobs/{id}/retry``).
+    A stalled ``prospecting.crawl_leads`` also gets its ``crawl_runs`` row moved
+    to ``error`` so Overview stops waiting on a run that will never finish.
+    """
+    from procrastinate.jobs import Status
+
+    from app.pipeline.run import abort_crawl_run
 
     try:
-        from app.shared.queue import app as queue_app
-
-        before = await _status_counts(sessionmaker)
-
-        async with queue_app.open_async():
-            # Enqueue any periodic jobs whose run_at has passed. On an
-            # always-on worker this is automatic; on free we poke it here.
-            try:
-                await queue_app._register_builtin_tasks()  # type: ignore[attr-defined]
-            except Exception:  # noqa: BLE001 — older/newer procrastinate paths
-                pass
-
-            try:
-                await asyncio.wait_for(
-                    queue_app.run_worker_async(
-                        queues=["default"],
-                        wait=False,
-                        install_signal_handlers=False,
-                        listen_notify=False,
-                    ),
-                    timeout=float(seconds),
+        stalled = list(await queue_app.job_manager.get_stalled_jobs())
+    except Exception as exc:  # noqa: BLE001 — recovery must never block the drain
+        log.warning("stalled-job scan failed: %s", exc)
+        return 0
+    for job in stalled:
+        try:
+            await queue_app.job_manager.finish_job(job, status=Status.FAILED, delete_job=False)
+            kwargs = job.task_kwargs or {}
+            if job.task_name == "prospecting.crawl_leads" and kwargs.get("run_id"):
+                await abort_crawl_run(
+                    sessionmaker,
+                    str(kwargs["run_id"]),
+                    tenant_id=kwargs.get("tenant_id"),
+                    error="worker stalled before the crawl finished (job failed by drain recovery)",
                 )
-            except asyncio.TimeoutError:
-                pass  # expected — bounded tick ending
-
-        after = await _status_counts(sessionmaker)
-        ran = max(0, (after.get("succeeded", 0) - before.get("succeeded", 0)) +
-                       (after.get("failed", 0) - before.get("failed", 0)))
-        succeeded = max(0, after.get("succeeded", 0) - before.get("succeeded", 0))
-        failed = max(0, after.get("failed", 0) - before.get("failed", 0))
-        return DrainOut(
-            ran=ran, succeeded=succeeded, failed=failed,
-            remaining=after.get("todo", 0),
-        )
-    finally:
-        async with sessionmaker() as s:
-            await s.execute(text("SELECT pg_advisory_unlock(hashtext('jobs.drain'))"))
-            await s.commit()
+            log.warning("failed stalled job %s (%s)", job.id, job.task_name)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not fail stalled job %s: %s", job.id, exc)
+    return len(stalled)
 
 
 async def kick_in_process_drain(sessionmaker, settings, *, seconds: int = 10) -> None:

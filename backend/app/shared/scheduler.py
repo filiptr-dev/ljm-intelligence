@@ -38,7 +38,7 @@ _TENANT = LJM_TENANT_ID
 async def _crawl_daily_est(timestamp: int) -> None:  # noqa: ARG001 — procrastinate contract
     from app.shared.queue import dispatch
 
-    await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron", limit=500)
+    await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron")
 
 
 @app.periodic(cron="0 20 * * *")  # 15:00 America/New_York during EDT (UTC 20)
@@ -46,7 +46,7 @@ async def _crawl_daily_est(timestamp: int) -> None:  # noqa: ARG001 — procrast
 async def _crawl_daily_edt(timestamp: int) -> None:  # noqa: ARG001
     from app.shared.queue import dispatch
 
-    await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron", limit=500)
+    await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron")
 
 
 @app.periodic(cron="5 19 * * *")  # 5min after the EST crawl

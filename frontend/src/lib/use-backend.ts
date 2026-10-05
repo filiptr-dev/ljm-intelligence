@@ -65,7 +65,7 @@ export function useLatestRun(pollMs = 4000) {
     return () => clearInterval(id)
   }, [fetchLatest, pollMs, run?.status])
 
-  const trigger = React.useCallback(async (limit = 25): Promise<number | null> => {
+  const trigger = React.useCallback(async (limit?: number): Promise<number | null> => {
     setRunning(true)
     try {
       // The proxy injects `X-Cron-Secret` for POST /crawl/run from a server-
@@ -81,7 +81,8 @@ export function useLatestRun(pollMs = 4000) {
       // CrawlRun row got an update).
       const resp = await api.POST(
         "/crawl/run",
-        { params: { query: { trigger: "on_demand", limit } } },
+        // `limit` omitted = the paginator's own caps (same as the daily cron)
+        { params: { query: limit === undefined ? { trigger: "on_demand" } : { trigger: "on_demand", limit } } },
       )
       await fetchLatest()
       const data = resp.data as { job_id?: number | null } | undefined

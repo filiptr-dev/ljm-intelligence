@@ -81,13 +81,17 @@ async def run_crawl(
     settings: Settings,
     *,
     trigger: Literal["cron", "on_demand"] = "on_demand",
-    fmcsa_limit: int = 500,
+    fmcsa_limit: int | None = None,
     run_id: str | None = None,
 ) -> RunSummary:
     """Fetch FMCSA -> upsert leads -> Gemini stage -> record CrawlRun. Idempotent re-run.
 
     If `run_id` is given (e.g. the API's intake step), reuse that row instead of creating a
     second one — keeps `/crawl/runs` free of duplicate rows per trigger.
+
+    `fmcsa_limit`, when given, caps the FMCSA rows fetched this run (the run stops with
+    `fmcsa_stopped_reason="limit"`). `None` = no extra cap: the paginator's page caps
+    and wall-clock budget bound the run, exactly as before.
     """
     from app.pipeline.gemini_stage import run_gemini_stage
 
@@ -132,7 +136,9 @@ async def run_crawl(
         # ``leads.raw``, no cursor column). NULL frontier ⇒ first run ⇒ backfill.
         frontier = await _read_fmcsa_frontier(sessionmaker)
         page_cap = settings.fmcsa_backfill_page_cap if frontier is None else settings.fmcsa_per_run_page_cap
-        page_size = settings.fmcsa_page_size or fmcsa_limit
+        page_size = settings.fmcsa_page_size
+        if fmcsa_limit is not None:
+            page_size = min(page_size, fmcsa_limit)
         app_token = settings.fmcsa_app_token.get_secret_value() if settings.fmcsa_app_token else None
         budget_s = settings.fmcsa_time_budget_s
 
@@ -151,6 +157,8 @@ async def run_crawl(
                 max_pages=page_cap,
                 app_token=app_token,
             ):
+                if fmcsa_limit is not None:
+                    page_leads = page_leads[: max(0, fmcsa_limit - rows_fetched_total)]
                 pages_seen += 1
                 rows_fetched_total += len(page_leads)
                 fmcsa_leads.extend(page_leads)
@@ -176,6 +184,10 @@ async def run_crawl(
                 )
                 if caught_up:
                     stopped_reason = "caught_up"
+                    break
+
+                if fmcsa_limit is not None and rows_fetched_total >= fmcsa_limit:
+                    stopped_reason = "limit"
                     break
 
                 # Wall-clock check between pages — don't start a page we can't
@@ -465,3 +477,33 @@ async def get_run(sessionmaker: async_sessionmaker, run_id: str) -> CrawlRun | N
     async with sessionmaker() as s:
         res = await s.execute(select(CrawlRun).where(CrawlRun.id == run_id))
         return res.scalar_one_or_none()
+
+
+async def abort_crawl_run(
+    sessionmaker: async_sessionmaker,
+    run_id: str,
+    *,
+    tenant_id: str | None,
+    error: str,
+) -> None:
+    """Move a still-open (`queued`/`running`) crawl run to `error`.
+
+    Used when the job carrying the run dies before `run_crawl` writes its own
+    terminal status (cancelled, or failed by the drain's stalled-job recovery).
+    A run that already reached `done`/`error` is left untouched.
+    """
+    from app.shared.db import uow
+    from app.shared.tenant import TenantId
+
+    stmt = (
+        update(CrawlRun)
+        .where(CrawlRun.id == run_id, CrawlRun.status.in_(("queued", "running")))
+        .values(status="error", finished_at=datetime.now(UTC), error=error[:500])
+    )
+    if tenant_id:
+        async with uow(sessionmaker, TenantId(tenant_id)) as s:
+            await s.execute(stmt)
+    else:
+        async with sessionmaker() as s:
+            await s.execute(stmt)
+            await s.commit()

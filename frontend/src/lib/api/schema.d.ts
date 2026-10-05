@@ -98,6 +98,9 @@ export interface paths {
          *
          *     Single intake row per trigger — `run_crawl` reuses this id so `/crawl/runs` doesn't get
          *     two rows (one "wrapper", one "real") like the earlier version produced.
+         *
+         *     ``limit`` (optional) caps the FMCSA rows fetched by this run. Omitted = the
+         *     paginator's own page caps and time budget, same as the daily cron.
          */
         post: operations["start_run_crawl_run_post"];
         delete?: never;
@@ -3796,7 +3799,7 @@ export interface operations {
         parameters: {
             query?: {
                 trigger?: string;
-                limit?: number;
+                limit?: number | null;
             };
             header?: {
                 "X-Cron-Secret"?: string | null;

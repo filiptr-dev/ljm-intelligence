@@ -377,3 +377,33 @@ async def test_crawlrun_row_persists_new_counts_keys(sm, monkeypatch):
     assert "fmcsa_stopped_reason" in counts
     assert "gemini_status" in counts
     assert "osm_status" in counts
+
+
+# ---- crawl limit (task 2026-10-05 drain-overlap-stuck-jobs, AC3) ----------
+
+
+@pytest.mark.asyncio
+async def test_explicit_limit_caps_rows_fetched(sm, monkeypatch):
+    """`/crawl/run?limit=150` used to ingest a full backfill (limit was never
+    read). An explicit limit now caps the rows fetched and says why it stopped."""
+    pages = [[_lead(f"{p}{i:04d}", "2026-09-01") for i in range(500)] for p in range(1, 4)]
+    _install_fake_fmcsa(monkeypatch, pages)
+
+    summary = await run_crawl(sm, _FakeSettings(), trigger="on_demand", fmcsa_limit=150)
+
+    assert summary.counts["fmcsa_rows_fetched"] == 150
+    assert summary.counts["fmcsa_stopped_reason"] == "limit"
+    async with sm() as s:
+        assert len((await s.execute(select(Lead))).scalars().all()) == 150
+
+
+@pytest.mark.asyncio
+async def test_no_limit_keeps_paginator_caps(sm, monkeypatch):
+    """No limit = unchanged behaviour: page caps bound the run."""
+    pages = [[_lead(f"{p}{i:03d}", "2026-09-01") for i in range(50)] for p in range(1, 4)]
+    _install_fake_fmcsa(monkeypatch, pages)
+
+    summary = await run_crawl(sm, _FakeSettings(fmcsa_page_size=50), trigger="on_demand")
+
+    assert summary.counts["fmcsa_rows_fetched"] == 150
+    assert summary.counts["fmcsa_stopped_reason"] != "limit"

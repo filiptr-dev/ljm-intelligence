@@ -21,7 +21,9 @@ log = logging.getLogger(__name__)
     queue="default",
     pass_context=False,
 )
-async def crawl_leads(tenant_id: str, trigger: str = "cron", limit: int = 500, run_id: str | None = None) -> None:
+async def crawl_leads(
+    tenant_id: str, trigger: str = "cron", limit: int | None = None, run_id: str | None = None
+) -> None:
     """Run one crawl cycle for ``tenant_id``.
 
     Idempotency: the pipeline is keyed on the daily ``run_id`` — a second
@@ -37,7 +39,7 @@ async def crawl_leads(tenant_id: str, trigger: str = "cron", limit: int = 500, r
     # if the pipeline modules fail at import time (defensive — the task
     # fails loudly instead of poisoning registration).
     from app.config import get_settings
-    from app.pipeline.run import _new_run_id, run_crawl
+    from app.pipeline.run import _new_run_id, abort_crawl_run, run_crawl
 
     settings = get_settings()
     # The app factory wires sessionmaker into app.state; from a worker
@@ -48,6 +50,18 @@ async def crawl_leads(tenant_id: str, trigger: str = "cron", limit: int = 500, r
     try:
         sm = create_sessionmaker(engine)
         rid = run_id or _new_run_id()
-        await run_crawl(sm, settings, trigger=trigger, fmcsa_limit=limit, run_id=rid)
+        try:
+            await run_crawl(sm, settings, trigger=trigger, fmcsa_limit=limit, run_id=rid)
+        except BaseException as exc:
+            # run_crawl records its own terminal status for ordinary errors; this
+            # covers what escapes it (cancellation, a DB error on the final write)
+            # so the crawl_runs row never stays `running` after the job is gone.
+            try:
+                await abort_crawl_run(
+                    sm, rid, tenant_id=tenant_id, error=f"crawl job ended early: {type(exc).__name__}: {exc}"
+                )
+            except Exception:  # never mask the original failure
+                log.exception("crawl_leads: could not mark run %s as error", rid)
+            raise
     finally:
         await engine.dispose()

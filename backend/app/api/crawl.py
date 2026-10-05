@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.config import Settings
@@ -47,19 +47,21 @@ async def start_run(
     background: BackgroundTasks,
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
     trigger: str = "on_demand",
-    limit: int = 500,
+    limit: int | None = Query(default=None, ge=1, le=50_000),
 ) -> dict:
     """Kick off a crawl. Returns 202 immediately; the pipeline runs in a background task.
 
     Single intake row per trigger — `run_crawl` reuses this id so `/crawl/runs` doesn't get
     two rows (one "wrapper", one "real") like the earlier version produced.
+
+    ``limit`` (optional) caps the FMCSA rows fetched by this run. Omitted = the
+    paginator's own page caps and time budget, same as the daily cron.
     """
     settings: Settings = request.app.state.settings
     _check_secret(settings, x_cron_secret)
 
     sessionmaker = request.app.state.sessionmaker
     trig = "cron" if trigger == "cron" else "on_demand"
-    limit = max(1, min(limit, 2000))
 
     intake_id = _new_run_id()
     started = datetime.now(UTC)
