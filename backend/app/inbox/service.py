@@ -868,8 +868,10 @@ async def _render_and_wrap(
     """
     from app.inbox.brand import get_accent, get_brand
     from app.inbox.email_render import EmailDesignOut, render_email
+    from app.prospecting.models import LeadContact
     from app.services.unsub_config import (
         build_unsub_link,
+        build_unsub_link_by_email,
         effective_unsub,
         unsub_headers as _unsub_headers,
         with_unsub_footer,
@@ -890,9 +892,12 @@ async def _render_and_wrap(
         show_truck=bool(design_dict.get("show_truck", True)),
     )
 
-    # Unsub link — reuse the HMAC token helper with a stable per-address
-    # pseudo-id. Verifying this token in `/unsubscribe` is a follow-up; the
-    # headers + visible link are what AC6 requires.
+    # Unsub link — resolve a real contact by lowercased email so that
+    # /unsubscribe can find a row to suppress. If no contact exists for this
+    # recipient (common for free-form inbox replies), fall back to the
+    # email-keyed token so the click still records a suppression keyed by
+    # email, honouring CAN-SPAM / RFC 8058. Pre-fix we minted a hashed
+    # pseudo-id that /unsubscribe could never resolve → 404 on click.
     row = (
         await session.execute(
             # avoid circular import with identity
@@ -906,8 +911,20 @@ async def _render_and_wrap(
     secret, base_url = effective_unsub(settings, row)
     unsub_url = ""
     if secret and base_url:
-        pseudo_id = abs(hash(to.lower())) & 0x7FFFFFFF
-        unsub_url = build_unsub_link(secret, base_url, pseudo_id)
+        to_norm = (to or "").strip().lower()
+        contact_id: int | None = None
+        if to_norm:
+            contact_id = (
+                await session.execute(
+                    select(LeadContact.id)
+                    .where(LeadContact.email == to_norm)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if contact_id is not None:
+            unsub_url = build_unsub_link(secret, base_url, contact_id)
+        elif to_norm:
+            unsub_url = build_unsub_link_by_email(secret, base_url, to_norm)
 
     footer_text = ""
     if settings.outreach_postal_address:

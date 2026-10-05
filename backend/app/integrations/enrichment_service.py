@@ -19,7 +19,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._auth import verify_unsubscribe_token
+from app.api._auth import verify_unsubscribe_token  # noqa: F401 — kept for back-compat re-exports
+from app.lib.tokens import verify_any_unsubscribe_token
 from app.models import (
     EnrichmentCandidate,
     Lead,
@@ -114,6 +115,19 @@ class UnsubscribeResult:
     ok: bool
     email: str | None
     already: bool
+
+
+@dataclass(frozen=True)
+class UnsubscribeTarget:
+    """What a verified token resolves to.
+
+    Exactly one of ``contact_id`` / ``email`` is set. ``contact_id`` is the
+    classic outreach path; ``email`` is the inbox-originated fallback for a
+    recipient we never enriched into ``lead_contacts``.
+    """
+
+    contact_id: int | None = None
+    email: str | None = None
 
 
 # ---------- helpers ---------------------------------------------------------
@@ -332,8 +346,12 @@ async def metrics(session: AsyncSession, kind: str) -> MetricsResult:
 # ---------- unsubscribe -----------------------------------------------------
 
 
-async def verify_token(sessionmaker: Any, settings: Any, token: str) -> int:
-    """Verify an unsub token, returning the ``LeadContact.id`` it points at.
+async def verify_token(sessionmaker: Any, settings: Any, token: str) -> UnsubscribeTarget:
+    """Verify an unsub token.
+
+    Accepts both the classic contact-id token (minted by outreach for
+    enriched contacts) and the email-keyed token (minted by inbox-originated
+    sends when no ``lead_contacts`` row exists for the recipient).
 
     Raises :class:`UnsubscribeConfigError` when no secret is configured
     (misconfigured deploy must never succeed at mass-unsubscribing) or
@@ -346,32 +364,70 @@ async def verify_token(sessionmaker: Any, settings: Any, token: str) -> int:
     secret = effective_secret(settings, cfg)
     if not secret:
         raise UnsubscribeConfigError("unsubscribe not configured")
-    cid = verify_unsubscribe_token(token, secret)
-    if cid is None:
+    verified = verify_any_unsubscribe_token(token, secret)
+    if verified is None:
         raise InvalidUnsubscribeTokenError("invalid unsubscribe token")
-    return cid
+    kind, value = verified
+    if kind == "contact":
+        assert isinstance(value, int)
+        return UnsubscribeTarget(contact_id=value)
+    assert isinstance(value, str)
+    return UnsubscribeTarget(email=value)
 
 
-async def apply_unsubscribe(sessionmaker: Any, contact_id: int) -> UnsubscribeResult:
-    """Suppress the contact's email and mark the contact ``lost``."""
+async def apply_unsubscribe(
+    sessionmaker: Any, target: UnsubscribeTarget | int
+) -> UnsubscribeResult:
+    """Suppress a recipient — either a known contact or a bare email.
+
+    Back-compat: a plain ``int`` is still accepted and interpreted as a
+    contact id, so older in-tree callers do not need to migrate in lockstep.
+
+    * Contact-id path — writes a Suppression row keyed by the contact's
+      email (if any) and flips the contact to ``lost``.
+    * Email path — writes a Suppression row keyed by the email, no contact
+      row is touched (there is none).
+    """
+    if isinstance(target, int):
+        target = UnsubscribeTarget(contact_id=target)
+
     async with sessionmaker() as s:
-        contact = (
-            await s.execute(select(LeadContact).where(LeadContact.id == contact_id))
-        ).scalar_one_or_none()
-        if contact is None:
-            raise NotFoundError("contact not found")
-        email = (contact.email or "").lower() or None
-        already = False
-        if email:
-            existing = (
-                await s.execute(select(Suppression).where(Suppression.email == email))
+        if target.contact_id is not None:
+            contact = (
+                await s.execute(select(LeadContact).where(LeadContact.id == target.contact_id))
             ).scalar_one_or_none()
-            if existing is None:
-                s.add(Suppression(email=email, reason="do_not_contact"))
-            else:
-                already = True
-        if contact.pipeline_status != "lost":
-            contact.pipeline_status = "lost"
-            contact.pipeline_status_at = datetime.now(UTC)
+            if contact is None:
+                raise NotFoundError("contact not found")
+            email = (contact.email or "").lower() or None
+            already = False
+            if email:
+                existing = (
+                    await s.execute(select(Suppression).where(Suppression.email == email))
+                ).scalar_one_or_none()
+                if existing is None:
+                    s.add(Suppression(email=email, reason="do_not_contact"))
+                else:
+                    already = True
+            if contact.pipeline_status != "lost":
+                contact.pipeline_status = "lost"
+                contact.pipeline_status_at = datetime.now(UTC)
+            await s.commit()
+            return UnsubscribeResult(ok=True, email=email, already=already)
+
+        # Email-keyed path — no contact to mutate, just write the Suppression
+        # row (idempotent). This is the inbox-originated unsubscribe route:
+        # a recipient we never enriched can still one-click opt out and
+        # future sends are blocked by the suppression check.
+        email = (target.email or "").strip().lower() or None
+        if email is None:
+            raise NotFoundError("contact not found")
+        already = False
+        existing = (
+            await s.execute(select(Suppression).where(Suppression.email == email))
+        ).scalar_one_or_none()
+        if existing is None:
+            s.add(Suppression(email=email, reason="do_not_contact"))
+        else:
+            already = True
         await s.commit()
-    return UnsubscribeResult(ok=True, email=email, already=already)
+        return UnsubscribeResult(ok=True, email=email, already=already)

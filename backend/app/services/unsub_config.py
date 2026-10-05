@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.config import Settings
-from app.lib.tokens import sign_unsubscribe_token
+from app.lib.tokens import sign_unsubscribe_email_token, sign_unsubscribe_token
 
 
 class _HasSecret(Protocol):
@@ -76,6 +76,16 @@ def unsub_missing_field(settings: Settings, row: _HasSecret | None) -> str | Non
 def build_unsub_link(secret: str, base_url: str, contact_id: int) -> str:
     """Signed per-contact unsubscribe URL."""
     return f"{base_url.rstrip('/')}/unsubscribe?t={sign_unsubscribe_token(contact_id, secret)}"
+
+
+def build_unsub_link_by_email(secret: str, base_url: str, email: str) -> str:
+    """Signed email-keyed unsubscribe URL.
+
+    Used by inbox-originated sends when no ``lead_contacts`` row exists for
+    the recipient — the clicked link still resolves (CAN-SPAM / RFC 8058)
+    and writes a ``suppression`` row keyed by email.
+    """
+    return f"{base_url.rstrip('/')}/unsubscribe?t={sign_unsubscribe_email_token(email, secret)}"
 
 
 def with_unsub_footer(body: str, *, postal_address: str, unsub_url: str) -> str:

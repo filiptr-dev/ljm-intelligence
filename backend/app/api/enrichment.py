@@ -303,7 +303,8 @@ class UnsubscribeOut(BaseModel):
 unsub_router = APIRouter(tags=["unsubscribe"])
 
 
-async def _verify_or_400(request: Request, token: str) -> int:
+async def _verify_or_400(request: Request, token: str):
+    """Return the verified :class:`UnsubscribeTarget` or raise 400."""
     try:
         return await svc_verify_token(
             request.app.state.sessionmaker, request.app.state.settings, token
@@ -345,9 +346,9 @@ async def unsubscribe_post(request: Request, t: str = Query(..., min_length=1)) 
     """POST performs the suppression. Same route also accepts RFC 8058
     ``List-Unsubscribe=One-Click`` payloads via ``?t=<token>`` on the query
     string. Invalid / forged token → 400 with zero side effects."""
-    cid = await _verify_or_400(request, t)
+    target = await _verify_or_400(request, t)
     try:
-        result = await svc_apply_unsubscribe(request.app.state.sessionmaker, cid)
+        result = await svc_apply_unsubscribe(request.app.state.sessionmaker, target)
     except NotFoundError as exc:
         raise HTTPException(404, "contact not found") from exc
     return UnsubscribeOut(ok=result.ok, email=result.email, already=result.already)
