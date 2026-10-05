@@ -142,8 +142,8 @@ async def _drain_locked(sessionmaker, *, seconds: int) -> DrainOut:
         # always-on worker this is automatic; on free we poke it here.
         try:
             await queue_app._register_builtin_tasks()  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001 — older/newer procrastinate paths
-            pass
+        except Exception as exc:  # noqa: BLE001 — older/newer procrastinate paths
+            log.debug("_register_builtin_tasks skipped: %s", exc)
 
         try:
             # procrastinate shields its run loop from cancellation: on timeout
@@ -158,7 +158,7 @@ async def _drain_locked(sessionmaker, *, seconds: int) -> DrainOut:
                 ),
                 timeout=float(seconds),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass  # expected — bounded tick ending
 
     after = await _status_counts(sessionmaker)
@@ -172,6 +172,9 @@ async def _drain_locked(sessionmaker, *, seconds: int) -> DrainOut:
 
 async def _fail_stalled_jobs(queue_app, sessionmaker) -> int:
     """Mark ``doing`` jobs with a dead worker (no heartbeat for 30s) as failed.
+
+    Heartbeat-based, so a job on a live always-on worker is never touched; the
+    recovery matters for free-host / ephemeral drains whose worker vanished.
 
     Failed, not retried: a stalled job may already have sent mail or written
     half its rows, so re-running it is an operator decision (``/jobs/{id}/retry``).
