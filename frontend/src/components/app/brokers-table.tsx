@@ -127,6 +127,13 @@ export function BrokersTable() {
   const [activityMonths, setActivityMonths] = React.useState<ActivityMonths>(12)
   const [exporting, setExporting] = React.useState(false)
 
+  // Monotonically-bumped request id used to drop stale responses. The list and
+  // the overview summary are fired independently on the fast path, so a slow
+  // summary from a prior filter/segment must not overwrite state owned by a
+  // newer load. Every call to `load(...)` increments this and captures the
+  // value; late resolutions check `reqId !== loadReqIdRef.current` and bail.
+  const loadReqIdRef = React.useRef(0)
+
   // Fast path trigger: no overview-driven sort and no segment narrowing →
   // fire the SQL-ranked list + the overview-summary companion in parallel.
   // Any other state (segment narrow or overview-sort) stays on the legacy
@@ -138,43 +145,74 @@ export function BrokersTable() {
     async (append: boolean, cursorOverride?: string | null) => {
       if (append) setLoadingMore(true)
       else setLoading(true)
-      try {
-        const sharedFilters = {
-          state: state || undefined,
-          min_fit: minFit > 0 ? minFit : undefined,
-          has_email: hasEmail || undefined,
-          has_phone: hasPhone || undefined,
-          next_action: action === "all" ? undefined : action,
-          q: q.trim() || undefined,
+      const reqId = ++loadReqIdRef.current
+      const sharedFilters = {
+        state: state || undefined,
+        min_fit: minFit > 0 ? minFit : undefined,
+        has_email: hasEmail || undefined,
+        has_phone: hasPhone || undefined,
+        next_action: action === "all" ? undefined : action,
+        q: q.trim() || undefined,
+      }
+      if (useFastPath) {
+        // Decoupled fire: the SQL ranker renders rows as soon as the list
+        // resolves; the overview companion fills columns + segment counts
+        // whenever it arrives (possibly later, possibly never). A slow or
+        // failed summary must not hold back — or black-hole — the primary
+        // row surface.
+        //
+        // Why not Promise.allSettled: that still awaits the slower of the
+        // two before any state updates. The amendment is explicit — list
+        // rows should render as soon as the list resolves, independent of
+        // the summary.
+        //
+        // Pagination doesn't apply to the companion — it summarises the
+        // whole filtered set. Only fire on the first page; "Load more"
+        // keeps the companion we already have.
+        if (!append) {
+          listBrokersOverviewSummary(sharedFilters)
+            .then((companion) => {
+              if (reqId !== loadReqIdRef.current) return // stale filter/segment
+              if (companion) {
+                setOverviewMap(companion.items)
+                setSegmentsCount(companion.segments_count)
+              }
+            })
+            .catch((e) => {
+              if (reqId !== loadReqIdRef.current) return
+              // Companion is secondary — fail quiet. The overview columns
+              // fall back to their existing "—" / empty render path, and
+              // the segment pills keep their current (possibly null)
+              // counts. A toast here would train users to ignore toasts.
+              console.warn("Broker overview summary failed", e)
+            })
         }
-        if (useFastPath) {
-          // Two parallel calls: the SQL ranker renders rows immediately;
-          // the companion fills overview columns + segment pill counts.
-          const [list, companion] = await Promise.all([
-            listBrokers({
-              ...sharedFilters,
-              cursor: append ? (cursorOverride ?? undefined) : undefined,
-              limit: 50,
-            }),
-            // Pagination doesn't apply to the companion — it summarises the
-            // whole filtered set. Only fire on the first page; "Load more"
-            // keeps the companion we already have.
-            append
-              ? Promise.resolve(null)
-              : listBrokersOverviewSummary(sharedFilters),
-          ])
+        try {
+          const list = await listBrokers({
+            ...sharedFilters,
+            cursor: append ? (cursorOverride ?? undefined) : undefined,
+            limit: 50,
+          })
+          if (reqId !== loadReqIdRef.current) return // stale
           setRows((prev) => (append ? [...prev, ...list.items] : list.items))
           setCursor(list.next_cursor ?? null)
           setTotal(list.total)
-          if (companion) {
-            setOverviewMap(companion.items)
-            setSegmentsCount(companion.segments_count)
+        } catch (e) {
+          if (reqId === loadReqIdRef.current) {
+            toast.error("Couldn't load brokers", { description: String(e) })
           }
-        } else {
-          // Legacy slow path: segment filter or overview-driven sort. The
-          // server must materialise every broker's overview to honour
-          // either, so we hit the single endpoint and read overview off
-          // each row.
+        } finally {
+          if (reqId === loadReqIdRef.current) {
+            setLoading(false)
+            setLoadingMore(false)
+          }
+        }
+      } else {
+        // Legacy slow path: segment filter or overview-driven sort. The
+        // server must materialise every broker's overview to honour
+        // either, so we hit the single endpoint and read overview off
+        // each row.
+        try {
           const list = await listBrokers({
             ...sharedFilters,
             cursor: append ? (cursorOverride ?? undefined) : undefined,
@@ -183,6 +221,7 @@ export function BrokersTable() {
             segment,
             sort: headerSort?.key,
           })
+          if (reqId !== loadReqIdRef.current) return // stale
           setRows((prev) => (append ? [...prev, ...list.items] : list.items))
           setCursor(list.next_cursor ?? null)
           setTotal(list.total)
@@ -194,12 +233,16 @@ export function BrokersTable() {
             for (const r of list.items) if (r.overview) next[r.id] = r.overview
             return next
           })
+        } catch (e) {
+          if (reqId === loadReqIdRef.current) {
+            toast.error("Couldn't load brokers", { description: String(e) })
+          }
+        } finally {
+          if (reqId === loadReqIdRef.current) {
+            setLoading(false)
+            setLoadingMore(false)
+          }
         }
-      } catch (e) {
-        toast.error("Couldn't load brokers", { description: String(e) })
-      } finally {
-        setLoading(false)
-        setLoadingMore(false)
       }
     },
     [state, minFit, hasEmail, hasPhone, action, q, segment, headerSort, useFastPath],
