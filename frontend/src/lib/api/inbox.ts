@@ -168,6 +168,27 @@ export async function rewrite(
   return unwrap(res as never, "/inbox/rewrite")
 }
 
+/** Shape returned by `POST /inbox/ask` — AI-distilled filter hint. */
+export type AskOut = {
+  intent: string | null
+  keywords: string[]
+  sentiment: "positive" | "negative" | null
+  summary: string
+}
+
+/**
+ * Translate a natural-language question in the /emails "Ask" bar into
+ * a filter hint. Server-side AI call; never 500s — on provider error
+ * the identity fallback is returned so the caller can keep rendering.
+ */
+export async function ask(question: string, signal?: AbortSignal): Promise<AskOut> {
+  const res = await api.POST("/inbox/ask" as never, {
+    body: { question } as never,
+    signal,
+  } as never)
+  return unwrap(res as never, "/inbox/ask") as AskOut
+}
+
 export async function statusBoard(limit = 200, signal?: AbortSignal): Promise<StatusBoardRow[]> {
   const res = await api.GET("/inbox/status-board", { params: { query: { limit } }, signal })
   return unwrap(res, "/inbox/status-board")

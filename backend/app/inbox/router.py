@@ -388,6 +388,30 @@ async def ai_draft_compose_endpoint(payload: AiDraftComposeIn) -> AiDraftOutMode
     return AiDraftOutModel(**draft.__dict__)
 
 
+class AskIn(BaseModel):
+    question: constr(min_length=1, max_length=500)
+
+
+class AskOutModel(BaseModel):
+    intent: str | None = None
+    keywords: list[str] = []
+    sentiment: str | None = None
+    summary: str = ""
+
+
+@router.post("/ask", response_model=AskOutModel)
+async def ask_endpoint(payload: AskIn) -> AskOutModel:
+    """Translate the operator's natural-language question in the Inbox
+    "Ask" bar into a filter hint. Reuses the ``inbox_draft_reply`` AI
+    feature slot. Never 500s — provider errors collapse to the identity
+    fallback (all fields null/empty)."""
+    out = await svc.ask_question(question=payload.question)
+    return AskOutModel(
+        intent=out.intent, keywords=out.keywords,
+        sentiment=out.sentiment, summary=out.summary,
+    )
+
+
 @router.post("/rewrite", response_model=AiDraftOutModel)
 async def ai_rewrite_endpoint(payload: RewriteIn) -> AiDraftOutModel:
     """Rewrite the body in the given tone. Falls back to the original body

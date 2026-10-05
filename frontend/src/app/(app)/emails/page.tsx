@@ -45,7 +45,22 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const intent = typeof sp.intent === "string" ? sp.intent : undefined
   const page = Math.max(1, Number(sp.page) || 1)
 
-  const data = await inbox.listEmails({ intent, q: q || undefined, page, page_size: PAGE })
+  // When the operator submits a question, hand it to the AI first so we
+  // can map natural language ("brokers who complained about late delivery")
+  // onto the structured filters the list query already understands.
+  // Identity fallback: if the AI is unavailable the ask() call returns
+  // all-nulls and the original substring behaviour is preserved.
+  let aiSummary = ""
+  let effectiveIntent = intent
+  let effectiveQ: string | undefined = q || undefined
+  if (q && !intent) {
+    const ask = await inbox.ask(q)
+    aiSummary = ask.summary
+    if (ask.intent) effectiveIntent = ask.intent
+    if (ask.keywords.length > 0) effectiveQ = ask.keywords[0]
+  }
+
+  const data = await inbox.listEmails({ intent: effectiveIntent, q: effectiveQ, page, page_size: PAGE })
   const rows = data.items
   const total = data.total
   const pages = Math.ceil(total / PAGE)
@@ -97,6 +112,13 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         </div>
         <button className={cn(buttonVariants(), "font-semibold")}>Ask</button>
       </form>
+
+      {aiSummary ? (
+        <p className="mb-5 -mt-3 flex items-start gap-2 px-1 text-sm text-muted-foreground">
+          <Sparkles className="mt-0.5 size-3.5 shrink-0 text-chart-2" />
+          <span><span className="font-medium text-foreground">AI understood:</span> {aiSummary}</span>
+        </p>
+      ) : null}
 
       <div className="mb-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Panel title="Emails by intent" description="What each email is about">

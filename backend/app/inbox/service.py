@@ -850,6 +850,128 @@ async def ai_rewrite(
     return AiDraftOut(subject="", body_text=final, body_html=html)
 
 
+@dataclass
+class AskOut:
+    """Shape returned by :func:`ask_question`.
+
+    Filters distilled from a natural-language question in the /emails
+    "Ask" bar. All fields default to the identity-fallback values so the
+    caller can treat a provider error the same way as "no useful hint".
+    """
+
+    intent: str | None
+    keywords: list[str]
+    sentiment: str | None  # 'positive' | 'negative' | None
+    summary: str
+
+
+# Narrow allow-lists so the AI can't push garbage into the DB filters.
+# These mirror the intents the ingest pipeline actually produces.
+_ASK_INTENTS = {
+    "load_offer", "rate_request", "booked", "complaint", "payment",
+    "praise", "urgent_truck", "detention", "routine",
+}
+_ASK_SENTIMENTS = {"positive", "negative"}
+
+
+async def ask_question(
+    *,
+    question: str,
+    provider: Any | None = None,
+) -> AskOut:
+    """Translate a natural-language inbox question into a filter hint.
+
+    Reuses the ``inbox_draft_reply`` feature slot — same AI matrix row
+    as ``ai_rewrite`` / ``ai_draft_compose`` (plan-gate: one slot for
+    the inbox AI flows). Never raises. On provider resolve/timeout/parse
+    error returns the identity-fallback: all filters null, empty summary.
+    """
+    import asyncio
+    import json
+    import logging as _log
+
+    _l = _log.getLogger(__name__)
+    fallback = AskOut(intent=None, keywords=[], sentiment=None, summary="")
+
+    q = (question or "").strip()
+    if not q:
+        return fallback
+
+    if provider is None:
+        try:
+            from app.config import get_settings
+            from app.integrations.adapters.ai.provider import get_for
+
+            provider = get_for("inbox_draft_reply", settings=get_settings())
+        except Exception as exc:  # noqa: BLE001
+            _l.info("ask_question: provider resolve failed: %s", type(exc).__name__)
+            provider = None
+
+    if provider is None or getattr(provider, "kind", None) == "null":
+        return fallback
+
+    allowed_intents = sorted(_ASK_INTENTS)
+    prompt = (
+        "You translate an operator's question about their freight-brokerage "
+        "inbox into a strict JSON filter. The inbox has these intents: "
+        f"{', '.join(allowed_intents)}. Sentiment is one of "
+        "'positive','negative', or null. Return ONLY valid minified JSON "
+        "with exactly these keys: intent (one of the listed intents or null), "
+        "keywords (array of 0-3 short lowercase search terms, no stopwords), "
+        "sentiment ('positive','negative', or null), summary (one short "
+        "English sentence stating how you understood the question). "
+        "Do not wrap in markdown fences.\n\n"
+        f"Question: {q[:500]}\n"
+    )
+
+    try:
+        call = await asyncio.wait_for(
+            provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
+        )
+    except TimeoutError:
+        _l.info("ask_question: provider timeout → identity fallback")
+        return fallback
+    except Exception as exc:  # noqa: BLE001
+        _l.info("ask_question: provider error %s → identity fallback", type(exc).__name__)
+        return fallback
+
+    if getattr(call, "status", None) != "ok":
+        return fallback
+    text = (getattr(call, "text", "") or "").strip()
+    if not text:
+        return fallback
+    # Some providers wrap JSON in ```json fences — strip defensively.
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        data = json.loads(text)
+    except Exception:  # noqa: BLE001
+        _l.info("ask_question: provider returned non-JSON → identity fallback")
+        return fallback
+    if not isinstance(data, dict):
+        return fallback
+
+    raw_intent = data.get("intent")
+    intent = raw_intent if isinstance(raw_intent, str) and raw_intent in _ASK_INTENTS else None
+
+    raw_kw = data.get("keywords") or []
+    keywords: list[str] = []
+    if isinstance(raw_kw, list):
+        for k in raw_kw[:3]:
+            if isinstance(k, str) and k.strip():
+                keywords.append(k.strip().lower()[:40])
+
+    raw_sent = data.get("sentiment")
+    sentiment = raw_sent if isinstance(raw_sent, str) and raw_sent in _ASK_SENTIMENTS else None
+
+    raw_summary = data.get("summary")
+    summary = raw_summary.strip()[:240] if isinstance(raw_summary, str) else ""
+
+    return AskOut(intent=intent, keywords=keywords, sentiment=sentiment, summary=summary)
+
+
 async def _render_and_wrap(
     *,
     session: AsyncSession,

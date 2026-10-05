@@ -1024,6 +1024,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Endpoint
+         * @description Translate the operator's natural-language question in the Inbox
+         *     "Ask" bar into a filter hint. Reuses the ``inbox_draft_reply`` AI
+         *     feature slot. Never 500s — provider errors collapse to the identity
+         *     fallback (all fields null/empty).
+         */
+        post: operations["ask_endpoint_inbox_ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/rewrite": {
         parameters: {
             query?: never;
@@ -1668,6 +1691,28 @@ export interface components {
             body_text: string;
             /** Body Html */
             body_html: string;
+        };
+        /** AskIn */
+        AskIn: {
+            /** Question */
+            question: string;
+        };
+        /** AskOutModel */
+        AskOutModel: {
+            /** Intent */
+            intent?: string | null;
+            /**
+             * Keywords
+             * @default []
+             */
+            keywords: string[];
+            /** Sentiment */
+            sentiment?: string | null;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
         };
         /** AutoSendIn */
         AutoSendIn: {
@@ -5869,6 +5914,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiDraftOutModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_endpoint_inbox_ask_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOutModel"];
                 };
             };
             /** @description Validation Error */
