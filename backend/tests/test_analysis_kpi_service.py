@@ -19,9 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.analysis import kpi_service as kpi
 from app.db import Base
-from app.models import CallOutcome, Lead
+from app.models import CallOutcome, CapacityPost, Lead
 from app.shared.tenant import TenantId, set_tenant
-
 
 TENANT = TenantId("01TESTTENANT0000000000000A")
 
@@ -127,3 +126,65 @@ async def test_cache_invalidate_bumps_epoch() -> None:
     kpi.bump_cache_key(TENANT, "overview")
     out2 = await kpi.overview_kpis(s, TENANT, p)
     assert out2["tiles"][0]["value"] > out1["tiles"][0]["value"]
+
+
+def _post(pid: str, created_at: datetime, status: str = "open") -> CapacityPost:
+    return CapacityPost(
+        tenant_id=TENANT,
+        id=pid,
+        kind="truck",
+        equipment="Dry Van",
+        origin_state="NJ",
+        destinations=["PA"],
+        status=status,
+        created_at=created_at,
+    )
+
+
+async def test_capacity_open_posts_delta_compares_periods() -> None:
+    """Open-posts tile compares the window against the prior window — not a
+    live count passed as both current and prev (which pinned delta at 0)."""
+    s = await _session()
+    now = datetime.now(UTC)
+    # 3 open posts in the current 7d window, 1 open post in the prior 7d window.
+    s.add_all(
+        [
+            _post("c1", now - timedelta(hours=1)),
+            _post("c2", now - timedelta(days=1)),
+            _post("c3", now - timedelta(days=2)),
+            _post("p1", now - timedelta(days=10)),
+            _post("p2", now - timedelta(days=10), status="closed"),
+        ]
+    )
+    await s.commit()
+    kpi.CACHE.invalidate(TENANT, "capacity")
+    out = await kpi.capacity_kpis(s, TENANT, kpi.period_from_label("7d"))
+    tile = out["tiles"][0]
+    assert tile["label"] == "Open posts"
+    assert tile["value"] == 3.0
+    assert tile["prev"] == 1.0
+    assert tile["delta_pct"] == 200.0
+    assert tile["direction"] == "up"
+
+
+async def test_cache_distinguishes_custom_ranges() -> None:
+    """Two custom ranges share label "custom"; they must not share a cache slot."""
+    s = await _session()
+    s.add_all(
+        [
+            _post("a1", datetime(2026, 3, 10, 15, tzinfo=UTC)),
+            _post("a2", datetime(2026, 3, 11, 15, tzinfo=UTC)),
+            _post("b1", datetime(2026, 6, 10, 15, tzinfo=UTC)),
+        ]
+    )
+    await s.commit()
+    kpi.CACHE.invalidate(TENANT, "capacity")
+    march = kpi.Period(**{"from": datetime(2026, 3, 9, 12, tzinfo=UTC), "to": datetime(2026, 3, 14, 12, tzinfo=UTC)})
+    june = kpi.Period(**{"from": datetime(2026, 6, 9, 12, tzinfo=UTC), "to": datetime(2026, 6, 14, 12, tzinfo=UTC)})
+    assert march.label == june.label == "custom"
+    out_march = await kpi.capacity_kpis(s, TENANT, march)
+    out_june = await kpi.capacity_kpis(s, TENANT, june)  # same tenant, warm cache
+    created = lambda out: out["tiles"][1]["value"]
+    assert created(out_march) == 2.0
+    assert created(out_june) == 1.0
+    assert out_march["period"] != out_june["period"]

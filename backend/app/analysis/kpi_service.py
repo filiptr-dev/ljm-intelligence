@@ -84,6 +84,16 @@ class Period(BaseModel):
         )
 
     @property
+    def cache_key(self) -> str:
+        """Cache variant: label + the resolved bounds.
+
+        The label alone is ambiguous — every custom range is "custom", and a
+        relative label ("7d") resolves to different bounds across midnight —
+        so the snapped from/to are always part of the key.
+        """
+        return f"{self.label}:{self.from_.isoformat()}:{self.to.isoformat()}"
+
+    @property
     def days(self) -> int:
         return max(1, (self.to - self.from_).days)
 
@@ -296,7 +306,7 @@ async def overview_kpis(session: AsyncSession, tenant: str, period: Period) -> d
     and the overlayed win-rate line (n per bucket included).
     """
 
-    cached = await CACHE.get(tenant, "overview", period.label)
+    cached = await CACHE.get(tenant, "overview", period.cache_key)
     if cached is not None:
         return cached
 
@@ -420,7 +430,7 @@ async def overview_kpis(session: AsyncSession, tenant: str, period: Period) -> d
             "win_rate": [asdict(p) for p in win_rate_series],
         },
     }
-    await CACHE.set(tenant, "overview", period.label, out)
+    await CACHE.set(tenant, "overview", period.cache_key, out)
     return out
 
 
@@ -430,7 +440,7 @@ async def crawler_kpis(session: AsyncSession, tenant: str, period: Period) -> di
     with a prior-period delta and gives capacity/leads pages their shared
     strip."""
 
-    cached = await CACHE.get(tenant, "crawler", period.label)
+    cached = await CACHE.get(tenant, "crawler", period.cache_key)
     if cached is not None:
         return cached
 
@@ -522,7 +532,7 @@ async def crawler_kpis(session: AsyncSession, tenant: str, period: Period) -> di
         "by_state": asdict(by_state),
         "last_crawl_finished_at": last_crawl,
     }
-    await CACHE.set(tenant, "crawler", period.label, out)
+    await CACHE.set(tenant, "crawler", period.cache_key, out)
     return out
 
 
@@ -530,7 +540,7 @@ async def call_outcome_kpis(session: AsyncSession, tenant: str, period: Period) 
     """Call outcome mix + conversion-to-booked, with prev-period comparison.
     Powers the overview booked tile and the call-list day pulse."""
 
-    cached = await CACHE.get(tenant, "call_outcomes", period.label)
+    cached = await CACHE.get(tenant, "call_outcomes", period.cache_key)
     if cached is not None:
         return cached
 
@@ -612,7 +622,7 @@ async def call_outcome_kpis(session: AsyncSession, tenant: str, period: Period) 
         "mix": asdict(mix),
         "trend": [asdict(p) for p in trend],
     }
-    await CACHE.set(tenant, "call_outcomes", period.label, out)
+    await CACHE.set(tenant, "call_outcomes", period.cache_key, out)
     return out
 
 
@@ -665,7 +675,7 @@ async def lane_performance(
     lane × loads × avg rate × avg $/mi (where miles present) × sample size.
     """
 
-    cached = await CACHE.get(tenant, "lanes", f"{period.label}:{region or '*'}")
+    cached = await CACHE.get(tenant, "lanes", f"{period.cache_key}:{region or '*'}")
     if cached is not None:
         return cached
 
@@ -718,7 +728,7 @@ async def lane_performance(
         "rows": lane_rows,
         "top": asdict(top),
     }
-    await CACHE.set(tenant, "lanes", f"{period.label}:{region or '*'}", out)
+    await CACHE.set(tenant, "lanes", f"{period.cache_key}:{region or '*'}", out)
     return out
 
 
@@ -729,7 +739,7 @@ async def capacity_kpis(session: AsyncSession, tenant: str, period: Period) -> d
     inbox-sourced funnel (reply → quote → load) is owned by the inbox plan.
     """
 
-    cached = await CACHE.get(tenant, "capacity", period.label)
+    cached = await CACHE.get(tenant, "capacity", period.cache_key)
     if cached is not None:
         return cached
 
@@ -738,8 +748,20 @@ async def capacity_kpis(session: AsyncSession, tenant: str, period: Period) -> d
     def _in(start, end):
         return and_(CapacityPost.created_at >= start, CapacityPost.created_at <= end)
 
-    open_posts = await _count_scalar(
-        session, select(func.count(CapacityPost.id)).where(CapacityPost.status == "open")
+    # "Open posts" = posts created in the window that are still open, compared
+    # against the same measure over the prior window (a live count has no
+    # meaningful prior, which made the delta permanently flat).
+    open_curr = await _count_scalar(
+        session,
+        select(func.count(CapacityPost.id)).where(
+            and_(_in(period.from_, period.to), CapacityPost.status == "open")
+        ),
+    )
+    open_prev = await _count_scalar(
+        session,
+        select(func.count(CapacityPost.id)).where(
+            and_(_in(prev.from_, prev.to), CapacityPost.status == "open")
+        ),
     )
     created_curr = await _count_scalar(
         session, select(func.count(CapacityPost.id)).where(_in(period.from_, period.to))
@@ -783,13 +805,13 @@ async def capacity_kpis(session: AsyncSession, tenant: str, period: Period) -> d
     out = {
         "period": {"from": period.from_.isoformat(), "to": period.to.isoformat(), "label": period.label},
         "tiles": [
-            asdict(to_block("Open posts", "posts", float(open_posts), float(open_posts))),
+            asdict(to_block("Open posts", "posts", float(open_curr), float(open_prev))),
             asdict(to_block("Created", "posts", float(created_curr), float(created_prev))),
             asdict(to_block("Matched", "posts", float(matched_curr), float(matched_prev))),
         ],
         "funnel": {"steps": [asdict(s) for s in steps]},
     }
-    await CACHE.set(tenant, "capacity", period.label, out)
+    await CACHE.set(tenant, "capacity", period.cache_key, out)
     return out
 
 
@@ -803,7 +825,7 @@ async def broker_kpis(
     owned by the inbox plan.
     """
 
-    cached = await CACHE.get(tenant, "broker", f"{broker_id}:{period.label}")
+    cached = await CACHE.get(tenant, "broker", f"{broker_id}:{period.cache_key}")
     if cached is not None:
         return cached
 
@@ -861,5 +883,5 @@ async def broker_kpis(
         ],
         "thin": sent_curr < 5,
     }
-    await CACHE.set(tenant, "broker", f"{broker_id}:{period.label}", out)
+    await CACHE.set(tenant, "broker", f"{broker_id}:{period.cache_key}", out)
     return out
