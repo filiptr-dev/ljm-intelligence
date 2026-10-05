@@ -12,8 +12,10 @@ from dataclasses import dataclass, field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CapacityPost, Lead
+from app.models import CapacityPost, Lead, ShipperCandidate
 from app.pipeline.match import score_broker_for_post
+from app.pipeline.shipper_match import match_shippers_for_post
+from app.shared.tenant import current_tenant
 
 
 class PostNotFoundError(Exception):
@@ -51,9 +53,23 @@ class SuggestionRow:
 
 
 @dataclass
+class ShipperSuggestionRow:
+    candidate_id: str
+    name: str
+    state: str
+    city: str | None
+    primary_email: str | None
+    phone: str | None
+    score: int
+    reason: str
+    promoted_lead_id: str | None
+
+
+@dataclass
 class SuggestionsResult:
     post: PostRow
     items: list[SuggestionRow] = field(default_factory=list)
+    shippers: list[ShipperSuggestionRow] = field(default_factory=list)
 
 
 def _row(p: CapacityPost) -> PostRow:
@@ -155,4 +171,49 @@ async def suggestions_for_post(
         )
         for s in scored[:top]
     ]
-    return SuggestionsResult(post=_row(post), items=items)
+
+    # Shipper matches — pulled from the Shipper Finder's `shipper_candidates`
+    # store. Pre-filter server-side on lane states (origin + any destinations +
+    # dest state) so the pure matcher only sees candidates that could plausibly
+    # match; a bad client param can't force a full-table scan.
+    lane_states: set[str] = set()
+    if post.origin_state:
+        lane_states.add(post.origin_state.upper())
+    for d in post.destinations or []:
+        if d:
+            lane_states.add(d.upper())
+    if post.dest_state:
+        lane_states.add(post.dest_state.upper())
+
+    shippers: list[ShipperSuggestionRow] = []
+    if lane_states:
+        # Explicit tenant filter — the ORM `before_insert` hook stamps on
+        # write, but there's no automatic read-side scope. We mirror
+        # `shipper_finder_service` and require the current tenant context.
+        try:
+            tenant = current_tenant()
+        except RuntimeError:
+            tenant = None
+        cand_q = select(ShipperCandidate).where(
+            ShipperCandidate.state.in_(lane_states)
+        ).limit(500)
+        if tenant:
+            cand_q = cand_q.where(ShipperCandidate.tenant_id == tenant)
+        cand_rows = (await session.execute(cand_q)).scalars().all()
+        matched = match_shippers_for_post(post, list(cand_rows), top=top)
+        shippers = [
+            ShipperSuggestionRow(
+                candidate_id=m.candidate_id,
+                name=m.name,
+                state=m.state,
+                city=m.city,
+                primary_email=m.primary_email,
+                phone=m.phone,
+                score=m.score,
+                reason=m.reason,
+                promoted_lead_id=m.promoted_lead_id,
+            )
+            for m in matched
+        ]
+
+    return SuggestionsResult(post=_row(post), items=items, shippers=shippers)

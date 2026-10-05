@@ -3022,6 +3022,27 @@ export interface components {
             /** Fit Reasons */
             fit_reasons?: string[];
         };
+        /** ShipperSuggestionOut */
+        ShipperSuggestionOut: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Name */
+            name: string;
+            /** State */
+            state: string;
+            /** City */
+            city: string | null;
+            /** Primary Email */
+            primary_email: string | null;
+            /** Phone */
+            phone: string | null;
+            /** Score */
+            score: number;
+            /** Reason */
+            reason: string;
+            /** Promoted Lead Id */
+            promoted_lead_id: string | null;
+        };
         /** SourceOut */
         SourceOut: {
             /** Kind */
@@ -3081,6 +3102,8 @@ export interface components {
             post: components["schemas"]["PostOut"];
             /** Items */
             items: components["schemas"]["SuggestionOut"][];
+            /** Shippers */
+            shippers?: components["schemas"]["ShipperSuggestionOut"][];
         };
         /** SuggestionOut */
         SuggestionOut: {

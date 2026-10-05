@@ -52,6 +52,66 @@ type Suggestion = {
   reason: string
 }
 
+type MatchedShipper = {
+  candidate_id: string
+  name: string
+  state: string
+  city: string | null
+  primary_email: string | null
+  phone: string | null
+  score: number
+  reason: string
+  promoted_lead_id: string | null
+}
+
+// Build the /emails/compose prefill URL. Subject + body are plain template
+// literals (no backend templating) and all three params are URL-encoded.
+// Body is capped at 1500 chars to keep the URL under common limits.
+function buildDraftEmailHref(post: PostOut, s: MatchedShipper): string {
+  const to = s.primary_email ?? ""
+  let subject: string
+  let body: string
+  if (post.kind === "truck") {
+    const originLoc = post.origin_city || post.origin_state
+    const avail = post.available_date ? ` ${post.available_date}` : ""
+    subject = `Capacity available: ${post.equipment} out of ${originLoc}${avail}`
+    const destLine = post.destinations.length
+      ? `heading toward ${post.destinations.join(", ")}`
+      : "available for your next lane"
+    body = [
+      `Hi ${s.name} team,`,
+      ``,
+      `We have a ${post.equipment} empty out of ${originLoc}${post.available_date ? ` on ${post.available_date}` : ""}, ${destLine}.`,
+      `Saw you ship out of ${s.state}${s.city ? ` (${s.city})` : ""} — figured we'd put it in front of you first.`,
+      ``,
+      `Reply here or call us if the lane works — happy to send specs and rates.`,
+      ``,
+      `— LJM International`,
+    ].join("\n")
+  } else {
+    const originLoc = post.origin_city || post.origin_state
+    const destLoc = post.dest_city || post.dest_state || ""
+    const pickup = post.pickup_date ? ` ${post.pickup_date}` : ""
+    subject = `Looking for a home for a ${post.equipment} load: ${post.origin_state} → ${post.dest_state ?? "?"}${pickup}`
+    body = [
+      `Hi ${s.name} team,`,
+      ``,
+      `We're moving a ${post.equipment} load from ${originLoc} to ${destLoc}${post.pickup_date ? ` picking up ${post.pickup_date}` : ""}${post.weight_lbs ? ` (${post.weight_lbs} lbs)` : ""}.`,
+      `You're on our ${s.state} drop list — want to see if the lane lines up.`,
+      ``,
+      `Reply here or give us a call if it's a fit.`,
+      ``,
+      `— LJM International`,
+    ].join("\n")
+  }
+  if (body.length > 1500) body = body.slice(0, 1500)
+  const params = new URLSearchParams()
+  if (to) params.set("to", to)
+  params.set("subject", subject)
+  params.set("body", body)
+  return `/emails/compose?${params.toString()}`
+}
+
 const EQUIPMENT = ["Dry Van", "Reefer", "Flatbed", "Step Deck", "Power Only"]
 
 export default function CapacityPage() {
@@ -84,6 +144,7 @@ export default function CapacityPage() {
   const [posts, setPosts] = React.useState<PostOut[]>([])
   const [selected, setSelected] = React.useState<PostOut | null>(null)
   const [suggestions, setSuggestions] = React.useState<Suggestion[]>([])
+  const [shippers, setShippers] = React.useState<MatchedShipper[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = React.useState(false)
 
   const load = React.useCallback(async () => {
@@ -143,6 +204,7 @@ export default function CapacityPage() {
     if (!selected) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSuggestions([])
+      setShippers([])
       return
     }
     let cancelled = false
@@ -152,7 +214,11 @@ export default function CapacityPage() {
         const { data } = await api.GET("/capacity/posts/{post_id}/suggestions", {
           params: { path: { post_id: selected.id }, query: { top: 20 } },
         })
-        if (!cancelled) setSuggestions(((data as { items?: Suggestion[] } | undefined)?.items) ?? [])
+        if (!cancelled) {
+          const payload = data as { items?: Suggestion[]; shippers?: MatchedShipper[] } | undefined
+          setSuggestions(payload?.items ?? [])
+          setShippers(payload?.shippers ?? [])
+        }
       } finally {
         if (!cancelled) setLoadingSuggestions(false)
       }
@@ -160,6 +226,16 @@ export default function CapacityPage() {
     return () => {
       cancelled = true
     }
+  }, [selected])
+
+  // Lane states for the empty-state copy (origin + truck destinations + load drop).
+  const laneStates = React.useMemo(() => {
+    if (!selected) return [] as string[]
+    const set = new Set<string>()
+    if (selected.origin_state) set.add(selected.origin_state)
+    for (const d of selected.destinations ?? []) if (d) set.add(d)
+    if (selected.dest_state) set.add(selected.dest_state)
+    return Array.from(set)
   }, [selected])
 
   return (
@@ -313,6 +389,49 @@ export default function CapacityPage() {
                           {s.phone ? <span className="text-muted-foreground">{s.phone}</span> : null}
                           <Link
                             href={`/emails/compose?lead=${encodeURIComponent(s.lead_id)}`}
+                            className="ml-auto rounded-sm border border-border px-2 py-0.5 text-[0.7rem] font-semibold hover:bg-muted"
+                          >
+                            Draft email
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel
+            title={<span className="inline-flex items-center gap-2"><Sparkles className="size-4 text-safety" /> Matched shippers</span>}
+            description={selected ? `Direct shippers on this lane (from Shipper Finder)` : "Pick a post to see direct shippers on this lane."}
+          >
+            {!selected ? (
+              <p className="text-sm text-muted-foreground">Pick a post from the list to see matched shippers.</p>
+            ) : loadingSuggestions ? (
+              <p className="text-sm text-muted-foreground">Finding shippers on this lane…</p>
+            ) : shippers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No shippers on this lane yet — run the Shipper Finder for {laneStates.join(", ") || "these states"} or widen your destinations.
+              </p>
+            ) : (
+              <ul className="max-h-[520px] space-y-2 overflow-y-auto">
+                {shippers.map((s) => (
+                  <li key={s.candidate_id} className="rounded-sm border border-border p-2.5">
+                    <div className="flex items-start gap-2">
+                      <RegionTag region="US" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-semibold">{s.name}</span>
+                          <span className="text-xs text-muted-foreground">{s.city ? `${s.city}, ${s.state}` : s.state}</span>
+                          <span className="ml-auto"><ScoreChip score={s.score} /></span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{s.reason}</div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                          {s.primary_email ? <span className="font-mono">{s.primary_email}</span> : <span className="text-warn">no email</span>}
+                          {s.phone ? <span className="text-muted-foreground">{s.phone}</span> : null}
+                          <Link
+                            href={buildDraftEmailHref(selected, s)}
                             className="ml-auto rounded-sm border border-border px-2 py-0.5 text-[0.7rem] font-semibold hover:bg-muted"
                           >
                             Draft email

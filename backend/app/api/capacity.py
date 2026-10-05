@@ -16,8 +16,14 @@ from pydantic import BaseModel, Field
 from app.outreach.capacity_service import (
     PostNotFoundError,
     PostRow,
+)
+from app.outreach.capacity_service import (
     create_post as svc_create_post,
+)
+from app.outreach.capacity_service import (
     list_posts as svc_list_posts,
+)
+from app.outreach.capacity_service import (
     suggestions_for_post as svc_suggestions,
 )
 
@@ -105,9 +111,22 @@ class SuggestionOut(BaseModel):
     reason: str
 
 
+class ShipperSuggestionOut(BaseModel):
+    candidate_id: str
+    name: str
+    state: str
+    city: str | None
+    primary_email: str | None
+    phone: str | None
+    score: int
+    reason: str
+    promoted_lead_id: str | None
+
+
 class SuggestionList(BaseModel):
     post: PostOut
     items: list[SuggestionOut]
+    shippers: list[ShipperSuggestionOut] = Field(default_factory=list)
 
 
 @router.get("/posts/{post_id}/suggestions", response_model=SuggestionList)
@@ -122,4 +141,5 @@ async def suggestions(
     return SuggestionList(
         post=_out(result.post),
         items=[SuggestionOut(**r.__dict__) for r in result.items],
+        shippers=[ShipperSuggestionOut(**r.__dict__) for r in result.shippers],
     )

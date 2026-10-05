@@ -306,7 +306,11 @@ def _install_auth_bypass(app):
     app.dependency_overrides[current_user] = lambda: principal
     app.dependency_overrides[require_user_or_cron] = lambda: principal
 
-    def _test_current_tenant():
+    async def _test_current_tenant():
+        # Must be async: Starlette runs sync deps on a threadpool, where any
+        # ContextVar mutation is lost before the request handler resumes.
+        # Keeping this async means `set_tenant()` lands in the main asyncio
+        # context, matching how the real `current_tenant` dep behaves.
         tenant = TenantId(LJM_TENANT_ID)
         set_tenant(tenant)
         return tenant

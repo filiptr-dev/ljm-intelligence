@@ -11,11 +11,19 @@ import * as inbox from "@/lib/api/inbox"
  * `/inbox/compose` endpoint; the owner switch controls whether the message
  * leaves the building (default OFF → simulated-sender records a receipt).
  */
-export function ComposeForm({ initialTo }: { initialTo: string }) {
+export function ComposeForm({
+  initialTo,
+  initialSubject = "",
+  initialBody = "",
+}: {
+  initialTo: string
+  initialSubject?: string
+  initialBody?: string
+}) {
   const router = useRouter()
   const [to, setTo] = useState(initialTo)
-  const [subject, setSubject] = useState("")
-  const [body, setBody] = useState("")
+  const [subject, setSubject] = useState(initialSubject)
+  const [body, setBody] = useState(initialBody)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<{ threadId: string; mode: string } | null>(null)
   const [pending, startTransition] = useTransition()

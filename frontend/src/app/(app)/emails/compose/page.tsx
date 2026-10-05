@@ -9,6 +9,8 @@ import { ComposeForm } from "./compose-form"
 export default async function ComposePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams
   const to = typeof sp.to === "string" ? sp.to : ""
+  const subject = typeof sp.subject === "string" ? sp.subject : ""
+  const body = typeof sp.body === "string" ? sp.body : ""
 
   return (
     <>
@@ -17,7 +19,7 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
         title="New email"
         description="A personal email to one company, outside of a campaign. The owner switch decides whether it leaves the building."
       />
-      <ComposeForm initialTo={to} />
+      <ComposeForm initialTo={to} initialSubject={subject} initialBody={body} />
     </>
   )
 }
