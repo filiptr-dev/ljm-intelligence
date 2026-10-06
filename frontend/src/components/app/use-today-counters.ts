@@ -3,18 +3,34 @@
 import * as React from "react"
 import { getTopbarCounters } from "@/lib/api/analysis"
 
-export type TodayCounters = { scanned: number; found: number; sent: number; replies: number }
+export type MonitoringStatus = "none" | "running" | "idle_recent" | "idle_stale" | "error"
 
-const ZERO: TodayCounters = { scanned: 0, found: 0, sent: 0, replies: 0 }
+export type TodayCounters = {
+  scanned: number
+  found: number
+  sent: number
+  replies: number
+  lastCrawlAt: string | null
+  lastCrawlStatus: MonitoringStatus
+}
+
+const ZERO: TodayCounters = {
+  scanned: 0,
+  found: 0,
+  sent: 0,
+  replies: 0,
+  lastCrawlAt: null,
+  lastCrawlStatus: "none",
+}
 const POLL_MS = 60_000
 
 /**
  * Today's (ET) real counters for the tenant — `GET /analysis/topbar-counters`.
  *
- * Starts at zero and only ever shows what the backend returned: no baseline,
- * no client-side tick-up. Re-polls every minute so a crawl or send that lands
- * while the page is open shows up without a reload. A failed poll keeps the
- * last real numbers rather than inventing new ones.
+ * One poll feeds both the number row and the top-bar pill (`lastCrawlAt` /
+ * `lastCrawlStatus`), so they can never drift against each other. Starts at
+ * zero + `none`; a failed poll keeps the last real snapshot rather than
+ * inventing new numbers.
  */
 export function useTodayCounters(): TodayCounters {
   const [counters, setCounters] = React.useState<TodayCounters>(ZERO)
@@ -22,7 +38,16 @@ export function useTodayCounters(): TodayCounters {
     const ctrl = new AbortController()
     const load = () =>
       getTopbarCounters(ctrl.signal)
-        .then(({ scanned, found, sent, replies }) => setCounters({ scanned, found, sent, replies }))
+        .then((c) =>
+          setCounters({
+            scanned: c.scanned,
+            found: c.found,
+            sent: c.sent,
+            replies: c.replies,
+            lastCrawlAt: c.last_crawl_at,
+            lastCrawlStatus: c.last_crawl_status as MonitoringStatus,
+          }),
+        )
         .catch(() => {})
     load()
     const id = setInterval(load, POLL_MS)

@@ -13,12 +13,11 @@ import { Textarea } from "@/components/ui/textarea"
 import type { EmailPurpose, OutreachDraft, OutreachTone } from "@/lib/ai/types"
 import type { Segment } from "@/lib/analytics"
 import { PURPOSE_LABEL, type Recipient } from "@/lib/campaigns/types"
-import { LEAD_KIND_LABEL } from "@/lib/data/types"
 import { nowMs } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { BriefBox, streamInto, StylePicker, type WriteStyle } from "./ai-writer"
 import { renderTemplate } from "./email-preview"
-import { toRecipient, useEngine } from "./engine"
+import { useEngine } from "./engine"
 import { Segmented } from "./segmented"
 import { RegionTag, SegmentBadge } from "./ui"
 
@@ -74,14 +73,10 @@ export function EmailComposer({
   init: ComposerInit
   onSent?: (id: string) => void
 }) {
-  const { liveLeads, sendEmail } = useEngine()
-  const all = React.useMemo<ContactOption[]>(
-    () => [
-      ...liveLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
-      ...contacts,
-    ],
-    [liveLeads, contacts],
-  )
+  const { sendEmail } = useEngine()
+  // Fake per-session `liveLeads` are gone (plan 2026-10-06); only the existing
+  // contacts list is offered.
+  const all = React.useMemo<ContactOption[]>(() => contacts, [contacts])
   const suggest = (c?: ContactOption): EmailPurpose => (!c ? "truck_available" : c.kind === "lead" ? "intro" : c.segment ? SUGGESTED[c.segment] : "check_in")
 
   const [toId, setToId] = React.useState(init.to)

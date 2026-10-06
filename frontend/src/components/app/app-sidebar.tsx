@@ -64,10 +64,13 @@ const CONFIG = [{ href: "/settings", label: "Settings", icon: SettingsIcon }]
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const { liveLeads, campaigns } = useEngine()
+  const { campaigns } = useEngine()
   const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href))
   const sending = campaigns.filter((c) => !c.single).reduce((s, c) => s + c.recipients.filter((r) => r.status === "queued").length, 0)
   const newReplies = campaigns.filter((c) => c.single && c.recipients[0]?.reply).length
+  // Lead Finder badge used to show `+liveLeads.length` (fake per-session count
+  // from the client-side crawler simulation). Dropped per plan 2026-10-06; the
+  // real "new leads today" number lives in the top-bar `found` counter.
 
   const item = (i: { href: string; label: string; icon: React.ComponentType<{ className?: string }> }, badge?: React.ReactNode) => (
     <SidebarMenuItem key={i.href}>
@@ -100,7 +103,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupLabel className="font-display tracking-[0.16em] text-[#8b9098]">Grow</SidebarGroupLabel>
           <SidebarMenu>
-            {item(GROW[0], liveLeads.length ? <SidebarMenuBadge className="bg-safety text-asphalt">+{liveLeads.length}</SidebarMenuBadge> : null)}
+            {item(GROW[0])}
             {item(GROW[1], sending ? <SidebarMenuBadge className="bg-sidebar-accent text-white">{sending}</SidebarMenuBadge> : null)}
             {item(GROW[2])}
             {item(GROW[3], newReplies ? <SidebarMenuBadge className="bg-good text-white">{newReplies}</SidebarMenuBadge> : null)}

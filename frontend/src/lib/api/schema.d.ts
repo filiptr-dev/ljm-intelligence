@@ -1373,6 +1373,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analysis/live-feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live Feed Endpoint
+         * @description Last 12h of real activity for the live-feed widgets.
+         *
+         *     Three real kinds only — ``found`` / ``outreach`` / ``reply``. Rolling
+         *     12h window; tenant-scoped on every leg (fail closed).
+         */
+        get: operations["live_feed_endpoint_analysis_live_feed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/campaign-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Campaign Status Endpoint
+         * @description Real per-recipient sent/replied timestamps for a client-side campaign.
+         *
+         *     Campaigns live in localStorage in v1 (no backend table). The dashboard
+         *     posts the campaign's ``created_at`` + the list of recipient emails and
+         *     gets back the real ``sent_at`` (latest ``SentLog`` in-window) and
+         *     ``replied_at`` (earliest inbound mail in-window) for each. Opens and
+         *     wins are **not** returned — no table backs them.
+         *
+         *     POST (not GET) because the recipient list can be large and GET query
+         *     strings have host-dependent limits; see plan 2026-10-06 "Honest
+         *     campaign metrics" — the plan's `GET /campaigns/{client_id}/status`
+         *     sketch is realised here as a tenant-scoped analysis read because
+         *     there is no backend Campaign table to key off of.
+         */
+        post: operations["campaign_status_endpoint_analysis_campaign_status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analysis/lanes": {
         parameters: {
             query?: never;
@@ -1996,6 +2051,30 @@ export interface components {
             /** Opener */
             opener: string;
             last_outcome: components["schemas"]["LastOutcomeOut"] | null;
+        };
+        /** CampaignStatusIn */
+        CampaignStatusIn: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Emails */
+            emails: string[];
+        };
+        /** CampaignStatusItemOut */
+        CampaignStatusItemOut: {
+            /** Email */
+            email: string;
+            /** Sent At */
+            sent_at: string | null;
+            /** Replied At */
+            replied_at: string | null;
+        };
+        /** CampaignStatusOut */
+        CampaignStatusOut: {
+            /** Items */
+            items: components["schemas"]["CampaignStatusItemOut"][];
         };
         /** CapacityKpiOut */
         CapacityKpiOut: {
@@ -2857,6 +2936,30 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+        };
+        /** LiveFeedItemOut */
+        LiveFeedItemOut: {
+            /** Id */
+            id: string;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "found" | "outreach" | "reply";
+            /** Text */
+            text: string;
+            /** Detail */
+            detail?: string | null;
+        };
+        /** LiveFeedOut */
+        LiveFeedOut: {
+            /** Items */
+            items: components["schemas"]["LiveFeedItemOut"][];
         };
         /** LoadOut */
         LoadOut: {
@@ -3946,6 +4049,13 @@ export interface components {
             sent: number;
             /** Replies */
             replies: number;
+            /** Last Crawl At */
+            last_crawl_at: string | null;
+            /**
+             * Last Crawl Status
+             * @enum {string}
+             */
+            last_crawl_status: "none" | "running" | "idle_recent" | "idle_stale" | "error";
         };
         /** TriageOut */
         TriageOut: {
@@ -6734,6 +6844,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TopbarCountersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    live_feed_endpoint_analysis_live_feed_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveFeedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    campaign_status_endpoint_analysis_campaign_status_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignStatusIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignStatusOut"];
                 };
             };
             /** @description Validation Error */

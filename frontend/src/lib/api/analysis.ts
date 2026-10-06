@@ -73,10 +73,44 @@ export async function getBrokerKpi(brokerId: string, opts: PeriodQuery = {}, sig
   return unwrap(res, `/analysis/broker-kpis/${brokerId}`)
 }
 
-/** GET /analysis/topbar-counters — today's (ET) scanned / found / sent / replies for the tenant. */
+/** GET /analysis/topbar-counters — today's (ET) scanned / found / sent / replies
+ *  for the tenant, plus the top-bar pill's `last_crawl_at` / `last_crawl_status`
+ *  piggybacked so the pill and the counters stay in lockstep off one poll. */
 export async function getTopbarCounters(signal?: AbortSignal): Promise<TopbarCounters> {
   const res = await api.GET("/analysis/topbar-counters", { signal })
   return unwrap(res, "/analysis/topbar-counters")
+}
+
+export type LiveFeedItem = components["schemas"]["LiveFeedItemOut"]
+export type LiveFeedOut = components["schemas"]["LiveFeedOut"]
+
+/** GET /analysis/live-feed — rolling 12h, real `found` / `outreach` / `reply`
+ *  events only, tenant-scoped. Replaces the client-side createRng fiction. */
+export async function getLiveFeed(limit = 25, signal?: AbortSignal): Promise<LiveFeedOut> {
+  const res = await api.GET("/analysis/live-feed", {
+    params: { query: { limit } },
+    signal,
+  })
+  return unwrap(res, "/analysis/live-feed")
+}
+
+export type CampaignStatusItem = components["schemas"]["CampaignStatusItemOut"]
+export type CampaignStatusOut = components["schemas"]["CampaignStatusOut"]
+
+/** POST /analysis/campaign-status — real per-recipient `sent_at` /
+ *  `replied_at` for a client-side campaign (campaigns live in localStorage
+ *  in v1; this read is how the dashboard stops lying about delivery).
+ *  Opens and wins are never returned — no table backs them. */
+export async function getCampaignStatus(
+  createdAt: string,
+  emails: string[],
+  signal?: AbortSignal,
+): Promise<CampaignStatusOut> {
+  const res = await api.POST("/analysis/campaign-status", {
+    body: { created_at: createdAt, emails },
+    signal,
+  })
+  return unwrap(res, "/analysis/campaign-status")
 }
 
 function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path: string): T {

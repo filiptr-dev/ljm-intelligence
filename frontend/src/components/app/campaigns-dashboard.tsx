@@ -6,19 +6,52 @@ import { Copy, Lightbulb, Plus, Sparkles } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { analyzeCampaigns } from "@/lib/campaigns/metrics"
-import { CAMPAIGN_TYPE_LABEL, REPLY_COLOR, REPLY_LABEL, TONE_LABEL, type Campaign, type ReplyCategory } from "@/lib/campaigns/types"
+import { CAMPAIGN_TYPE_LABEL, REPLY_COLOR, REPLY_LABEL, TONE_LABEL, type Campaign, type CampaignRecipient, type ReplyCategory } from "@/lib/campaigns/types"
 import { dateShort, num } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { GoalBar, pctText, ReplyChip, StatusPill } from "./campaign-bits"
 import { readableTags } from "./email-preview"
 import { useEngine } from "./engine"
 import { BarList, PageHeader, Panel, StackBar, StatTile } from "./ui"
+import { useCampaignsStatus } from "./use-campaign-status"
+
+/** Overlay backend-derived `sent_at` / `replied_at` onto a client-side
+ *  campaign's recipients. Opens and wins are **never** promoted — no table
+ *  backs them (plan 2026-10-06, gate amendment keeps the columns but
+ *  renders them as `—`). Returns a shallow-cloned Campaign so React
+ *  memoisation downstream still works. */
+function applyRealStatus(c: Campaign, status: Map<string, { sent_at: string | null; replied_at: string | null }> | undefined): Campaign {
+  if (!status || status.size === 0) return c
+  const next: CampaignRecipient[] = c.recipients.map((r) => {
+    const row = status.get(r.email.toLowerCase())
+    if (!row) return r
+    if (row.replied_at) {
+      return { ...r, status: "replied", at: new Date(row.replied_at).getTime() }
+    }
+    if (row.sent_at) {
+      return { ...r, status: "sent", at: new Date(row.sent_at).getTime() }
+    }
+    return r
+  })
+  return { ...c, recipients: next }
+}
+
+const DASH = "—"
 
 export function CampaignsDashboard({ history }: { history: Campaign[] }) {
   const { campaigns: live } = useEngine()
+  // Backfill real sent/replied timestamps per client-side campaign (plan
+  // 2026-10-06). `history` is the pre-seeded dev data (not persisted
+  // server-side), so it has no backend state to look up — only live
+  // campaigns go through the backend read.
+  const statusMaps = useCampaignsStatus(live)
+  const liveReal = React.useMemo(
+    () => live.filter((c) => c.recipients.length && !c.single).map((c) => applyRealStatus(c, statusMaps.get(c.id))),
+    [live, statusMaps],
+  )
   const all = React.useMemo(
-    () => [...live.filter((c) => c.recipients.length && !c.single), ...history].sort((a, b) => b.createdAt - a.createdAt),
-    [live, history],
+    () => [...liveReal, ...history].sort((a, b) => b.createdAt - a.createdAt),
+    [liveReal, history],
   )
   const a = React.useMemo(() => analyzeCampaigns(all), [all])
   const t = a.totals
@@ -40,11 +73,14 @@ export function CampaignsDashboard({ history }: { history: Campaign[] }) {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatTile label="Campaigns" value={all.length} sub={`${a.list.filter(({ s }) => s.status !== "Completed").length} running or scheduled`} />
-        <StatTile label="Emails delivered" value={num(t.delivered)} sub={`${pctText(t.opened / (t.delivered || 1))} opened`} />
+        {/* Opens aren't tracked yet (no table backs it) — kept visible per gate amendment, rendered as — */}
+        <StatTile label="Emails delivered" value={num(t.delivered)} sub={`${DASH} opened`} />
         <StatTile label="Reply rate" value={pctText(t.replied / (t.delivered || 1))} sub={`${num(t.replied)} replies`} />
-        <StatTile label="Interested replies" value={num(t.positive)} sub={`${pctText(t.positive / (t.replied || 1))} of all replies`} />
-        <StatTile label="New customers won" value={num(t.won)} sub="Booked a first load" />
-        <StatTile label="Loads from campaigns" value={num(t.loads)} sub="Booked after a reply" />
+        {/* Reply categorisation isn't tracked yet, so "interested" has no honest number — render — */}
+        <StatTile label="Interested replies" value={DASH} sub="Not tracked yet" />
+        {/* Wins / loads aren't tracked yet (no bookings table) — kept visible, rendered as — */}
+        <StatTile label="New customers won" value={DASH} sub="Booked a first load" />
+        <StatTile label="Loads from campaigns" value={DASH} sub="Booked after a reply" />
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
@@ -113,9 +149,11 @@ export function CampaignsDashboard({ history }: { history: Campaign[] }) {
                   </TableCell>
                   <TableCell><StatusPill status={s.status} /></TableCell>
                   <TableCell className="num text-right font-mono">{s.total}</TableCell>
-                  <TableCell className="num text-right font-mono">{pctText(s.openRate)}</TableCell>
+                  {/* Opens column kept per gate amendment but rendered as — (not tracked) */}
+                  <TableCell className="num text-right font-mono">{DASH}</TableCell>
                   <TableCell className="num text-right font-mono">{pctText(s.replyRate)}</TableCell>
-                  <TableCell className="num text-right font-mono">{s.positive}</TableCell>
+                  {/* Interested column kept but no reply-categorisation backs it */}
+                  <TableCell className="num text-right font-mono">{DASH}</TableCell>
                   <TableCell><GoalBar goal={s.goal} compact /></TableCell>
                   <TableCell className="pr-4 text-right">
                     <div className="flex justify-end gap-1.5">

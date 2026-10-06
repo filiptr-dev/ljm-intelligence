@@ -678,6 +678,10 @@ async def topbar_counters(session: AsyncSession, tenant: str) -> dict:
       * sent    — outreach sends today (``sent_log``, test sends excluded)
       * replies — inbound mail received today (``from_addr != mailbox``,
         the inbox's inbound rule; ``sent_log.replied_at`` is never written)
+
+    Also piggybacks the top-bar pill's monitoring state so the pill and the
+    counters stay in lockstep off a single poll (see plan 2026-10-06). The
+    pill reads ``last_crawl_at`` (ISO) + ``last_crawl_status`` (five-state).
     """
     now = datetime.now(UTC)
     start = _snap_day_et(now)
@@ -717,13 +721,309 @@ async def topbar_counters(session: AsyncSession, tenant: str) -> dict:
             )
         ),
     )
+    # ---- pill: last-crawl + status --------------------------------------
+    # Window logic:
+    #   running     -> any row for this tenant with status=='running'
+    #                  and started_at within the last 30 min
+    #                  (stalled-row healer in app/api/jobs.py closes anything older).
+    #   idle_recent -> latest 'done' finished within the last 2 h.
+    #   idle_stale  -> latest 'done' older than 2 h, within 48 h.
+    #   error       -> latest terminal is 'error' and nothing newer is running/done.
+    #   none        -> no CrawlRun rows for this tenant.
+    #
+    # last_crawl_at = started_at when running, else finished_at of latest terminal.
+    thirty_min_ago = now - timedelta(minutes=30)
+    running_row = (
+        await session.execute(
+            select(CrawlRun.started_at)
+            .where(
+                and_(
+                    CrawlRun.tenant_id == tenant,
+                    CrawlRun.status == "running",
+                    CrawlRun.started_at >= thirty_min_ago,
+                )
+            )
+            .order_by(CrawlRun.started_at.desc())
+            .limit(1)
+        )
+    ).first()
+
+    last_terminal_row = (
+        await session.execute(
+            select(CrawlRun.status, CrawlRun.finished_at)
+            .where(
+                and_(
+                    CrawlRun.tenant_id == tenant,
+                    CrawlRun.status.in_(("done", "error")),
+                    CrawlRun.finished_at.is_not(None),
+                )
+            )
+            .order_by(CrawlRun.finished_at.desc())
+            .limit(1)
+        )
+    ).first()
+
+    any_row = (
+        await session.execute(
+            select(func.count(CrawlRun.id)).where(CrawlRun.tenant_id == tenant)
+        )
+    ).scalar() or 0
+
+    last_crawl_at: str | None = None
+    last_crawl_status: str = "none"
+
+    def _aware(dt: datetime | None) -> datetime | None:
+        # sqlite returns naive timestamps; normalise so arithmetic works
+        # against the aware `now` on both backends.
+        if dt is None:
+            return None
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+    if running_row is not None:
+        last_crawl_status = "running"
+        started = _aware(running_row[0])
+        last_crawl_at = started.isoformat() if started else None
+    elif last_terminal_row is not None:
+        status, finished_at = last_terminal_row
+        finished_at = _aware(finished_at)
+        last_crawl_at = finished_at.isoformat() if finished_at else None
+        age = now - finished_at if finished_at else timedelta(days=999)
+        if status == "error":
+            last_crawl_status = "error"
+        elif age <= timedelta(hours=2):
+            last_crawl_status = "idle_recent"
+        elif age <= timedelta(hours=48):
+            last_crawl_status = "idle_stale"
+        else:
+            # Older than 48h — treat as "no recent monitoring" rather than
+            # staying "idle" indefinitely. Falls to idle_stale so the pill
+            # at least carries the timestamp; the client will show how long
+            # ago, which is the honest signal.
+            last_crawl_status = "idle_stale"
+    elif any_row == 0:
+        last_crawl_status = "none"
+    else:
+        # Rows exist (e.g. queued-but-never-started) but none terminal and
+        # none currently running within our 30-min window. Honest fallback:
+        # "none" would be misleading; call it idle_stale with no timestamp.
+        last_crawl_status = "idle_stale"
+
     return {
         "today_et": start.astimezone(ET).date().isoformat(),
         "scanned": scanned,
         "found": found,
         "sent": sent,
         "replies": replies,
+        "last_crawl_at": last_crawl_at,
+        "last_crawl_status": last_crawl_status,
     }
+
+
+# ---- live feed -----------------------------------------------------------
+
+
+async def live_feed(session: AsyncSession, tenant: str, limit: int = 25) -> dict:
+    """Last 12h of real activity for the top-bar / sidebar live feed.
+
+    Three real event sources only — ``found`` (new leads), ``outreach``
+    (sent_log), ``reply`` (inbound mail). No ``scan`` / ``verify`` /
+    ``duplicate`` kinds; the backend doesn't emit those, and inventing
+    them client-side is precisely the fiction this plan is deleting.
+
+    Rolling 12-hour window: a 9am user needs context from last night's
+    crawl, not an empty "today ET" feed. Every leg filters tenant
+    explicitly (fail closed; sqlite has no RLS).
+
+    ``id`` is namespaced per kind (``found:{lead.id}`` etc.) so React
+    keys never collide across unions.
+    """
+    now = datetime.now(UTC)
+    window_start = now - timedelta(hours=12)
+    # Cap per-leg so a tenant with 10k leads in the last 12h doesn't blow
+    # memory before we sort. We still ORDER BY per leg so the slice is
+    # the most-recent N, then merge-sort client-side.
+    per_leg = max(limit, 50)
+
+    found_rows = (
+        await session.execute(
+            select(Lead.id, Lead.name, Lead.kind, Lead.state, Lead.first_seen_at)
+            .where(
+                and_(
+                    Lead.tenant_id == tenant,
+                    Lead.first_seen_at >= window_start,
+                    Lead.first_seen_at <= now,
+                )
+            )
+            .order_by(Lead.first_seen_at.desc())
+            .limit(per_leg)
+        )
+    ).all()
+
+    sent_rows = (
+        await session.execute(
+            select(SentLog.id, SentLog.to_email, SentLog.subject, SentLog.sent_at)
+            .where(
+                and_(
+                    SentLog.tenant_id == tenant,
+                    SentLog.is_test.is_(False),
+                    SentLog.sent_at >= window_start,
+                    SentLog.sent_at <= now,
+                )
+            )
+            .order_by(SentLog.sent_at.desc())
+            .limit(per_leg)
+        )
+    ).all()
+
+    reply_rows = (
+        await session.execute(
+            select(
+                MailMessage.message_id,
+                MailMessage.from_addr,
+                MailMessage.subject,
+                MailMessage.received_at,
+            )
+            .where(
+                and_(
+                    MailMessage.tenant_id == tenant,
+                    MailMessage.from_addr != MailMessage.mailbox,
+                    MailMessage.received_at >= window_start,
+                    MailMessage.received_at <= now,
+                )
+            )
+            .order_by(MailMessage.received_at.desc())
+            .limit(per_leg)
+        )
+    ).all()
+
+    items: list[dict] = []
+    for lid, name, kind, state, fsa in found_rows:
+        items.append(
+            {
+                "id": f"found:{lid}",
+                "at": fsa.isoformat() if fsa else now.isoformat(),
+                "kind": "found",
+                "text": name or lid,
+                "detail": f"{kind or 'Lead'} · {state or '—'}",
+            }
+        )
+    for sid, to_email, subject, sent_at in sent_rows:
+        items.append(
+            {
+                "id": f"outreach:{sid}",
+                "at": sent_at.isoformat() if sent_at else now.isoformat(),
+                "kind": "outreach",
+                "text": f"Email sent to {to_email}" if to_email else "Email sent",
+                "detail": subject or None,
+            }
+        )
+    for mid, from_addr, subject, received_at in reply_rows:
+        items.append(
+            {
+                "id": f"reply:{mid}",
+                "at": received_at.isoformat() if received_at else now.isoformat(),
+                "kind": "reply",
+                "text": f"Reply received from {from_addr}" if from_addr else "Reply received",
+                "detail": subject or None,
+            }
+        )
+
+    items.sort(key=lambda r: r["at"], reverse=True)
+    return {"items": items[:limit]}
+
+
+# ---- campaign status (per client-side campaign) --------------------------
+
+
+async def campaign_status(
+    session: AsyncSession,
+    tenant: str,
+    created_at: datetime,
+    emails: list[str],
+) -> dict:
+    """Backfill real ``sent_at`` / ``replied_at`` per recipient email.
+
+    Campaigns live client-side in v1 (localStorage); this read lets the
+    UI stop lying about delivery. For each requested email we return:
+
+      * ``sent_at``    — latest ``SentLog.sent_at`` for that address in
+                         this tenant between ``created_at`` and now.
+      * ``replied_at`` — earliest inbound ``MailMessage.received_at``
+                         from that address in the same window.
+
+    Opens and wins are **not** returned — no table backs them.
+    """
+    if not emails:
+        return {"items": []}
+    # Normalise once; downstream matches are case-insensitive.
+    wanted = [e for e in {e.strip().lower() for e in emails} if e]
+    if not wanted:
+        return {"items": []}
+
+    now = datetime.now(UTC)
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+
+    sent_rows = (
+        await session.execute(
+            select(SentLog.to_email, func.max(SentLog.sent_at))
+            .where(
+                and_(
+                    SentLog.tenant_id == tenant,
+                    SentLog.is_test.is_(False),
+                    SentLog.sent_at >= created_at,
+                    SentLog.sent_at <= now,
+                    func.lower(SentLog.to_email).in_(wanted),
+                )
+            )
+            .group_by(SentLog.to_email)
+        )
+    ).all()
+    sent_by_email: dict[str, datetime] = {}
+    for addr, max_at in sent_rows:
+        if addr is None or max_at is None:
+            continue
+        key = addr.lower()
+        existing = sent_by_email.get(key)
+        if existing is None or max_at > existing:
+            sent_by_email[key] = max_at
+
+    reply_rows = (
+        await session.execute(
+            select(MailMessage.from_addr, func.min(MailMessage.received_at))
+            .where(
+                and_(
+                    MailMessage.tenant_id == tenant,
+                    MailMessage.from_addr != MailMessage.mailbox,
+                    MailMessage.received_at >= created_at,
+                    MailMessage.received_at <= now,
+                    func.lower(MailMessage.from_addr).in_(wanted),
+                )
+            )
+            .group_by(MailMessage.from_addr)
+        )
+    ).all()
+    replied_by_email: dict[str, datetime] = {}
+    for addr, min_at in reply_rows:
+        if addr is None or min_at is None:
+            continue
+        key = addr.lower()
+        existing = replied_by_email.get(key)
+        if existing is None or min_at < existing:
+            replied_by_email[key] = min_at
+
+    items = []
+    for addr in wanted:
+        s_at = sent_by_email.get(addr)
+        r_at = replied_by_email.get(addr)
+        items.append(
+            {
+                "email": addr,
+                "sent_at": s_at.isoformat() if s_at else None,
+                "replied_at": r_at.isoformat() if r_at else None,
+            }
+        )
+    return {"items": items}
 
 
 async def lane_performance(

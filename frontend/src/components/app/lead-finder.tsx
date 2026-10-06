@@ -28,6 +28,7 @@ import { DEFAULT_DESIGN, toRecipient, useEngine } from "./engine"
 import { LiveFeed, ScoreChip } from "./live-feed"
 import { Panel, RegionTag } from "./ui"
 import { Segmented } from "./segmented"
+import { useAutoOutreach } from "./use-auto-outreach"
 
 /** One-click templates: brokers and forwarders get a capacity pitch, shippers a direct-carrier pitch. */
 const QUICK: Record<"capacity" | "shipper", { type: string; subject: string; body: string }> = {
@@ -45,7 +46,8 @@ const QUICK: Record<"capacity" | "shipper", { type: string; subject: string; bod
 
 export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: LookalikeProfile }) {
   const router = useRouter()
-  const { liveLeads, contacted, sendCampaign, autoOutreach, setAutoOutreach, feed } = useEngine()
+  const { contacted, sendCampaign } = useEngine()
+  const [autoOutreach, setAutoOutreach] = useAutoOutreach()
   const [q, setQ] = React.useState("")
   const [minScore, setMinScore] = React.useState(0)
   const [equipment, setEquipment] = React.useState("all")
@@ -55,7 +57,6 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   const [limit, setLimit] = React.useState(60)
   const [open, setOpen] = React.useState<Lead | null>(null)
   const [confirm, setConfirm] = React.useState(false)
-  const liveIds = React.useMemo(() => new Set(liveLeads.map((l) => l.id)), [liveLeads])
   const { real: realLeads, live: backendLive, reload: reloadRealLeads } = useBackendLeads(200)
   const { run: latestRun, running: triggering, trigger: triggerCrawl } = useLatestRun()
   // MF3 — poll the procrastinate job directly so a worker-side failure
@@ -75,10 +76,9 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
     },
   })
 
-  const all = React.useMemo(
-    () => [...realLeads, ...liveLeads, ...pool],
-    [realLeads, liveLeads, pool],
-  )
+  // Fake per-session `liveLeads` are gone (plan 2026-10-06): the table shows
+  // only real backend leads + the design-pool fallback.
+  const all = React.useMemo(() => [...realLeads, ...pool], [realLeads, pool])
   const filtered = React.useMemo(
     () =>
       all.filter(
@@ -98,8 +98,10 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
     all.forEach((l) => m.set(`${l.region}:${l.source}`, (m.get(`${l.region}:${l.source}`) ?? 0) + 1))
     return m
   }, [all])
-  const scan = feed.find((f) => f.kind === "scan")
-  const scanning = scan ? `${scan.region}:${scan.text.replace("Scanning ", "")}` : undefined
+  // The old "which source is scanning right now" highlight was driven by the
+  // fake feed's `scan` events. The real backend never emits a `scan` kind, so
+  // the highlight is dropped (plan 2026-10-06: removed, not faked).
+  const scanning: string | undefined = undefined
 
   const toggle = (id: string) =>
     setSelected((s) => {
@@ -193,7 +195,6 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
           <div className="flex flex-wrap items-center gap-3 border-b border-border bg-muted/50 px-3 py-2.5">
             <span className="text-sm">
               <b className="num font-mono">{num(filtered.length)}</b> leads
-              {liveLeads.length ? <span className="ml-2 rounded-sm bg-safety px-1.5 py-0.5 text-xs font-semibold text-asphalt">+{liveLeads.length} found this session</span> : null}
             </span>
             <div className="ml-auto flex flex-wrap gap-2">
               <Button
@@ -230,7 +231,9 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
             </TableHeader>
             <TableBody>
               {filtered.slice(0, limit).map((l) => {
-                const isNew = liveIds.has(l.id)
+                // "NEW" badge used to light up for fake per-session liveLeads;
+                // the real "found today" surface is the top-bar `found` counter.
+                const isNew = false
                 const done = contacted.has(l.id)
                 return (
                   <TableRow key={l.id} className={cn("cursor-pointer", isNew && "animate-feed bg-accent/60")} onClick={() => setOpen(l)}>
@@ -282,7 +285,7 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
         <Panel title="Auto-outreach" description="Email new high-match leads as soon as they're verified">
           <label className="flex items-center justify-between gap-3">
             <span className="text-sm">Auto-send when match ≥ 70</span>
-            <Switch checked={autoOutreach} onCheckedChange={setAutoOutreach} />
+            <Switch checked={autoOutreach} onCheckedChange={(v) => { void setAutoOutreach(v) }} />
           </label>
           <p className="mt-2 text-xs text-muted-foreground">Emails go out in your peak reply windows, with the “Capacity intro” template personalised by the AI.</p>
         </Panel>

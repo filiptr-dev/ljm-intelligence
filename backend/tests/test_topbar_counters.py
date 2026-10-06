@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.analysis import kpi_service as kpi
 from app.db import Base
+from app.identity.models import Organization
 from app.main import create_app
 from app.models import Lead, MailMessage, SentLog
 from app.shared.orm import LJM_TENANT_ID
@@ -37,7 +38,17 @@ async def _sessionmaker():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:
-        yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        sm = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        # Seed OTHER organization so the pg16-strict FK (`leads.tenant_id`
+        # → `organizations.id`) accepts rows that belong to it. On sqlite
+        # this is a harmless extra insert.
+        async with sm() as s:
+            s.add(Organization(id=OTHER, slug="other-test", name="Other Co"))
+            try:
+                await s.commit()
+            except Exception:  # noqa: BLE001 — swallow dup-insert from reuse
+                await s.rollback()
+        yield sm
     finally:
         await engine.dispose()
 

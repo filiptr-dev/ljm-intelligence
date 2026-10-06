@@ -319,12 +319,77 @@ class TopbarCountersOut(BaseModel):
     found: int
     sent: int
     replies: int
+    # Pill carries the real crawler state so the top-bar pill and the counters
+    # stay in lockstep off one poll — see plan 2026-10-06.
+    last_crawl_at: str | None
+    last_crawl_status: Literal["none", "running", "idle_recent", "idle_stale", "error"]
 
 
 @router.get("/topbar-counters", response_model=TopbarCountersOut)
 async def topbar_counters_endpoint(session: Session) -> Any:
     """Top-bar "today" counters (ET, tenant) — replaces the client-side baseline."""
     return await kpi.topbar_counters(session, current_tenant())
+
+
+class LiveFeedItemOut(BaseModel):
+    id: str
+    at: datetime
+    kind: Literal["found", "outreach", "reply"]
+    text: str
+    detail: str | None = None
+
+
+class LiveFeedOut(BaseModel):
+    items: list[LiveFeedItemOut]
+
+
+@router.get("/live-feed", response_model=LiveFeedOut)
+async def live_feed_endpoint(
+    session: Session,
+    limit: int = Query(default=25, ge=1, le=100),
+) -> Any:
+    """Last 12h of real activity for the live-feed widgets.
+
+    Three real kinds only — ``found`` / ``outreach`` / ``reply``. Rolling
+    12h window; tenant-scoped on every leg (fail closed).
+    """
+    return await kpi.live_feed(session, current_tenant(), limit=limit)
+
+
+class CampaignStatusItemOut(BaseModel):
+    email: str
+    sent_at: str | None
+    replied_at: str | None
+
+
+class CampaignStatusOut(BaseModel):
+    items: list[CampaignStatusItemOut]
+
+
+class CampaignStatusIn(BaseModel):
+    created_at: datetime
+    emails: list[str]
+
+
+@router.post("/campaign-status", response_model=CampaignStatusOut)
+async def campaign_status_endpoint(session: Session, body: CampaignStatusIn) -> Any:
+    """Real per-recipient sent/replied timestamps for a client-side campaign.
+
+    Campaigns live in localStorage in v1 (no backend table). The dashboard
+    posts the campaign's ``created_at`` + the list of recipient emails and
+    gets back the real ``sent_at`` (latest ``SentLog`` in-window) and
+    ``replied_at`` (earliest inbound mail in-window) for each. Opens and
+    wins are **not** returned — no table backs them.
+
+    POST (not GET) because the recipient list can be large and GET query
+    strings have host-dependent limits; see plan 2026-10-06 "Honest
+    campaign metrics" — the plan's `GET /campaigns/{client_id}/status`
+    sketch is realised here as a tenant-scoped analysis read because
+    there is no backend Campaign table to key off of.
+    """
+    return await kpi.campaign_status(
+        session, current_tenant(), body.created_at, body.emails
+    )
 
 
 class LaneRow(BaseModel):

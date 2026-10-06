@@ -107,17 +107,19 @@ export function SingleEmailBuilder({
   onSend, defaultDesign, defaultTone,
 }: SingleEmailBuilderProps) {
   const router = useRouter()
-  const { liveLeads, sendEmail } = useEngine()
+  const { sendEmail } = useEngine()
   const { real: realLeads } = useBackendLeads(200)
 
+  // Fake per-session `liveLeads` are gone (plan 2026-10-06); recipient picker
+  // shows the already-synthesised recipient (from `?to=…`), real backend
+  // leads, and the existing contacts list.
   const all = React.useMemo<ContactOption[]>(
     () => [
       ...(initialRecipient ? [initialRecipient] : []),
       ...realLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
-      ...liveLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
       ...contacts,
     ],
-    [initialRecipient, realLeads, liveLeads, contacts],
+    [initialRecipient, realLeads, contacts],
   )
 
   const [toId, setToId] = React.useState(initialToId ?? initialRecipient?.id)

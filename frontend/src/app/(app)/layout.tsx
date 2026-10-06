@@ -2,30 +2,23 @@ import { AppSidebar } from "@/components/app/app-sidebar"
 import { EngineProvider } from "@/components/app/engine"
 import { Topbar } from "@/components/app/topbar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import { getStore } from "@/lib/data/store"
-import { LEAD_KIND_LABEL } from "@/lib/data/types"
 
-// render per request so the seeded feed's "min ago" stays relative to the demo moment
+// Still per-request so time-relative labels (`timeAgo`) read fresh.
 export const dynamic = "force-dynamic"
 
 /**
  * App-group layout — wraps every authenticated page in the sidebar, topbar,
- * and demo engine. Nothing in the `(auth)` route group (e.g. /login) sees
+ * and campaign store. Nothing in the `(auth)` route group (e.g. /login) sees
  * this layout, which is the whole point: a signed-out visitor must land on
  * a chrome-free sign-in form.
+ *
+ * EngineProvider no longer takes seed/profile/knownNames: the seeded fake
+ * feed is gone, replaced by a real `useLiveFeed()` backend read (plan
+ * 2026-10-06).
  */
-export default async function AppLayout({ children }: LayoutProps<"/">) {
-  const store = await getStore()
-  const seed = store.leads.slice(0, 8).map((l) => ({
-    at: new Date(l.discoveredAt).getTime(),
-    text: l.name,
-    detail: `${LEAD_KIND_LABEL[l.kind]}${l.industry ? ` · ${l.industry}` : ""} · ${l.hq} · via ${l.source}`,
-    score: l.score,
-    region: l.region,
-  }))
-
+export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
-    <EngineProvider profile={store.profile} knownNames={store.knownNames} seed={seed}>
+    <EngineProvider>
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0 bg-background">

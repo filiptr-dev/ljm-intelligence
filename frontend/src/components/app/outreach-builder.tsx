@@ -102,9 +102,11 @@ export function OutreachBuilder({
   initial: { audience: Audience; ids: string[]; campaign?: string; segment?: string; template?: Campaign | null; templateId?: string }
 }) {
   const router = useRouter()
-  const { liveLeads, contacted, sendCampaign, campaigns: liveCampaigns } = useEngine()
+  const { contacted, sendCampaign, campaigns: liveCampaigns } = useEngine()
   const tpl = initial.template ?? undefined
-  const allLeads = React.useMemo(() => [...liveLeads, ...leads], [liveLeads, leads])
+  // Fake per-session `liveLeads` are gone (plan 2026-10-06); audience is only
+  // the real backend-sourced `leads` passed in from the page.
+  const allLeads = React.useMemo(() => leads, [leads])
 
   // a reused campaign keeps its kind of audience: existing brokers, or the same type of new company
   const tplKind = initial.template ? dominantKind(initial.template) : undefined

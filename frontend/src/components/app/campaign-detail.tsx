@@ -16,14 +16,34 @@ import { EmailPreview, readableTags } from "./email-preview"
 import { useEngine } from "./engine"
 import { SentimentDot } from "./intent"
 import { BarList, Panel, RegionTag, StackBar } from "./ui"
+import { useCampaignStatus } from "./use-campaign-status"
 
 const DAY = 86_400_000
 const when = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
 
+const DASH = "—"
+
 export function CampaignDetail({ id, history }: { id: string; history: Campaign | null }) {
   const { campaigns, sendFollowUp } = useEngine()
-  const c = history ?? campaigns.find((x) => x.id === id)
+  const raw = history ?? campaigns.find((x) => x.id === id) ?? null
+  // Backfill real `sent_at` / `replied_at` for live (non-history) campaigns.
+  // Opens / wins are never promoted — no table backs them (plan 2026-10-06).
+  const status = useCampaignStatus(history ? null : raw)
+  const c = React.useMemo(() => {
+    if (!raw || history) return raw
+    if (status.size === 0) return raw
+    return {
+      ...raw,
+      recipients: raw.recipients.map((r) => {
+        const row = status.get(r.email.toLowerCase())
+        if (!row) return r
+        if (row.replied_at) return { ...r, status: "replied" as const, at: new Date(row.replied_at).getTime() }
+        if (row.sent_at) return { ...r, status: "sent" as const, at: new Date(row.sent_at).getTime() }
+        return r
+      }),
+    }
+  }, [raw, history, status])
   const [filter, setFilter] = React.useState<ReplyCategory | "all">("all")
 
   if (!c) {
@@ -119,10 +139,12 @@ export function CampaignDetail({ id, history }: { id: string; history: Campaign 
           <BarList
             rows={[
               { label: "Delivered", value: s.delivered, sub: s.bounced ? `${s.bounced} bounced` : undefined },
-              { label: "Opened", value: s.opened, sub: pctText(s.openRate) },
+              // Opens / Interested / Won kept per gate amendment but with
+              // honest "not tracked yet" subs — no table backs them.
+              { label: "Opened", value: 0, sub: DASH },
               { label: "Replied", value: s.replied, sub: pctText(s.replyRate) },
-              { label: "Interested", value: s.positive, sub: pctText(s.positiveRate) },
-              { label: "Won as customer", value: s.won, sub: `${s.loads} loads booked` },
+              { label: "Interested", value: 0, sub: DASH },
+              { label: "Won as customer", value: 0, sub: DASH },
             ]}
             max={Math.max(1, s.delivered)}
           />
