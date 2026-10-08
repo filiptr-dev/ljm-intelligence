@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import os
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -18,6 +20,13 @@ from app.auth.deps import UserPrincipal, current_user
 from app.db import Base
 from app.main import create_app
 from app.models import CallOutcome, Lead, LeadContact, SentLog
+
+# Postgres-only: the conftest pg16 harness redirects the sqlite engines below
+# to the throwaway PG DB (run with TEST_HARNESS=pg16 or DATABASE_URL_TEST_PG).
+pytestmark = pytest.mark.skipif(
+    os.environ.get("TEST_HARNESS") != "pg16" and not os.environ.get("DATABASE_URL_TEST_PG"),
+    reason="requires PG16 harness",
+)
 
 
 @pytest.fixture
