@@ -115,7 +115,7 @@ def _normalize_phone(s: str | None) -> str:
 # Free-mail providers must never corroborate a company match — two different companies
 # sharing a gmail/yahoo/outlook address would produce a false merge. Return "" so the
 # domain corroborator treats free-mail the same as no domain at all.
-_FREE_MAIL_DOMAINS: frozenset[str] = frozenset(
+FREE_MAIL_DOMAINS: frozenset[str] = frozenset(
     {
         "gmail.com",
         "googlemail.com",
@@ -139,7 +139,7 @@ def _normalize_domain(s: str | None) -> str:
     if not s:
         return ""
     d = s.strip().lower().removeprefix("www.")
-    if d in _FREE_MAIL_DOMAINS:
+    if d in FREE_MAIL_DOMAINS:
         return ""
     return d
 

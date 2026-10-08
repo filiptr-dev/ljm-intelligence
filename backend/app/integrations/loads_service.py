@@ -119,36 +119,12 @@ def _group_hash(raw: RawLoad) -> str:
 
 
 async def _resolve_broker_lead(session: AsyncSession, raw: RawLoad) -> str | None:
-    """Match a RawLoad's broker to a :class:`Lead` row.
+    """Match a RawLoad's broker to a :class:`Lead` row (shared matcher)."""
+    from app.prospecting.broker_matching import match_broker_lead
 
-    Ladder (from the live-loads plan): email → phone → (name, origin_state).
-    Returns the Lead id or None. Pure SQL, zero AI.
-    """
-    if raw.broker_email:
-        row = await session.execute(
-            select(Lead.id).where(Lead.primary_email == raw.broker_email).limit(1)
-        )
-        hit = row.scalar_one_or_none()
-        if hit:
-            return hit
-    if raw.broker_phone:
-        row = await session.execute(
-            select(Lead.id).where(Lead.phone == raw.broker_phone).limit(1)
-        )
-        hit = row.scalar_one_or_none()
-        if hit:
-            return hit
-    if raw.broker_name and raw.origin_state:
-        row = await session.execute(
-            select(Lead.id)
-            .where(Lead.name == raw.broker_name)
-            .where(Lead.state == raw.origin_state)
-            .limit(1)
-        )
-        hit = row.scalar_one_or_none()
-        if hit:
-            return hit
-    return None
+    return await match_broker_lead(
+        session, email=raw.broker_email, phone=raw.broker_phone, name=raw.broker_name
+    )
 
 
 async def _store_batch(sessionmaker: Any, raws: list[RawLoad]) -> tuple[int, int]:

@@ -186,9 +186,13 @@ async def _upsert_load_from_offer(session: AsyncSession, msg: RawMessage, o: Tri
 
     origin_city, origin_state = _split_city_state(o.lane_from)
     dest_city, dest_state = _split_city_state(o.lane_to)
+    from app.prospecting.broker_matching import match_broker_lead
+
+    broker_lead_id = await match_broker_lead(session, email=msg.from_addr or None, name=o.broker_name)
     session.add(
         Load(
             source="inbox",
+            broker_lead_id=broker_lead_id,
             source_ref=source_ref,
             broker_name=o.broker_name or "",
             broker_email=msg.from_addr or None,

@@ -25,7 +25,7 @@ from app.prospecting.broker_health import (
     HealthInputs,
     compute_health,
 )
-from app.prospecting.models import Lead, LeadContact, LeadContactProvenance
+from app.prospecting.models import Lead, LeadContact, LeadContactProvenance, Load
 from app.prospecting.pipeline.broker_next_action import (
     PRIORITY,
     NextAction,
@@ -823,6 +823,7 @@ class OverviewMetricsRow:
     last_contact_at: str | None
     days_since_last_contact: int | None
     segment: Segment
+    revenue_usd: float = 0.0
 
 
 # Available server-side sorts (`sort=` query param). The deterministic
@@ -956,6 +957,17 @@ async def get_overview_metrics(
                 .where(LeadContact.lead_id.in_(lead_ids))
             )
         ).all()
+
+        # Revenue: sum(rate_usd) of booked loads per broker (one grouped query).
+        revenue_rows = (
+            await s.execute(
+                select(Load.broker_lead_id, func.sum(Load.rate_usd))
+                .where(Load.broker_lead_id.in_(lead_ids))
+                .where(Load.status == "booked")
+                .group_by(Load.broker_lead_id)
+            )
+        ).all()
+        revenue_by_lead = {lid: float(total or 0) for lid, total in revenue_rows}
 
         # Suppressions keyed off any known email.
         emails_by_lead: dict[str, set[str]] = {}
@@ -1185,6 +1197,7 @@ async def get_overview_metrics(
             last_contact_at=_iso(la),
             days_since_last_contact=days_since,
             segment=segment,
+            revenue_usd=revenue_by_lead.get(lid, 0.0),
         )
     await _cache.set(tenant, "brokers_overview", variant, result)
     return result

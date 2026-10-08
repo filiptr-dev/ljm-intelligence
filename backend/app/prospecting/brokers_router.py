@@ -98,6 +98,7 @@ class OverviewMetricsOut(BaseModel):
     segment: Literal[
         "all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral"
     ]
+    revenue_usd: float = 0.0
 
 
 class BrokerRowOut(BaseModel):
@@ -268,6 +269,7 @@ def _overview_out(om: OverviewMetricsRow) -> OverviewMetricsOut:
         last_contact_at=om.last_contact_at,
         days_since_last_contact=om.days_since_last_contact,
         segment=om.segment,  # type: ignore[arg-type]
+        revenue_usd=om.revenue_usd,
     )
 
 

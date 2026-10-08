@@ -103,6 +103,7 @@ export function StatTilesRow({ om }: { om: OverviewMetrics }) {
     },
     { label: "Booked · 12m", value: String(om.booked_12m), thin: om.win_rate_thin },
     { label: "Rejected · 12m", value: String(om.rejected_12m), thin: om.win_rate_thin },
+    { label: "Revenue · booked", value: `$${Math.round(om.revenue_usd ?? 0).toLocaleString("en-US")}` },
   ]
   return (
     <Panel title="Outreach stats" description="Real numbers from sent_log + call_outcomes.">

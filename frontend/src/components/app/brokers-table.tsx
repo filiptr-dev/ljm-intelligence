@@ -9,10 +9,10 @@
  * chip from the current list route carried over as the "Suggested action"
  * column.
  *
- * Two columns are deliberately HIDDEN per the operator's plan-gate decision:
- *   - Revenue  — Load table has no FK to Lead; dashed "—" would misrepresent.
- *   - Payment issues chip — signal is still computed server-side on
- *     overview.has_bounce / has_suppression, but we don't render a column.
+ * Revenue = sum(rate_usd) of booked loads linked to the broker.
+ * Payment issues chip is deliberately HIDDEN per the operator's plan-gate
+ * decision: signal is still computed server-side on
+ * overview.has_bounce / has_suppression, but we don't render a column.
  *
  * Pattern: typed openapi-fetch client in `lib/api/brokers`, no ad-hoc proxies.
  */
@@ -442,6 +442,7 @@ export function BrokersTable() {
             <TableHead className="text-right">
               <SortHeader label="Rejected" k="rejected" headerSort={headerSort} onClick={cycleHeader} align="right" />
             </TableHead>
+            <TableHead className="text-right">Revenue</TableHead>
             <TableHead className="text-right">
               <SortHeader label="Days since" k="days_since" headerSort={headerSort} onClick={cycleHeader} align="right" />
             </TableHead>
@@ -471,13 +472,13 @@ export function BrokersTable() {
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
                 Loading real broker leads…
               </TableCell>
             </TableRow>
           ) : sorted.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="py-6 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
                 Nothing matches these filters. Clear them or run the FMCSA crawler to pull in fresh rows.
               </TableCell>
             </TableRow>
@@ -529,6 +530,9 @@ export function BrokersTable() {
                   </TableCell>
                   <TableCell className="num text-right font-mono">
                     {om ? om.rejected_12m : "—"}
+                  </TableCell>
+                  <TableCell className="num text-right font-mono">
+                    {om ? `$${Math.round(om.revenue_usd ?? 0).toLocaleString("en-US")}` : "—"}
                   </TableCell>
                   <TableCell
                     className={cn(

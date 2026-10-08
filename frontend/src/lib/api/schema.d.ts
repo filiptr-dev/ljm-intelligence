@@ -3892,6 +3892,11 @@ export interface components {
              * @enum {string}
              */
             segment: "all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral";
+            /**
+             * Revenue Usd
+             * @default 0
+             */
+            revenue_usd: number;
         };
         /**
          * OverviewSummaryOut
