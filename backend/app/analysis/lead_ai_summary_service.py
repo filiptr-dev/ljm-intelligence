@@ -46,6 +46,16 @@ class LeadSummaryResult:
     email_count: int = 0
 
 
+_FENCE_MARKERS = ("<<<UNTRUSTED_EMAIL_DATA>>>", "<<<END_UNTRUSTED_EMAIL_DATA>>>")
+
+
+def _neutralize(text: str) -> str:
+    """Remove fence markers from untrusted text so it cannot close the fence."""
+    for mk in _FENCE_MARKERS:
+        text = text.replace(mk, "[removed]")
+    return text
+
+
 def _build_prompt(msgs: list[MailMessage], insights: dict[tuple[str, str], MessageInsight]) -> str:
     lines: list[str] = []
     for m in msgs:
@@ -58,8 +68,9 @@ def _build_prompt(msgs: list[MailMessage], insights: dict[tuple[str, str], Messa
             if ins.lane_from or ins.lane_to:
                 meta += f", lane={ins.lane_from or '?'}->{ins.lane_to or '?'}"
             meta += "]"
-        body = " ".join((m.body_text or "").split())[:BODY_CHARS]
-        lines.append(f"- {m.sent_at:%Y-%m-%d} from={m.from_addr} subject={m.subject!r}{meta}\n  {body}")
+        body = _neutralize(" ".join((m.body_text or "").split())[:BODY_CHARS])
+        frm, subj = _neutralize(str(m.from_addr)), _neutralize(str(m.subject))
+        lines.append(f"- {m.sent_at:%Y-%m-%d} from={frm} subject={subj!r}{meta}\n  {body}")
     return (
         "You are summarising a freight carrier's relationship with one broker. "
         "Write 3-4 sentences, facts only, using ONLY the emails and extracted "
