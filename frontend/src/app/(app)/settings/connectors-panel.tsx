@@ -195,7 +195,7 @@ export function ConnectorsPanel() {
     <>
       <Panel
         title="Mail connection"
-        description="Default is simulated. Add your Google Workspace service-account JSON in Render as GMAIL_SA_JSON, set GMAIL_ADMIN_IMPERSONATE and MAIL_OWNER_SEND_ENABLED=true, then use the two Test buttons below. Test connection sends a tiny email (write-side); Test read lists one mailbox and shows the most recent message (read-side). Start first sync kicks a 3-month backfill of the owner mailbox."
+        description="Default is simulated. Paste the Google Workspace service-account JSON + admin-impersonate email on the Gmail card below (stored encrypted in the DB vault — no Render env needed). Flip Owner-send ON in Owner switches, then use the two Test buttons: Test connection sends a tiny email (write-side); Test read lists one mailbox and shows the most recent message. Start first sync kicks a 3-month backfill of the owner mailbox."
       >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm">
@@ -278,7 +278,7 @@ export function ConnectorsPanel() {
 
       <Panel
         title="Load sources"
-        description="Every connector starts off. Add the vendor's credentials in Render, then click Test connection. We never collect credentials in the browser."
+        description="Every connector starts off. See the Load boards card below to paste credentials + choose a driver (off, api, or agent). This table is a live status readout."
       >
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
