@@ -250,6 +250,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.outreach.email_router import router as email_router
     from app.outreach.unsub_router import unsub_router as unsubscribe_router
     from app.prospecting.brokers_router import router as brokers_router
+    from app.prospecting.contacts_router import router as contacts_router
     from app.prospecting.crawl_router import router as crawl_router
     from app.prospecting.enrichment_router import router as enrichment_router
     from app.prospecting.leads_router import router as leads_router
@@ -268,6 +269,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(brokers_router, dependencies=user_only)
     app.include_router(shipper_finder_router, dependencies=user_only)
     app.include_router(enrichment_router, dependencies=user_or_cron)
+    app.include_router(contacts_router, dependencies=user_only)
     app.include_router(ai_router, dependencies=user_only)
     app.include_router(overview_router, dependencies=user_only)
     # Mail + loads connectors (plans 2026-10-01-google-workspace-mail-connector + load-board).

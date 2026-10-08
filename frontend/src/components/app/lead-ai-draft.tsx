@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { EMAIL_TONES, STANCE_LABEL, TONE_LABEL, type EmailDraft, type EmailTone } from "@/lib/backend"
 import { api } from "@/lib/api/client"
+import { listContactsForLead, type Contact } from "@/lib/api/contacts"
 import type { Lead } from "@/lib/data/types"
 import { cn } from "@/lib/utils"
 
@@ -67,15 +68,23 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
   const [draft, setDraft] = React.useState<EmailDraft | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  // Recipient picker — "lead" means the lead's primary email; a number is
+  // a `contact_id` the backend uses to draft against that specific person.
+  const [contacts, setContacts] = React.useState<Contact[]>([])
+  const [recipient, setRecipient] = React.useState<"lead" | number>("lead")
 
   const target = React.useMemo(() => targetProp ?? (lead ? leadToTarget(lead) : null), [targetProp, lead])
 
-  const generate = React.useCallback(async (t: EmailTone) => {
+  const generate = React.useCallback(async (t: EmailTone, pick: "lead" | number) => {
     if (!target) return
     setLoading(true)
     setError(null)
     try {
-      const body = { ...target.request, tone: t }
+      // When a contact_id is picked, the backend ignores lead_id/lead and
+      // uses the contact row for both greeting + to-address.
+      const body: Record<string, unknown> = pick === "lead"
+        ? { ...target.request, tone: t }
+        : { contact_id: pick, tone: t }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, response } = await api.POST("/email/draft", { body: body as any })
       if (!response.ok || !data) throw new Error(`draft ${response.status}`)
@@ -92,7 +101,15 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
     if (open && target) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraft(null)
-      void generate(tone)
+      setRecipient("lead")
+      void generate(tone, "lead")
+      // Load contact list for the recipient dropdown (real leads only).
+      const isReal = /^(MC|DOT|DOMAIN)-/.test(target.id)
+      if (isReal) {
+        listContactsForLead(target.id).then((r) => setContacts(r.items ?? [])).catch(() => setContacts([]))
+      } else {
+        setContacts([])
+      }
     }
     // Regenerate only when re-opened; tone chips call generate() explicitly.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,6 +145,29 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
           </DialogDescription>
         </DialogHeader>
 
+        {contacts.length > 0 ? (
+          <div className="flex items-center gap-2 text-sm">
+            <label className="text-xs text-muted-foreground">To:</label>
+            <select
+              className="rounded-sm border border-border bg-background px-2 py-1 text-sm"
+              value={recipient === "lead" ? "lead" : String(recipient)}
+              disabled={loading}
+              onChange={(e) => {
+                const v = e.target.value === "lead" ? "lead" : Number(e.target.value)
+                setRecipient(v)
+                void generate(tone, v)
+              }}
+            >
+              <option value="lead">{target?.email || "Lead's primary email"}</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id} disabled={!c.email}>
+                  {(c.name ?? "—")}{c.title ? ` · ${c.title}` : ""}{c.email ? ` <${c.email}>` : " (no email)"}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">Tone:</span>
           {EMAIL_TONES.map((t) => (
@@ -135,7 +175,7 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
               key={t}
               type="button"
               disabled={loading}
-              onClick={() => { setTone(t); void generate(t) }}
+              onClick={() => { setTone(t); void generate(t, recipient) }}
               className={cn(
                 "min-h-9 rounded-full border border-border px-3 py-1 text-sm font-semibold transition",
                 tone === t ? "bg-asphalt text-white" : "bg-card hover:bg-muted",
@@ -148,7 +188,7 @@ export function LeadAIDraftDialog({ lead, target: targetProp, open, onOpenChange
             size="sm"
             variant="outline"
             disabled={loading}
-            onClick={() => void generate(tone)}
+            onClick={() => void generate(tone, recipient)}
             className="ml-auto"
           >
             <RefreshCw className={cn("size-3.5", loading && "animate-spin")} /> Regenerate

@@ -35,6 +35,7 @@ Stance = Literal["positive", "neutral", "cooling"]
 class DraftIn(BaseModel):
     lead_id: str | None = None
     lead: dict | None = None
+    contact_id: int | None = None
     tone: Tone = "professional"
     instructions: str | None = Field(default=None, max_length=1000)
 
@@ -52,14 +53,18 @@ class DraftOut(BaseModel):
 @router.post("/draft", response_model=DraftOut)
 async def draft_email(payload: DraftIn, request: Request) -> DraftOut:
     settings: Settings = request.app.state.settings
-    if not payload.lead_id and not payload.lead:
-        raise HTTPException(400, "provide lead_id or lead")
+    provided = sum(1 for v in (payload.lead_id, payload.lead, payload.contact_id) if v)
+    if provided == 0:
+        raise HTTPException(400, "provide lead_id, lead, or contact_id")
+    if provided > 1:
+        raise HTTPException(422, "pass exactly one of lead_id, lead, contact_id")
     try:
         result = await svc_draft(
             request.app.state.sessionmaker,
             settings,
             lead_id=payload.lead_id,
             lead_payload=payload.lead,
+            contact_id=payload.contact_id,
             tone=payload.tone,
             instructions=payload.instructions,
         )
@@ -81,11 +86,12 @@ async def draft_email(payload: DraftIn, request: Request) -> DraftOut:
 
 
 class SendIn(BaseModel):
-    to: EmailStr
+    to: EmailStr | None = None
     subject: str
     body: str
     body_html: str | None = None
     lead_id: str | None = None
+    contact_id: int | None = None
     in_reply_to: str | None = None
     references: list[str] | None = None
     thread_id: str | None = None
@@ -102,16 +108,43 @@ class SendOut(BaseModel):
 @router.post("/send", response_model=SendOut)
 async def send_email(payload: SendIn, request: Request) -> SendOut:
     """Owner-only. The service resolves the mail sender (DB override wins over
-    env) and persists SentLog with provider fields."""
+    env) and persists SentLog with provider fields.
+
+    Accepts either ``lead_id`` + ``to`` or ``contact_id`` (which resolves
+    ``to`` + stamps SentLog with the contact FK). Passing both ``contact_id``
+    and ``lead_id`` is 422 — the composer owns one recipient at a time.
+    """
     settings: Settings = request.app.state.settings
+    if payload.contact_id is not None and payload.lead_id is not None:
+        raise HTTPException(422, "pass exactly one of lead_id, contact_id")
+    to_addr: str | None = str(payload.to) if payload.to else None
+    resolved_lead_id = payload.lead_id
+    if payload.contact_id is not None:
+        from sqlalchemy import select as _select
+
+        from app.prospecting.models import LeadContact
+
+        async with request.app.state.sessionmaker() as s:
+            c = (
+                await s.execute(_select(LeadContact).where(LeadContact.id == payload.contact_id))
+            ).scalar_one_or_none()
+            if c is None:
+                raise HTTPException(404, "contact not found")
+            if not c.email:
+                raise HTTPException(422, "contact has no email on file")
+            to_addr = c.email
+            resolved_lead_id = c.lead_id
+    if not to_addr:
+        raise HTTPException(422, "provide `to` (or a contact_id with an email)")
     result = await svc_send(
         request.app.state.sessionmaker,
         settings,
-        to=str(payload.to),
+        to=to_addr,
         subject=payload.subject,
         body=payload.body,
         body_html=payload.body_html,
-        lead_id=payload.lead_id,
+        lead_id=resolved_lead_id,
+        contact_id=payload.contact_id,
         in_reply_to=payload.in_reply_to,
         references=payload.references,
         thread_id=payload.thread_id,
@@ -123,3 +156,62 @@ async def send_email(payload: SendIn, request: Request) -> SendOut:
         thread_id=result.thread_id,
         reason=result.reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# Campaigns — bulk send to a contact segment (freight managers in v1).
+# ---------------------------------------------------------------------------
+
+
+class CampaignIn(BaseModel):
+    segment: Literal["freight_manager"] = "freight_manager"
+    tone: Tone = "professional"
+    limit: int = Field(50, ge=1, le=500)
+    dry_run: bool = True
+
+
+class CampaignRecipient(BaseModel):
+    contact_id: int
+    lead_id: str
+    name: str | None = None
+    email: str
+
+
+class CampaignOut(BaseModel):
+    recipients: list[CampaignRecipient]
+    enqueued: int = 0
+    dry_run: bool = True
+
+
+@router.post("/campaigns", response_model=CampaignOut)
+async def run_campaign(payload: CampaignIn, request: Request) -> CampaignOut:
+    """Fan-out send to a contact segment. v1 only supports ``freight_manager``.
+
+    Dry-run returns the recipient list and sends nothing. The non-dry-run
+    path enqueues one procrastinate job per contact (reuses
+    ``outreach.send_to_contact``) so the per-send rate limit holds.
+    """
+    sm = request.app.state.sessionmaker
+    from app.prospecting.contacts_repository import SqlLeadContactRepo
+    from app.prospecting.contacts_service import list_segment_freight_managers
+    from app.shared.queue import dispatch
+
+    async with sm() as s:
+        repo = SqlLeadContactRepo(s)
+        rows, _ = await list_segment_freight_managers(repo, cursor=None, limit=payload.limit)
+    recipients = [
+        CampaignRecipient(contact_id=c.id, lead_id=c.lead_id, name=c.name, email=c.email)
+        for c in rows
+        if c.email  # skip contacts without a published email (hard rule)
+    ]
+    enqueued = 0
+    if not payload.dry_run:
+        for r in recipients:
+            jid = await dispatch(
+                "outreach.send_to_contact",
+                contact_id=r.contact_id,
+                tone=payload.tone,
+            )
+            if jid is not None:
+                enqueued += 1
+    return CampaignOut(recipients=recipients, enqueued=enqueued, dry_run=payload.dry_run)

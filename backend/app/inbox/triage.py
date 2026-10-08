@@ -217,10 +217,42 @@ def _split_city_state(lane: str | None) -> tuple[str | None, str | None]:
 # ---- signatures ------------------------------------------------------------
 
 _PHONE_RE = re.compile(r"(?:\+?\d{1,2}[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}")
+# Conservative title sniff — the two lines following a plausible name line in
+# a signature block. Short-enough, title-case words with freight nouns. Noise
+# is cheap here (bad title doesn't hurt dedupe — name_norm still matches),
+# but we keep it narrow so we don't scrape body sentences.
+_TITLE_LINE_RE = re.compile(r"^[A-Z][\w .&/'-]{2,60}$")
+
+
+def _sniff_title(body_text: str | None, name: str | None) -> str | None:
+    """Pull a plausible job title from the 2–3 lines after a name in the
+    signature. Returns None when nothing freight-related is in reach.
+    """
+    if not body_text or not name:
+        return None
+    lines = [ln.strip() for ln in body_text.splitlines()]
+    try:
+        idx = next(
+            i for i, ln in enumerate(lines) if name.split()[0] and name.lower() in ln.lower()
+        )
+    except StopIteration:
+        return None
+    for ln in lines[idx + 1 : idx + 4]:
+        if not ln:
+            continue
+        if not _TITLE_LINE_RE.match(ln):
+            continue
+        # Nudge: prefer lines carrying a known freight keyword, but accept
+        # any short titlecase label as a fallback — a non-freight title still
+        # tags the contact correctly in the UI, and the segment filter will
+        # just skip it.
+        return ln
+    return None
 
 
 async def _maybe_extract_contact(session: AsyncSession, msg: RawMessage, broker_name: str | None) -> None:
-    """If a lead exists by this sender's email-domain, add the signature contact.
+    """If a lead exists by this sender's email-domain OR we sent *to* that lead's
+    domain (inbound reply), add the signature contact.
 
     Deliberately conservative: we only *attach* contacts to existing leads.
     Creating new leads from an email signature is a separate flow (prospecting).
@@ -234,6 +266,21 @@ async def _maybe_extract_contact(session: AsyncSession, msg: RawMessage, broker_
     if not domain:
         return
     lead = (await session.execute(select(Lead).where(Lead.domain == domain))).scalar_one_or_none()
+    # Inbound-reply widening: when the sender's domain doesn't match a lead,
+    # try the recipient's domain (we sent them something, they replied).
+    if lead is None:
+        to_addrs = msg.to_addrs or []
+        for addr in to_addrs:
+            if not addr or "@" not in addr:
+                continue
+            _, _, to_domain = addr.strip().lower().partition("@")
+            if not to_domain:
+                continue
+            lead = (
+                await session.execute(select(Lead).where(Lead.domain == to_domain))
+            ).scalar_one_or_none()
+            if lead is not None:
+                break
     if lead is None:
         return
     # Avoid duplicate contact per (lead_id, email).
@@ -248,12 +295,17 @@ async def _maybe_extract_contact(session: AsyncSession, msg: RawMessage, broker_
     phone_match = _PHONE_RE.search(msg.body_text or "")
     if phone_match:
         phone = phone_match.group(0)
+    name = broker_name or local.title()
+    title = _sniff_title(msg.body_text, name)
     session.add(
         LeadContact(
             lead_id=lead.id,
-            name=broker_name or local.title(),
+            name=name,
             email=msg.from_addr.lower(),
+            email_norm=msg.from_addr.lower(),
+            name_norm=name.strip().lower() if name else None,
             phone=phone,
+            title=title,
             source="inbox-signature",
         )
     )

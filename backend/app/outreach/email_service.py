@@ -264,6 +264,26 @@ async def _load_lead(session: AsyncSession, lead_id: str) -> dict:
     }
 
 
+async def _load_lead_by_contact(session: AsyncSession, contact_id: int) -> tuple[dict, str, str | None]:
+    """Return (lead_dict, to_email, contact_name) for a composer-by-contact draft.
+
+    Raises :class:`LeadNotFoundError` when the contact or its lead is gone.
+    """
+    from app.prospecting.models import LeadContact
+
+    contact = (
+        await session.execute(select(LeadContact).where(LeadContact.id == contact_id))
+    ).scalar_one_or_none()
+    if contact is None:
+        raise LeadNotFoundError(f"contact {contact_id}")
+    lead = await _load_lead(session, contact.lead_id)
+    # Composer uses contact_name as the first-name source for the greeting.
+    lead = dict(lead)
+    if contact.name:
+        lead["contact_name"] = contact.name
+    return lead, (contact.email or ""), contact.name
+
+
 async def _load_ai_features(session: AsyncSession) -> dict | None:
     try:
         row = (
@@ -283,10 +303,16 @@ async def draft(
     lead_payload: dict | None,
     tone: Tone,
     instructions: str | None,
+    contact_id: int | None = None,
 ) -> DraftResult:
-    """Compose a draft. ``lead_id`` or ``lead_payload`` must be set; router
-    validates. Raises :class:`LeadNotFoundError` if ``lead_id`` is unknown."""
-    if lead_id:
+    """Compose a draft. One of ``lead_id`` / ``lead_payload`` / ``contact_id``
+    must be set; router validates. Raises :class:`LeadNotFoundError` when the
+    id is unknown."""
+    if contact_id is not None:
+        async with sessionmaker() as s:
+            lead, _to_email, _name = await _load_lead_by_contact(s, contact_id)
+        lead_id = lead["id"]
+    elif lead_id:
         async with sessionmaker() as s:
             lead = await _load_lead(s, lead_id)
     elif lead_payload:
@@ -294,7 +320,7 @@ async def draft(
     else:
         # Defensive — the router guards against this; keep a clear error for
         # any future direct caller.
-        raise ValueError("provide lead_id or lead_payload")
+        raise ValueError("provide lead_id, lead_payload, or contact_id")
 
     ai_features: dict | None = None
     try:
@@ -356,6 +382,7 @@ async def send(
     in_reply_to: str | None,
     references: list[str] | None,
     thread_id: str | None,
+    contact_id: int | None = None,
 ) -> SendResult:
     """Resolve mode (DB override wins), send, persist a ``SentLog`` row."""
     # DB override wins over env for mode so /settings flips take effect live.
@@ -379,6 +406,7 @@ async def send(
         s.add(
             SentLog(
                 lead_id=lead_id or "SYSTEM",
+                contact_id=contact_id,
                 mode=result.mode,
                 to_email=to,
                 subject=subject,

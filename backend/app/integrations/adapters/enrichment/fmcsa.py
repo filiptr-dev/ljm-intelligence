@@ -40,6 +40,92 @@ from app.shared.region import IN_REGION_STATES
 log = logging.getLogger(__name__)
 
 SODA_URL = "https://data.transportation.gov/resource/az4n-8mr2.json"
+# Company snapshot — ``representative`` block only lives on this per-DOT view,
+# not the paginated feed above. One GET per lead-refresh, cached 30 days.
+SNAPSHOT_URL_TMPL = "https://mobile.fmcsa.dot.gov/qc/services/carriers/{dot}?webKey=anonymous"
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotOfficer:
+    """Representative row extracted from the FMCSA snapshot payload."""
+
+    name: str
+    title: str | None
+    phone: str | None
+    email: str | None
+    source_url: str
+
+
+async def fetch_fmcsa_snapshot(
+    dot: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+    app_token: str | None = None,
+) -> list[SnapshotOfficer]:
+    """One-shot per-DOT snapshot. Returns officer rows (name + title at least).
+
+    The caller caches by DOT (``fmcsa_snapshot_cache`` table, 30-day TTL).
+    Only published email/phone are kept; never synthesises ``first.last@…``.
+    """
+    if not dot:
+        return []
+    url = SNAPSHOT_URL_TMPL.format(dot=dot)
+    headers = {"User-Agent": "LJM-Intelligence-Bot/1.0 (+https://ljminternational.com)"}
+    if app_token:
+        headers["X-App-Token"] = app_token
+    owned = client is None
+    if owned:
+        client = httpx.AsyncClient(timeout=15.0)
+    try:
+        resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            return []
+        payload = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        log.info("fmcsa_snapshot: fetch failed for dot=%s: %s", dot, exc)
+        return []
+    finally:
+        if owned:
+            await client.aclose()
+    return _extract_officers(payload, url)
+
+
+def _extract_officers(payload: dict, source_url: str) -> list[SnapshotOfficer]:
+    """Pull representative block(s) from the snapshot payload.
+
+    The public snapshot endpoint returns:
+      {"content": {"carrier": {..., "legalName": "...", "phyStreet": "...",
+                               "representative": [...] | {"name": ...}}}}
+    Shapes vary; defensive, tolerant parse.
+    """
+    carrier = (payload.get("content") or {}).get("carrier") or {}
+    reps = carrier.get("representative")
+    if reps is None:
+        return []
+    if isinstance(reps, dict):
+        reps = [reps]
+    if not isinstance(reps, list):
+        return []
+    out: list[SnapshotOfficer] = []
+    for r in reps:
+        if not isinstance(r, dict):
+            continue
+        name = (r.get("name") or r.get("representativeName") or "").strip()
+        if not name:
+            continue
+        title = (r.get("title") or r.get("representativeTitle") or "").strip() or "Owner/Officer"
+        phone = (r.get("phone") or "").strip() or None
+        email = normalize_email(r.get("email"))
+        out.append(
+            SnapshotOfficer(
+                name=name,
+                title=title,
+                phone=phone,
+                email=email,
+                source_url=source_url,
+            )
+        )
+    return out
 
 # SoQL ``$select`` — kept as a single string literal (ruff FLY002) but
 # split per-column so a git diff on a schema tweak stays one line.

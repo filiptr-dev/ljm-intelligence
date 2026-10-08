@@ -342,6 +342,82 @@ export function LeadFinder({ pool, profile }: { pool: Lead[]; profile: Lookalike
   )
 }
 
+function LeadContactsPanel({ leadId, onDraftAI }: { leadId: string; onDraftAI: () => void }) {
+  const [items, setItems] = React.useState<import("@/lib/api/contacts").Contact[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [refreshing, setRefreshing] = React.useState(false)
+  const isReal = /^(MC|DOT|DOMAIN)-/.test(leadId)
+  const load = React.useCallback(async () => {
+    if (!isReal) return
+    setLoading(true)
+    try {
+      const r = await (await import("@/lib/api/contacts")).listContactsForLead(leadId)
+      setItems(r.items ?? [])
+    } catch {
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }, [leadId, isReal])
+  React.useEffect(() => { void load() }, [load])
+  const refresh = async () => {
+    if (!isReal) return
+    setRefreshing(true)
+    try {
+      await (await import("@/lib/api/contacts")).refreshContactsForLead(leadId)
+      await load()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+  if (!isReal) return null
+  return (
+    <div className="rounded-sm border border-border p-3 text-sm">
+      <div className="mb-1.5 flex items-center justify-between">
+        <div className="eyebrow">People at this company</div>
+        <button
+          type="button"
+          onClick={refresh}
+          className="rounded-sm border border-border px-2 py-0.5 text-xs hover:bg-muted"
+          disabled={refreshing}
+        >
+          {refreshing ? "Refreshing…" : "Refresh contacts"}
+        </button>
+      </div>
+      {loading ? (
+        <div className="text-xs text-muted-foreground">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No contacts yet. Hit refresh to run FMCSA + Gemini + site scrape.</div>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-2 border-b border-border/50 pb-1 last:border-0">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{c.name ?? "—"}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {c.title ?? "—"}
+                  {c.email ? ` · ${c.email}` : ""}
+                  {c.source ? ` · ${c.source}` : ""}
+                  {" · sighted ×"}{c.evidence_count}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-sm border border-border px-2 py-0.5 text-xs hover:bg-muted"
+                onClick={onDraftAI}
+                disabled={!c.email}
+                title={c.email ? "Draft an email to this person" : "No email on file"}
+              >
+                Mail
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 function LeadDetail({ lead, profile, contacted, onSend, onDraftAI }: { lead: Lead; profile: LookalikeProfile; contacted: boolean; onSend: () => void; onDraftAI: () => void }) {
   const why = explainScore(lead, profile)
   return (
@@ -399,6 +475,7 @@ function LeadDetail({ lead, profile, contacted, onSend, onDraftAI }: { lead: Lea
           <div className="mt-1 flex items-center gap-1.5"><Mail className="size-3.5" /> {lead.contact.email} {lead.emailVerified ? <BadgeCheck className="size-3.5 text-good" /> : <span className="text-xs text-warn">unverified</span>}</div>
           <div className="mt-0.5 text-muted-foreground">{lead.contact.phone}</div>
         </div>
+        <LeadContactsPanel leadId={lead.id} onDraftAI={onDraftAI} />
         <div className="text-xs text-muted-foreground">Found via {lead.source} · {timeAgo(lead.discoveredAt)}</div>
         <div className="flex flex-wrap gap-2">
           <Button className="flex-1 min-h-11 font-semibold" onClick={onDraftAI}>

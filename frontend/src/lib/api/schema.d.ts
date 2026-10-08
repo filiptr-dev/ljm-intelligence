@@ -224,8 +224,36 @@ export interface paths {
          * Send Email
          * @description Owner-only. The service resolves the mail sender (DB override wins over
          *     env) and persists SentLog with provider fields.
+         *
+         *     Accepts either ``lead_id`` + ``to`` or ``contact_id`` (which resolves
+         *     ``to`` + stamps SentLog with the contact FK). Passing both ``contact_id``
+         *     and ``lead_id`` is 422 — the composer owns one recipient at a time.
          */
         post: operations["send_email_email_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/email/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Campaign
+         * @description Fan-out send to a contact segment. v1 only supports ``freight_manager``.
+         *
+         *     Dry-run returns the recipient list and sends nothing. The non-dry-run
+         *     path enqueues one procrastinate job per contact (reuses
+         *     ``outreach.send_to_contact``) so the per-send rate limit holds.
+         */
+        post: operations["run_campaign_email_campaigns_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -791,6 +819,67 @@ export interface paths {
          *     only the cron caller can ask.
          */
         post: operations["auto_send_enrichment_auto_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/leads/{lead_id}/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lead Contacts
+         * @description List all contacts for a single lead. Keyset-less (small N per lead).
+         */
+        get: operations["list_lead_contacts_leads__lead_id__contacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/leads/{lead_id}/contacts/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Lead Contacts
+         * @description Run the four-source promotion for a lead. v1: inline (sync).
+         *
+         *     The procrastinate enqueue path exists via ``shared.queue.dispatch`` but
+         *     inline keeps the UX honest — the composer page shows the fresh rows on
+         *     reload immediately. The job seam is already wired for campaign sends.
+         */
+        post: operations["refresh_lead_contacts_leads__lead_id__contacts_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Segment Feed */
+        get: operations["segment_feed_contacts_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2327,6 +2416,57 @@ export interface components {
             opener: string;
             last_outcome: components["schemas"]["LastOutcomeOut"] | null;
         };
+        /** CampaignIn */
+        CampaignIn: {
+            /**
+             * Segment
+             * @default freight_manager
+             * @constant
+             */
+            segment: "freight_manager";
+            /**
+             * Tone
+             * @default professional
+             * @enum {string}
+             */
+            tone: "professional" | "friendly" | "direct" | "persuasive";
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+            /**
+             * Dry Run
+             * @default true
+             */
+            dry_run: boolean;
+        };
+        /** CampaignOut */
+        CampaignOut: {
+            /** Recipients */
+            recipients: components["schemas"]["CampaignRecipient"][];
+            /**
+             * Enqueued
+             * @default 0
+             */
+            enqueued: number;
+            /**
+             * Dry Run
+             * @default true
+             */
+            dry_run: boolean;
+        };
+        /** CampaignRecipient */
+        CampaignRecipient: {
+            /** Contact Id */
+            contact_id: number;
+            /** Lead Id */
+            lead_id: string;
+            /** Name */
+            name?: string | null;
+            /** Email */
+            email: string;
+        };
         /** CampaignStatusIn */
         CampaignStatusIn: {
             /**
@@ -2417,6 +2557,55 @@ export interface components {
             verified_at?: string | null;
             /** Confidence */
             confidence?: string | null;
+        };
+        /** ContactListOut */
+        ContactListOut: {
+            /** Items */
+            items: components["schemas"]["ContactOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** ContactOut */
+        ContactOut: {
+            /** Id */
+            id: number;
+            /** Lead Id */
+            lead_id: string;
+            /** Name */
+            name?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Linkedin Url */
+            linkedin_url?: string | null;
+            /**
+             * Is Decision Maker
+             * @default false
+             */
+            is_decision_maker: boolean;
+            /** Confidence */
+            confidence?: string | null;
+            /**
+             * Is Freight Manager
+             * @default false
+             */
+            is_freight_manager: boolean;
+            /**
+             * Evidence Count
+             * @default 0
+             */
+            evidence_count: number;
+            /** Last Verified At */
+            last_verified_at?: string | null;
+            /** Discovered At */
+            discovered_at?: string | null;
         };
         /** CrawlRunOut */
         CrawlRunOut: {
@@ -2591,6 +2780,8 @@ export interface components {
             lead?: {
                 [key: string]: unknown;
             } | null;
+            /** Contact Id */
+            contact_id?: number | null;
             /**
              * Tone
              * @default professional
@@ -3891,6 +4082,31 @@ export interface components {
             /** Job Id */
             job_id?: number | null;
         };
+        /** RefreshIn */
+        RefreshIn: {
+            /** Sources */
+            sources?: ("fmcsa" | "gemini" | "site" | "inbox")[] | null;
+        };
+        /** RefreshOut */
+        RefreshOut: {
+            /** Job Id */
+            job_id?: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "enqueued" | "ran_inline";
+            /**
+             * Created
+             * @default 0
+             */
+            created: number;
+            /**
+             * Updated
+             * @default 0
+             */
+            updated: number;
+        };
         /** RefreshStatsOut */
         RefreshStatsOut: {
             /** Kind */
@@ -4031,11 +4247,8 @@ export interface components {
         };
         /** SendIn */
         SendIn: {
-            /**
-             * To
-             * Format: email
-             */
-            to: string;
+            /** To */
+            to?: string | null;
             /** Subject */
             subject: string;
             /** Body */
@@ -4044,6 +4257,8 @@ export interface components {
             body_html?: string | null;
             /** Lead Id */
             lead_id?: string | null;
+            /** Contact Id */
+            contact_id?: number | null;
             /** In Reply To */
             in_reply_to?: string | null;
             /** References */
@@ -4997,6 +5212,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_campaign_email_campaigns_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignOut"];
                 };
             };
             /** @description Validation Error */
@@ -6184,6 +6434,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lead_contacts_leads__lead_id__contacts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_lead_contacts_leads__lead_id__contacts_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    segment_feed_contacts_get: {
+        parameters: {
+            query?: {
+                role?: string;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactListOut"];
                 };
             };
             /** @description Validation Error */

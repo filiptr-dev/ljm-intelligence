@@ -127,6 +127,12 @@ class LeadContact(TenantMixin, Base):
         String(16), nullable=False, default="found", server_default=text("'found'")
     )
     pipeline_status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Dedupe seam (migration 0028). ``email_norm`` = ``lower(email)``;
+    # ``name_norm`` = diacritic-stripped lowercase; written by the service.
+    # Partial unique indexes enforce dedupe when email is present (preferred
+    # key) and when email is NULL but name is set (fallback key).
+    email_norm: Mapped[str | None] = mapped_column(String(255))
+    name_norm: Mapped[str | None] = mapped_column(String(255))
 
     __table_args__ = (
         Index("lead_contacts_lead_id", "lead_id"),
@@ -164,6 +170,25 @@ class LeadContactProvenance(TenantMixin, Base):
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("lead_contact_provenance_contact_disc", "contact_id", text("discovered_at DESC")),)
+
+
+class FmcsaSnapshotCache(Base):
+    """Per-DOT snapshot cache for the FMCSA company-snapshot endpoint.
+
+    30-day TTL enforced by the caller (``fetch_fmcsa_snapshot``). Not tenant
+    partitioned — the dataset is public and the cache saves one GET per
+    lead-refresh across the whole app. Added by migration 0028.
+    """
+
+    __tablename__ = "fmcsa_snapshot_cache"
+
+    dot: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONType, default=dict)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (Index("fmcsa_snapshot_cache_fetched_at_idx", "fetched_at"),)
 
 
 class EnrichmentCandidate(TenantMixin, Base):

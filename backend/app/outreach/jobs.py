@@ -32,3 +32,52 @@ async def enrichment_auto_send(tenant_id: str, dry_run: bool = False) -> None:
         )
     finally:
         await engine.dispose()
+
+
+@app.task(name="outreach.send_to_contact", queue="default", pass_context=False)
+async def send_to_contact(contact_id: int, tone: str = "professional") -> None:
+    """Campaign fan-out worker — one job per freight-manager contact.
+
+    Looks up the contact, drafts (reusing the composer-by-contact path), and
+    sends via the configured mail sender (DB override > env). Suppression
+    and per-send rate-limit stay in the service layer we already use.
+    """
+    from app.config import get_settings
+    from app.db import create_engine, create_sessionmaker
+    from app.outreach.email_service import draft as svc_draft, send as svc_send
+
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        sm = create_sessionmaker(engine)
+        try:
+            d = await svc_draft(
+                sm, settings,
+                lead_id=None, lead_payload=None, contact_id=contact_id,
+                tone=tone, instructions=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("send_to_contact: draft failed for %s: %s", contact_id, exc)
+            return
+        # Resolve `to` from the contact row.
+        from sqlalchemy import select
+        from app.prospecting.models import LeadContact
+
+        async with sm() as s:
+            c = (
+                await s.execute(select(LeadContact).where(LeadContact.id == contact_id))
+            ).scalar_one_or_none()
+            if c is None or not c.email:
+                log.info("send_to_contact: contact %s missing or no email", contact_id)
+                return
+            to_addr = c.email
+            lead_id = c.lead_id
+        result = await svc_send(
+            sm, settings,
+            to=to_addr, subject=d.subject, body=d.body, body_html=d.body_html,
+            lead_id=lead_id, contact_id=contact_id,
+            in_reply_to=None, references=None, thread_id=None,
+        )
+        log.info("send_to_contact: contact=%s mode=%s ok=%s", contact_id, result.mode, result.ok)
+    finally:
+        await engine.dispose()
