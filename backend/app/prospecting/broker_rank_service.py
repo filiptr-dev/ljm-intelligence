@@ -407,18 +407,12 @@ async def rank_brokers(
     extra = _build_lead_filter_clauses(filters, params)
     base = _BASE_CTE_SQL.format(extra_lead_filters=extra)
 
-    page_where_bits: list[str] = ["WHERE 1=1"]
     if filters.next_action:
-        page_where_bits.append("AND a.next_action_kind = :p_next_action")
         params["p_next_action"] = filters.next_action
     cur = Cursor.decode(cursor)
     if cur is not None:
         # Strict row-value compare. ``fit_sort`` is non-null; lower_name
         # falls back to '' via COALESCE in the base — safe to compare.
-        page_where_bits.append(
-            "AND (a.action_priority, a.fit_sort, a.lower_name, a.id) "
-            "> (:c_p, :c_f, :c_n, :c_id)"
-        )
         params["c_p"] = cur.priority
         params["c_f"] = cur.fit_sort
         params["c_n"] = cur.lower_name
