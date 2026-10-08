@@ -50,11 +50,18 @@ class SlidingWindow:
 LOGIN_LIMITER = SlidingWindow()
 
 
-def check_login_rate(ip: str, email: str) -> float:
-    """S0.5 — 5 attempts / minute / IP + 10 attempts / hour / email."""
-    retry = LOGIN_LIMITER.hit("ip", ip, limit=5, window_s=60.0)
-    if retry > 0:
-        return retry
+def check_login_rate(ip: str | None, email: str) -> float:
+    """S0.5 — 5 attempts / minute / IP + 10 attempts / hour / email.
+
+    ``ip=None`` means no trusted real-client IP is available (no
+    ``TRUSTED_PROXY_SECRET``): behind a shared proxy every request would share
+    one IP, so the per-IP bucket would lock everyone out. Skip it and rely on
+    the per-email limit alone.
+    """
+    if ip is not None:
+        retry = LOGIN_LIMITER.hit("ip", ip, limit=5, window_s=60.0)
+        if retry > 0:
+            return retry
     return LOGIN_LIMITER.hit("email", email.lower().strip(), limit=10, window_s=3600.0)
 
 

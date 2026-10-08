@@ -84,7 +84,10 @@ async def login(request: Request, body: LoginIn) -> LoginOut:
         if settings.trusted_proxy_secret
         else None
     )
-    client_ip = resolve_client_ip(
+    # No trusted-proxy secret configured => the forwarded IP cannot be trusted
+    # (and a shared proxy IP would collapse all users into one bucket), so
+    # skip the per-IP limit and apply only the per-email one.
+    client_ip = None if trusted_proxy_secret is None else resolve_client_ip(
         xff_header=request.headers.get("x-forwarded-for"),
         client_host=request.client.host if request.client else None,
         client_ip_header=request.headers.get("x-ljm-client-ip"),

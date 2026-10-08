@@ -167,3 +167,24 @@ def test_mf2_fallback_to_client_host_when_no_xff():
         trusted_proxy_secret=None, trusted_proxy_hops=1,
     )
     assert ip == "5.6.7.8"
+
+
+def test_login_rate_skips_ip_limit_when_ip_unavailable():
+    """No TRUSTED_PROXY_SECRET => ip=None => only the per-email limit (10/h)."""
+    from app.shared.rate_limit import check_login_rate
+
+    LOGIN_LIMITER.reset()
+    # Well past the 5/min per-IP cap, still allowed.
+    for _ in range(10):
+        assert check_login_rate(None, "solo@y.co") == 0.0
+    assert check_login_rate(None, "solo@y.co") > 0
+
+
+def test_login_rate_applies_ip_limit_when_ip_trusted():
+    """With a trusted real IP, the per-IP 5/min limit still bites."""
+    from app.shared.rate_limit import check_login_rate
+
+    LOGIN_LIMITER.reset()
+    for i in range(5):
+        assert check_login_rate("9.9.9.9", f"u{i}@y.co") == 0.0
+    assert check_login_rate("9.9.9.9", "u99@y.co") > 0
