@@ -89,9 +89,24 @@ export function LoadsBoard() {
     }
   }, [])
 
+  // Initial load: setState happens in the promise callback, not synchronously
+  // in the effect body (react-hooks/set-state-in-effect).
   React.useEffect(() => {
-    void refresh()
-  }, [refresh])
+    let cancelled = false
+    Promise.all([listLoads(200), listLoadSources()])
+      .then(([g, s]) => {
+        if (cancelled) return
+        setGroups(g)
+        setSources(s)
+        setFetchError(false)
+      })
+      .catch(() => {
+        if (!cancelled) setFetchError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function onStatus(group: LoadGroupRow, status: StatusValue) {
     setBusy(`status-${group.group_hash}-${status}`)
@@ -360,6 +375,7 @@ export function LoadsBoard() {
               initialSubject={compose.subject}
               initialBody={compose.body}
               onSend={composeAdapter}
+              onDone={() => setCompose(null)}
             />
           </div>
         </div>

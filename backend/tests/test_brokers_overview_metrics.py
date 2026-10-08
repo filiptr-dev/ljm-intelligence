@@ -12,7 +12,7 @@ Covers the acceptance criteria:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -21,14 +21,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.auth.deps import UserPrincipal, current_user
 from app.db import Base
 from app.main import create_app
-from app.models import CallOutcome, Lead, LeadContact, SentLog, Suppression
+from app.models import CallOutcome, Lead, LeadContact, Suppression
 from app.prospecting.broker_health import (
-    HealthInputs,
     THIN_DECIDED,
+    HealthInputs,
     compute_health,
 )
 from app.prospecting.brokers_service import get_overview_metrics
-
 
 # ---------- pure health formula --------------------------------------------
 
@@ -320,3 +319,54 @@ async def test_overview_metrics_second_call_hits_cache(client: AsyncClient):
 
     second = await get_overview_metrics(_boom, ["L-cache"])
     assert second == first
+
+
+async def test_overview_cache_returns_copy_and_clears_on_booked(client: AsyncClient):
+    """Mutating a returned dict must not poison the cache, and a load status
+    flip must clear the brokers_overview bucket."""
+    from datetime import timedelta as _td
+
+    from app.integrations.loads_service import set_group_status
+    from app.models import Load
+
+    sm = client._sm  # type: ignore[attr-defined]
+    async with sm() as s:
+        s.add(Lead(id="L-copy", name="Copy Co", kind="Broker", state="NJ"))
+        s.add(Load(
+            source="dat", source_ref="copy-1", broker_name="Copy Co",
+            origin_state="VA", dest_state="GA",
+            pickup_date=datetime.now(UTC) + _td(days=1), equipment="van",
+            rate_usd=1000, miles=100, posted_at=datetime.now(UTC),
+            raw={}, status="new", dedupe_group_hash="gh-copy",
+        ))
+        await s.commit()
+
+    first = await get_overview_metrics(sm, ["L-copy"])
+    first.pop("L-copy")  # caller mutation
+    second = await get_overview_metrics(sm, ["L-copy"])
+    assert "L-copy" in second
+    assert second is not first
+
+    # A status write clears the bucket -> next call must re-query the DB.
+    assert await set_group_status(sm, "gh-copy", "booked") == 1
+
+    def _boom():
+        raise AssertionError("re-queried after invalidation")
+
+    with pytest.raises(AssertionError):
+        await get_overview_metrics(_boom, ["L-copy"])
+
+
+async def test_overview_cache_deep_copy_isolates_nested_values(client: AsyncClient):
+    sm = client._sm  # type: ignore[attr-defined]
+    async with sm() as s:
+        s.add(Lead(id="L-deep", name="Deep Co", kind="Broker", state="NJ"))
+        await s.commit()
+    first = await get_overview_metrics(sm, ["L-deep"])
+    first["L-deep"].monthly_series.append("POISON")
+    first["L-deep"].monthly_series.clear()
+    second = await get_overview_metrics(sm, ["L-deep"])
+    third = await get_overview_metrics(sm, ["L-deep"])
+    assert "POISON" not in second["L-deep"].monthly_series
+    assert second["L-deep"].monthly_series == third["L-deep"].monthly_series
+    assert len(second["L-deep"].monthly_series) > 0
