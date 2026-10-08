@@ -325,6 +325,13 @@ async def unsubscribe_confirm_page(request: Request, t: str = Query(..., min_len
     the CAN-SPAM one-click contract (RFC 8058); we honor it.
     """
     _ = await _verify_or_400(request, t)
+    # Escape the token before echoing it back into HTML. Even though
+    # `_verify_or_400` has already verified the token signature, the raw
+    # string can still contain ``<``/``>`` characters that would break out
+    # of the attribute context on a malformed input — defence in depth.
+    import html as _htmllib
+
+    t_safe = _htmllib.escape(t, quote=True)
     html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<title>Unsubscribe — LJM International</title>"
@@ -332,7 +339,7 @@ async def unsubscribe_confirm_page(request: Request, t: str = Query(..., min_len
         "</head><body style='font-family:system-ui;max-width:32rem;margin:4rem auto;padding:1rem'>"
         "<h1>Unsubscribe from LJM International outreach</h1>"
         "<p>Click the button below to stop all future emails to this address.</p>"
-        f"<form method='POST' action='/unsubscribe?t={t}'>"
+        f"<form method='POST' action='/unsubscribe?t={t_safe}'>"
         "<button type='submit' style='padding:0.75rem 1.5rem;font-size:1rem;"
         "background:#0a0a0a;color:#fff;border:0;border-radius:4px'>Confirm unsubscribe</button>"
         "</form>"

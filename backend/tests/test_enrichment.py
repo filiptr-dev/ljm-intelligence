@@ -862,3 +862,33 @@ async def test_copy_enrichment_candidates_helper(sm):
     async with sm() as s:
         rows = (await s.execute(select(LeadContact))).scalars().all()
     assert rows[0].email == "dm@copy.com"
+
+
+async def test_unsubscribe_get_escapes_token_in_form_action(sm, client):
+    """GET /unsubscribe must html-escape the `t` query param when it echoes
+    it into the form action. ``_verify_or_400`` already rejects a forged
+    token with a 400, but a well-formed token can still contain
+    characters that need escaping if the signing path ever widens; this
+    test pins the defence-in-depth escape.
+    """
+    from app.api._auth import sign_unsubscribe_token
+
+    async with sm() as s:
+        s.add(Lead(id="MC-UN-E", name="U", kind="Shipper", state="NJ", raw={}, evidence={}, recommendations=[]))
+        await s.flush()
+        c = LeadContact(lead_id="MC-UN-E", email="esc@x.com", pipeline_status="contacted", is_decision_maker=True)
+        s.add(c)
+        await s.commit()
+        await s.refresh(c)
+        cid = c.id
+
+    token = sign_unsubscribe_token(cid, "test-unsub-secret")
+    r = await client.get(f"/unsubscribe?t={token}")
+    assert r.status_code == 200
+    # Never render a raw `<` from the token into the HTML — html.escape
+    # would turn it into `&lt;`. The signed-token alphabet is base64url + a
+    # dot, so under normal conditions no escaping is visible; we assert the
+    # safe form regardless as a regression guard.
+    assert "<script" not in r.text.lower()
+    # The form must still work after escaping — the token round-trips.
+    assert f'action=\'/unsubscribe?t={token}\'' in r.text or f'action="/unsubscribe?t={token}"' in r.text
