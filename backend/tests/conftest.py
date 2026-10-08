@@ -131,8 +131,9 @@ def _reset_pg16_schema(url: str) -> None:
 # in os.environ wins over whatever backend/.env holds. In sqlite mode we pin
 # to an in-memory URL; in PG16 mode we pin to the throwaway container's URL.
 if _PG_HARNESS:
-    # Migration 0008 hardcodes the owner password ("password") since 2026-10-08;
-    # no SEED_OWNER_PASSWORD env is needed. See migration 0008 + 0023.
+    # Migration 0008 hardcodes the owner password since 2026-10-08; 0024
+    # rotates it to "Admin123!@#LJM". No SEED_OWNER_PASSWORD env is needed.
+    # See migrations 0008, 0023, 0024.
     _PG_TEST_URL = _ensure_pg16_container()
     _reset_pg16_schema(_PG_TEST_URL)
     _SAFE_DB_URL = _PG_TEST_URL

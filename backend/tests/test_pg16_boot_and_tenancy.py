@@ -90,7 +90,7 @@ async def test_login_and_list_endpoints(pg_app):
         # login as demo owner (seeded by migration 0008)
         r = await c.post(
             "/auth/login",
-            json={"email": "owner@ljm.com", "password": "password"},
+            json={"email": "owner@ljm.com", "password": "Admin123!@#LJM"},
         )
         assert r.status_code == 200, r.text
         token = r.json()["access_token"]
