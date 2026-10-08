@@ -26,6 +26,49 @@ _DRIVER_ATTR = {
     "truckstop": "loads_truckstop_driver",
 }
 
+# In-process overlay primed from the DB at app startup and refreshed by the
+# ``PUT /settings/connectors/loadboard/drivers`` endpoint. Env wins when set
+# (``LOADS_<SRC>_DRIVER`` != "off"); otherwise the overlay wins; otherwise
+# the hard-coded default ("off"). Keeps the registry sync-friendly without
+# every ``_mode()`` lookup opening a DB session.
+_DB_OVERLAY: dict[str, str] = {}  # keys: dat/chr/loadboard123/truckstop/kill
+
+
+def set_db_overlay(**values: str) -> None:
+    """Replace known keys on the overlay — called from the settings PUT."""
+    for k, v in values.items():
+        _DB_OVERLAY[k] = str(v or "off")
+
+
+async def prime_overlay_from_db(sessionmaker) -> None:
+    """Load driver + kill values from the singleton settings row.
+
+    Absent-safe: a missing row / column / connection just leaves the overlay
+    empty so the registry falls back to env/default. Called from the FastAPI
+    lifespan on startup.
+    """
+    try:
+        from sqlalchemy import select as _sa_select
+
+        from app.identity.models import SettingsRow
+
+        async with sessionmaker() as s:
+            row = (
+                await s.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            set_db_overlay(
+                dat=getattr(row, "loads_dat_driver", "off") or "off",
+                chr=getattr(row, "loads_chr_driver", "off") or "off",
+                loadboard123=getattr(row, "loads_lb123_driver", "off") or "off",
+                truckstop=getattr(row, "loads_truckstop_driver", "off") or "off",
+                kill=getattr(row, "loads_agent_kill", "off") or "off",
+            )
+    except Exception:  # noqa: BLE001  pragma: no cover
+        # Boot must not fail — the overlay stays empty and env/default win.
+        return
+
 
 class _DriverSwitch:
     """Composite that reads the per-source driver env and delegates."""
@@ -37,13 +80,22 @@ class _DriverSwitch:
         self._settings = settings
 
     def _mode(self) -> str:
+        """Resolve the active driver — env wins if non-off, else DB overlay."""
         attr = _DRIVER_ATTR.get(self.kind, None)
         if attr is None:
             return "off"
-        return str(getattr(self._settings, attr, "off") or "off")
+        env_val = str(getattr(self._settings, attr, "off") or "off")
+        if env_val != "off":
+            return env_val
+        # DB overlay — primed at lifespan start, mutated by the settings PUT.
+        return str(_DB_OVERLAY.get(self.kind, "off") or "off")
 
     def _kill(self) -> bool:
-        return (getattr(self._settings, "loads_agent_kill", "") or "") == "1"
+        # Env kill wins: ``LOADS_AGENT_KILL=1`` disables every agent run.
+        if (getattr(self._settings, "loads_agent_kill", "") or "") == "1":
+            return True
+        # DB overlay: "on" | "1" | "true" → killed.
+        return str(_DB_OVERLAY.get("kill", "off")).lower() in {"on", "1", "true"}
 
     @property
     def enabled(self) -> bool:
@@ -104,4 +156,10 @@ def by_kind(settings, kind: str) -> LoadSource | None:
     return None
 
 
-__all__ = ["all_sources", "by_kind", "enabled_sources"]
+__all__ = [
+    "all_sources",
+    "by_kind",
+    "enabled_sources",
+    "prime_overlay_from_db",
+    "set_db_overlay",
+]

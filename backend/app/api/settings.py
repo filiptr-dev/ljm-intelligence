@@ -13,6 +13,8 @@ the footer is appended to every outgoing email by the send code.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
@@ -487,3 +489,127 @@ async def set_broker_page_urls(payload: BrokerPageUrlsIn, request: Request) -> L
         await s.commit()
     # Re-use the GET projection so the client gets a consistent payload.
     return await list_loadboard_creds(request)
+
+
+# ---- Driver dropdown + agent kill switch (migration 0025 + 0027) ----------
+# Env wins when a ``LOADS_<SRC>_DRIVER`` or ``LOADS_AGENT_KILL`` is explicitly
+# set on the process; otherwise the DB value stored here is used. The
+# registry primes an in-process overlay from this row at app startup and we
+# refresh that overlay on each write so the next ``/loads`` call reflects it.
+
+
+_DRIVER_FIELDS = {
+    "dat": "loads_dat_driver",
+    "chr": "loads_chr_driver",
+    "loadboard123": "loads_lb123_driver",
+    "truckstop": "loads_truckstop_driver",
+}
+
+
+class LoadboardDriverIn(BaseModel):
+    # One or more of the keys below; omitted keys keep their current value.
+    dat: Literal["off", "api", "agent"] | None = None
+    chr: Literal["off", "api", "agent"] | None = None
+    loadboard123: Literal["off", "api", "agent"] | None = None
+    truckstop: Literal["off", "api", "agent"] | None = None
+    agent_kill: Literal["off", "on"] | None = None
+
+
+class LoadboardDriverOut(BaseModel):
+    dat: str
+    chr: str
+    loadboard123: str
+    truckstop: str
+    agent_kill: str
+    # True if any ``LOADS_*_DRIVER`` env is set to something other than ``off``;
+    # the UI uses this to warn that the DB value is being overridden by env.
+    env_override_active: bool
+
+
+def _env_overrides_active(settings) -> bool:
+    for attr in _DRIVER_FIELDS.values():
+        if str(getattr(settings, attr, "off") or "off") != "off":
+            return True
+    if (getattr(settings, "loads_agent_kill", "") or "") == "1":
+        return True
+    return False
+
+
+async def _load_driver_row(session) -> SettingsRow:
+    row = (
+        await session.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+    ).scalar_one_or_none()
+    if row is None:
+        row = SettingsRow(id=1)
+        session.add(row)
+        await session.flush()
+    return row
+
+
+def _project_drivers(row: SettingsRow, env_override: bool) -> LoadboardDriverOut:
+    return LoadboardDriverOut(
+        dat=getattr(row, "loads_dat_driver", "off") or "off",
+        chr=getattr(row, "loads_chr_driver", "off") or "off",
+        loadboard123=getattr(row, "loads_lb123_driver", "off") or "off",
+        truckstop=getattr(row, "loads_truckstop_driver", "off") or "off",
+        agent_kill=getattr(row, "loads_agent_kill", "off") or "off",
+        env_override_active=env_override,
+    )
+
+
+# Note: this route lives *before* the ``/connectors/loadboard/{src}`` matcher
+# further up because FastAPI resolves in registration order and ``drivers``
+# must not be captured as a src slug. We re-register nothing here; the file
+# order already placed the ``{src}`` routes above, so we use an explicit
+# non-overlapping path (``/drivers``) that cannot be matched as a source
+# name (the ``_loadboard_connector`` guard would 404 ``drivers`` anyway).
+
+
+@router.get("/connectors/loadboard/drivers", response_model=LoadboardDriverOut)
+async def get_loadboard_drivers(request: Request) -> LoadboardDriverOut:
+    from app.config import Settings as _Settings
+
+    settings: _Settings = request.app.state.settings
+    async with request.app.state.sessionmaker() as s:
+        row = await _load_driver_row(s)
+        await s.commit()
+    return _project_drivers(row, _env_overrides_active(settings))
+
+
+@router.put("/connectors/loadboard/drivers", response_model=LoadboardDriverOut)
+async def put_loadboard_drivers(payload: LoadboardDriverIn, request: Request) -> LoadboardDriverOut:
+    """Persist driver + kill-switch values on the settings row.
+
+    Only the fields the caller sends are updated. The registry overlay is
+    refreshed in-process so the next ``/loads/sources`` call sees the change
+    without a restart. Env still wins at read time — set ``LOADS_<SRC>_DRIVER``
+    to anything other than ``off`` to pin a source regardless of this DB value.
+    """
+    from app.config import Settings as _Settings
+    from app.integrations.adapters.loadboard.registry import set_db_overlay
+
+    settings: _Settings = request.app.state.settings
+    patch = payload.model_dump(exclude_unset=True)
+    async with request.app.state.sessionmaker() as s:
+        row = await _load_driver_row(s)
+        if "dat" in patch:
+            row.loads_dat_driver = patch["dat"]
+        if "chr" in patch:
+            row.loads_chr_driver = patch["chr"]
+        if "loadboard123" in patch:
+            row.loads_lb123_driver = patch["loadboard123"]
+        if "truckstop" in patch:
+            row.loads_truckstop_driver = patch["truckstop"]
+        if "agent_kill" in patch:
+            row.loads_agent_kill = patch["agent_kill"]
+        await s.commit()
+        await s.refresh(row)
+    # Mirror into the in-process overlay the registry reads from.
+    set_db_overlay(
+        dat=row.loads_dat_driver,
+        chr=row.loads_chr_driver,
+        loadboard123=row.loads_lb123_driver,
+        truckstop=row.loads_truckstop_driver,
+        kill=row.loads_agent_kill,
+    )
+    return _project_drivers(row, _env_overrides_active(settings))
