@@ -19,9 +19,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.identity.models import SettingsRow
 from app.integrations.adapters.ai.provider import ALLOWED_MODELS, DEFAULT_FEATURES, FEATURE_NAMES
-from app.models import SettingsRow
-from app.services.unsub_config import effective_unsub, unsub_missing_field
+from app.outreach.unsub_config import effective_unsub, unsub_missing_field
 
 
 @dataclass

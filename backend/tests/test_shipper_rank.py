@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from app.db import Base
 from app.models import CallOutcome, CapacityPost, ShipperCandidate
-from app.pipeline.shipper_rank import (
+from app.prospecting.pipeline.shipper_rank import (
     SHIPPER_FINDER_LIMIT_CAP,
     ShipperFilters,
     rank_shippers,

@@ -14,8 +14,8 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.analysis.models import AiUsageLog
 from app.integrations.adapters.ai.provider import ProviderCall
-from app.models import AiUsageLog
 from app.shared.orm import LJM_TENANT_ID
 from app.shared.tenant import ADMIN_SENTINEL, _tenant_ctx
 

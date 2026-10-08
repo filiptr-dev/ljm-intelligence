@@ -23,8 +23,8 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from app.shared.cron_auth import check_secret
 from app.config import Settings
+from app.shared.cron_auth import check_secret
 
 log = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ async def _fail_stalled_jobs(queue_app, sessionmaker) -> int:
     """
     from procrastinate.jobs import Status
 
-    from app.pipeline.run import abort_crawl_run
+    from app.prospecting.pipeline.run import abort_crawl_run
 
     try:
         stalled = list(await queue_app.job_manager.get_stalled_jobs())
@@ -364,7 +364,7 @@ async def retry_job(job_id: int, request: Request) -> RetryOut:
                 {"id": job_id},
             )
             await s.commit()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise HTTPException(status_code=500, detail=f"retry failed: {exc}") from exc
     return RetryOut(ok=True, id=job_id)
 

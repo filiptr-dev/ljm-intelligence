@@ -19,8 +19,8 @@ from app.integrations.crawl_service import (
     latest_run as svc_latest_run,
     list_runs as svc_list_runs,
 )
-from app.models import CrawlRun
-from app.pipeline.run import _new_run_id, run_crawl
+from app.prospecting.models import CrawlRun
+from app.prospecting.pipeline.run import _new_run_id, run_crawl
 
 log = logging.getLogger(__name__)
 

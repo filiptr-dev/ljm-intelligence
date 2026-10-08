@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.models import CrawlRun
-from app.pipeline.run import abort_crawl_run
+from app.prospecting.pipeline.run import abort_crawl_run
 from app.shared.orm import LJM_TENANT_ID
 
 _PG = os.environ.get("TEST_HARNESS", "").lower() == "pg16"
@@ -80,8 +80,8 @@ async def test_crawl_job_failure_closes_its_run() -> None:
 
     boom = RuntimeError("db went away on the final write")
     with (
-        patch("app.pipeline.run.run_crawl", AsyncMock(side_effect=boom)),
-        patch("app.pipeline.run.abort_crawl_run", AsyncMock()) as abort,
+        patch("app.prospecting.pipeline.run.run_crawl", AsyncMock(side_effect=boom)),
+        patch("app.prospecting.pipeline.run.abort_crawl_run", AsyncMock()) as abort,
         pytest.raises(RuntimeError),
     ):
         await pjobs.crawl_leads.func(tenant_id=LJM_TENANT_ID, trigger="on_demand", run_id="run_x")

@@ -49,12 +49,12 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] 
         tid = _tenant_ctx.get()
         if tid:
             tags["tenant_id"] = tid
-    except Exception:  # noqa: BLE001 — never let the tag hook kill a report.
+    except Exception:
         log.exception("sentry before_send tagging failed")
     return event
 
 
-def init_sentry(settings: "Settings") -> bool:
+def init_sentry(settings: Settings) -> bool:
     """Init the SDK iff a DSN is configured. Returns True when actually initialised."""
     global _INITIALISED
     if _INITIALISED:

@@ -36,27 +36,27 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.models import (
-    EnrichmentCandidate,
-    FitScoreHistory,
-    Lead,
-    LeadContact,
-    LeadContactProvenance,
-    SettingsRow,
-    ShipperCandidate,
-)
-from app.pipeline.shipper_merge import normalize_name
-from app.shared.region import IN_REGION_STATES
-from app.scoring.fit_score import DEFAULT_WEIGHTS, build_signals, compute_fit
-from app.sources.emails import normalize_email
-from app.sources.fetcher import Fetcher, HttpxTrafilaturaFetcher
-from app.sources.linkedin_search import (
+from app.identity.models import SettingsRow
+from app.integrations.adapters.ai.linkedin_search import (
     CompanyRef,
     find_company_page,
     find_decision_makers,
 )
 from app.integrations.adapters.ai.provider import LLMProvider, NullProvider, get_for
-from app.sources.site_scraper import scrape_site
+from app.integrations.adapters.web.emails import normalize_email
+from app.integrations.adapters.web.site_scraper import scrape_site
+from app.prospecting.models import (
+    EnrichmentCandidate,
+    FitScoreHistory,
+    Lead,
+    LeadContact,
+    LeadContactProvenance,
+    ShipperCandidate,
+)
+from app.prospecting.pipeline.shipper_merge import normalize_name
+from app.prospecting.scoring import DEFAULT_WEIGHTS, build_signals, compute_fit
+from app.shared.fetcher import Fetcher, HttpxTrafilaturaFetcher
+from app.shared.region import IN_REGION_STATES
 
 log = logging.getLogger(__name__)
 
@@ -814,9 +814,9 @@ async def discover_new_shippers(
     Any discovered company flows through `match_and_merge`; new rows land with
     `sources=['Gemini']`.
     """
-    from app.pipeline.shipper_ingest import _upsert_candidate  # local — small extension
-    from app.pipeline.shipper_merge import IncomingCandidate
-    from app.sources.gemini_search import GeminiDiscoverer
+    from app.integrations.adapters.ai.gemini_search import GeminiDiscoverer
+    from app.prospecting.pipeline.shipper_ingest import _upsert_candidate  # local — small extension
+    from app.prospecting.pipeline.shipper_merge import IncomingCandidate
 
     counts: dict[str, Any] = {
         "discovery_new_shippers": 0,

@@ -10,7 +10,7 @@ Cases per scope change 2026-09-30:
 
 from __future__ import annotations
 
-from app.scoring.fit_score import (
+from app.prospecting.scoring import (
     DEFAULT_WEIGHTS,
     SiteSignals,
     build_signals,

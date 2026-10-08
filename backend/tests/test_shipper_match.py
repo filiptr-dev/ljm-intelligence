@@ -8,7 +8,7 @@ function, assert on the shape of the output. See
 from __future__ import annotations
 
 from app.models import CapacityPost, ShipperCandidate
-from app.pipeline.shipper_match import ShipperMatchRow, match_shippers_for_post
+from app.prospecting.pipeline.shipper_match import ShipperMatchRow, match_shippers_for_post
 
 
 def _post(**kw) -> CapacityPost:

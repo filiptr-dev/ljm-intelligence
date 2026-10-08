@@ -1,5 +1,6 @@
 """Load-board port — the common surface over DAT/CHR/123LB/Truckstop."""
 from __future__ import annotations
+
 from typing import Any, Protocol
 
 

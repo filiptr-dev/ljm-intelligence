@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.models import SettingsRow
+from app.identity.models import SettingsRow
 
 ALGORITHM = "HS256"
 

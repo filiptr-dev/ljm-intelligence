@@ -59,7 +59,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
-from app.models import CallOutcome, CapacityPost, ShipperCandidate
+from app.outreach.models import CallOutcome, CapacityPost
+from app.prospecting.models import ShipperCandidate
 from app.shared.region import IN_REGION_STATES
 
 # Hard cap on server-side page size — Slice 3 will read this in the cursor pagination path

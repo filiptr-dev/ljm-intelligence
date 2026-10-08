@@ -18,7 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.pipeline.shipper_rank import ShipperRow
+from app.prospecting.pipeline.shipper_rank import ShipperRow
 from app.prospecting.shipper_finder_service import (
     NotFoundError,
     PromotedLeadRow,

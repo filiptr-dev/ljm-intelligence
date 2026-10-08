@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 from app.models import CallOutcome, CapacityPost, Lead
-from app.pipeline.call_rank import CALLBACK_DEFAULT_OFFSET_DAYS, rank_call_list
+from app.prospecting.pipeline.call_rank import CALLBACK_DEFAULT_OFFSET_DAYS, rank_call_list
 
 TODAY = date(2026, 9, 29)
 

@@ -16,8 +16,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.sources.emails import normalize_email
 from app.integrations.adapters.ai.provider import LLMProvider, NullProvider
+from app.integrations.adapters.web.emails import normalize_email
 
 log = logging.getLogger(__name__)
 

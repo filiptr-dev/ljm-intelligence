@@ -14,11 +14,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
-from app.models import Lead, LeadSource, Score
-from app.shared.region import in_region
 from app.integrations.adapters.ai.gemini_score import GeminiScorer
-from app.sources.emails import add_contact_email
-from app.sources.gemini_search import GeminiDiscoverer
+from app.integrations.adapters.ai.gemini_search import GeminiDiscoverer
+from app.integrations.adapters.web.emails import add_contact_email
+from app.prospecting.models import Lead, LeadSource, Score
+from app.shared.region import in_region
 
 log = logging.getLogger(__name__)
 

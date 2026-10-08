@@ -18,26 +18,20 @@ generates readable types for the frontend typed client.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from app.shared.cron_auth import check_secret
 from app.config import Settings
 from app.integrations.enrichment_service import (
-    InvalidUnsubscribeTokenError,
     NotFoundError,
-    UnsubscribeConfigError,
-    apply_unsubscribe as svc_apply_unsubscribe,
     enrich_candidate as svc_enrich_candidate,
     enrich_lead as svc_enrich_lead,
     load_lead_view as svc_load_lead_view,
     metrics as svc_metrics,
-    verify_token as svc_verify_token,
 )
+from app.shared.cron_auth import check_secret
 
 log = logging.getLogger(__name__)
 

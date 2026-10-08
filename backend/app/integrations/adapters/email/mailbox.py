@@ -29,7 +29,6 @@ from typing import Any, Protocol
 from app.config import Settings
 from app.integrations.adapters.email.credentials import (
     build_delegated_credentials,
-    load_sa_info,
     resolve_impersonate,
     resolve_sa_info,
 )

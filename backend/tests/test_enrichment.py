@@ -61,7 +61,7 @@ async def _seed_template(sm, template_id: str = "tmpl-1") -> None:
         )
         await s.commit()
 from app.integrations.adapters.ai.provider import GeminiProvider, NullProvider
-from app.pipeline.enrichment import (
+from app.prospecting.pipeline.enrichment import (
     ContactPayload,
     copy_enrichment_candidates_to_lead,
     discover_new_shippers,
@@ -69,9 +69,9 @@ from app.pipeline.enrichment import (
     mark_contact_contacted,
     upsert_lead_contact,
 )
-from app.sources import robots as robots_mod
-from app.sources.fetcher import FetchResult, _js_only_heuristic
-from app.sources.linkedin_search import (
+from app.shared import robots as robots_mod
+from app.shared.fetcher import FetchResult, _js_only_heuristic
+from app.integrations.adapters.ai.linkedin_search import (
     _LINKEDIN_IN_RE,
     CompanyRef,
     _normalize_url,
@@ -267,7 +267,7 @@ async def test_linkedin_search_citation_anchor(monkeypatch):
         )
         return payload, citations
 
-    import app.sources.linkedin_search as lm
+    import app.integrations.adapters.ai.linkedin_search as lm
 
     monkeypatch.setattr(lm, "_grounded_call", fake_call)
     hits = await find_decision_makers(
@@ -355,10 +355,10 @@ async def test_enrich_happy_path(sm, monkeypatch):
     # suspenders stub the lookup so no network leaves the box regardless.
     #
     # ``site_scraper`` imports ``is_allowed`` into its own module namespace via
-    # ``from app.sources.robots import is_allowed``, so patching only the
+    # ``from app.shared.robots import is_allowed``, so patching only the
     # ``robots`` module no longer propagates — we patch both bindings.
-    from app.sources import robots as _robots
-    from app.sources import site_scraper as _ss
+    from app.shared import robots as _robots
+    from app.integrations.adapters.web import site_scraper as _ss
 
     monkeypatch.setattr(_robots, "is_allowed", lambda url, ua: True)
     monkeypatch.setattr(_ss, "is_allowed", lambda url, ua: True)
@@ -380,7 +380,7 @@ async def test_enrich_happy_path(sm, monkeypatch):
         )
         return body, [{"url": "https://www.linkedin.com/in/jane-freight"}]
 
-    import app.sources.linkedin_search as lm
+    import app.integrations.adapters.ai.linkedin_search as lm
 
     monkeypatch.setattr(lm, "_grounded_call", fake_call)
 
@@ -492,7 +492,7 @@ async def test_enrich_happy_path(sm, monkeypatch):
 
 async def test_discover_new_shippers_adds_gemini_source(sm, monkeypatch):
     from app.config import Settings
-    from app.sources.gemini_search import DiscoveredCompany, GeminiDiscoverer
+    from app.integrations.adapters.ai.gemini_search import DiscoveredCompany, GeminiDiscoverer
 
     async def fake_discover(self, *, target_count=8):
         return [

@@ -24,11 +24,13 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analysis.ai_usage_service import hash_prompt, record
+from app.identity.models import SettingsRow
 from app.integrations.adapters.ai.provider import NullProvider, get_for
 from app.integrations.adapters.email.sender import get_mail_sender
-from app.models import Lead, SentLog, SettingsRow
 from app.outreach.brand import render_branded_email
-from app.services.ai_usage import hash_prompt, record
+from app.outreach.models import SentLog
+from app.prospecting.models import Lead
 
 log = logging.getLogger(__name__)
 

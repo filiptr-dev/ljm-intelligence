@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import CrawlRun
+from app.prospecting.models import CrawlRun
 
 
 @dataclass

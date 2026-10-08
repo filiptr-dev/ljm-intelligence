@@ -53,4 +53,4 @@ async def tenant_binder(request: Request) -> None:  # pragma: no cover - helper
     Routes that already depend on `current_user` can add this to also stamp
     the context + RLS without resolving a second DB session.
     """
-    return None
+    return

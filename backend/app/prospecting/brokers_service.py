@@ -16,29 +16,21 @@ from typing import Any
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (
-    CallOutcome,
-    Lead,
-    LeadContact,
-    LeadContactProvenance,
-    MailMessage,
-    MessageInsight,
-    SentLog,
-    Suppression,
+from app.inbox.models import MessageInsight
+from app.outreach.models import CallOutcome, SentLog, Suppression
+from app.prospecting.broker_health import (
+    TONE_WINDOW_DAYS,
+    VOLUME_WINDOW_DAYS,
+    WIN_RATE_WINDOW_DAYS,
+    HealthInputs,
+    compute_health,
 )
-from app.pipeline.broker_next_action import (
+from app.prospecting.models import Lead, LeadContact, LeadContactProvenance
+from app.prospecting.pipeline.broker_next_action import (
     PRIORITY,
     NextAction,
     NextActionInput,
     compute,
-)
-from app.prospecting.broker_health import (
-    HealthInputs,
-    HealthScore,
-    TONE_WINDOW_DAYS,
-    VOLUME_WINDOW_DAYS,
-    WIN_RATE_WINDOW_DAYS,
-    compute_health,
 )
 
 
@@ -120,7 +112,7 @@ class BrokerListResult:
     # Opt-in overview block, keyed by lead id. Empty when the caller does not
     # pass ``include_overview=True`` — keeps the default list payload
     # byte-identical to the pre-overview response.
-    overview: dict[str, "OverviewMetricsRow"] = field(default_factory=dict)
+    overview: dict[str, OverviewMetricsRow] = field(default_factory=dict)
     overview_segments_count: dict[str, int] = field(default_factory=dict)
 
 
@@ -163,7 +155,7 @@ class BrokerDetailResult:
     activity: list[ActivityCallEvent | ActivityEmailEvent]
     summary: SummaryRow
     main_lane: MainLaneRow | None
-    overview_metrics: "OverviewMetricsRow | None" = None
+    overview_metrics: OverviewMetricsRow | None = None
 
 
 # ---------- helpers ---------------------------------------------------------

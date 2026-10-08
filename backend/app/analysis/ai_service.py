@@ -17,8 +17,9 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analysis.models import AiUsageLog
+from app.identity.models import SettingsRow
 from app.integrations.adapters.ai.provider import ALLOWED_MODELS, DEFAULT_FEATURES
-from app.models import AiUsageLog, SettingsRow
 
 
 @dataclass

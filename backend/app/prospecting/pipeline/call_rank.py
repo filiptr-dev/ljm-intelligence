@@ -45,7 +45,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
-from app.models import CallOutcome, CapacityPost, Lead
+from app.outreach.models import CallOutcome, CapacityPost
+from app.prospecting.models import Lead
 
 # Slice 3 will read this default in the date picker; kept here so the ranker + the UI
 # never disagree on cadence.

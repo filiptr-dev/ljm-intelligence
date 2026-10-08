@@ -14,8 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.analysis import kpi_service as kpi
-from app.analysis import service as svc
+from app.analysis import kpi_service as kpi, service as svc
 from app.db import Session
 from app.shared.tenant import current_tenant
 

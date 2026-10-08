@@ -72,7 +72,7 @@ def check_login_rate(ip: str, email: str) -> float:
 #      what trusted proxies appended; everything to the left of them is
 #      attacker-controlled.
 # Fallback: ``request.client.host`` (TCP peer).
-import hmac as _hmac  # noqa: E402
+import hmac as _hmac
 
 
 def resolve_client_ip(

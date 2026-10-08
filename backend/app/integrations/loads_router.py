@@ -13,7 +13,6 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.shared.cron_auth import check_secret
 from app.config import Settings
 from app.integrations.loads_service import (
     UnknownSourceError,
@@ -27,6 +26,7 @@ from app.integrations.loads_service import (
     set_group_status as svc_set_group_status,
     test_source as svc_test_source,
 )
+from app.shared.cron_auth import check_secret
 
 log = logging.getLogger(__name__)
 
@@ -310,10 +310,11 @@ async def get_session_blob(
 ) -> SessionBlobOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
+    from fastapi.responses import JSONResponse
+
     from app.identity.credentials import CredentialVault, VaultConfigError, VaultNotFound
     from app.shared.orm import LJM_TENANT_ID
     from app.shared.tenant import TenantId
-    from fastapi.responses import JSONResponse
 
     async with request.app.state.sessionmaker() as s:
         try:
@@ -370,7 +371,7 @@ async def purge_demo_loads(request: Request) -> dict:
     """
     from sqlalchemy import delete as _sa_delete
 
-    from app.models import Load
+    from app.prospecting.models import Load
 
     async with request.app.state.sessionmaker() as s:
         result = await s.execute(

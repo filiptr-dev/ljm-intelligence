@@ -21,8 +21,9 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CallOutcome, CapacityPost, Lead, ShipperCandidate
-from app.pipeline.shipper_rank import (
+from app.outreach.models import CallOutcome, CapacityPost
+from app.prospecting.models import Lead, ShipperCandidate
+from app.prospecting.pipeline.shipper_rank import (
     SHIPPER_FINDER_LIMIT_CAP,
     ShipperFilters,
     ShipperRow,
@@ -211,7 +212,7 @@ async def promote(sessionmaker: Any, candidate_id: str) -> PromoteResult:
             # Idempotent short-circuit — a candidate already pointing at a lead
             # returns the existing link, never a new lead.
             if c.promoted_lead_id:
-                from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
+                from app.prospecting.pipeline.enrichment import copy_enrichment_candidates_to_lead
 
                 await copy_enrichment_candidates_to_lead(
                     s, candidate_id=c.id, lead_id=c.promoted_lead_id, run_id=None
@@ -221,7 +222,7 @@ async def promote(sessionmaker: Any, candidate_id: str) -> PromoteResult:
             existing = await _find_existing_lead(s, c)
             if existing is not None:
                 c.promoted_lead_id = existing.id
-                from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
+                from app.prospecting.pipeline.enrichment import copy_enrichment_candidates_to_lead
 
                 await copy_enrichment_candidates_to_lead(
                     s, candidate_id=c.id, lead_id=existing.id, run_id=None
@@ -257,7 +258,7 @@ async def promote(sessionmaker: Any, candidate_id: str) -> PromoteResult:
             s.add(lead)
             c.promoted_lead_id = lead_id
             await s.flush()
-            from app.pipeline.enrichment import copy_enrichment_candidates_to_lead
+            from app.prospecting.pipeline.enrichment import copy_enrichment_candidates_to_lead
 
             await copy_enrichment_candidates_to_lead(
                 s, candidate_id=c.id, lead_id=lead_id, run_id=None

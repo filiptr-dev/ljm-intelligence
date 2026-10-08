@@ -10,8 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.prospecting.service import list_leads as svc_list_leads
-from app.prospecting.service import show_lead as svc_show_lead
+from app.prospecting.service import list_leads as svc_list_leads, show_lead as svc_show_lead
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 

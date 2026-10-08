@@ -17,13 +17,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 
+from app.integrations.adapters.ai import provider as ai_provider
 from app.integrations.adapters.loadboard.agent_browser.agent import (
     AgentCaps,
     AgentResult,
     run as run_agent,
 )
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
-from app.integrations.adapters.ai import provider as ai_provider
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class AgentSource:
     async def _count_runs_today(self, settings) -> int:
         if self._sessionmaker is None:
             return 0
-        from app.models import AgentRun
+        from app.prospecting.models import AgentRun
 
         async with self._sessionmaker() as s:
             today = datetime.now(UTC).date()
@@ -100,7 +100,7 @@ class AgentSource:
     async def _log_run(self, settings, result: AgentResult) -> None:
         if self._sessionmaker is None:
             return
-        from app.models import AgentRun
+        from app.prospecting.models import AgentRun
 
         async with self._sessionmaker() as s:
             s.add(

@@ -7,7 +7,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import LeadContact
+from app.prospecting.models import LeadContact
 
 # Deliberately basic: one @, no spaces, a dot-separated domain with a 2+ letter TLD.
 # Deliverability is checked later by the sender, this only keeps obvious junk out.

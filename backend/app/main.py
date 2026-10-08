@@ -207,19 +207,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.analysis.overview_router import router as overview_router
     from app.identity.auth.deps import current_user, require_user_or_cron
     from app.identity.auth_router import router as auth_router
-    from app.identity.settings_router import router as settings_router
-    from app.integrations.loads_router import router as loads_router
-    from app.outreach.call_list_router import router as call_list_router
-    from app.outreach.capacity_router import router as capacity_router
-    from app.outreach.email_router import router as email_router
-    from app.outreach.unsub_router import unsub_router as unsubscribe_router
-    from app.prospecting.brokers_router import router as brokers_router
-    from app.prospecting.crawl_router import router as crawl_router
-    from app.prospecting.enrichment_router import router as enrichment_router
-    from app.prospecting.leads_router import router as leads_router
-    from app.prospecting.shipper_finder_router import router as shipper_finder_router
-    from app.inbox.mail_router import cron_router as mail_cron_router
-    from app.inbox.mail_router import router as mail_router
 
     # ``require_user_or_cron`` fronts routers that mix user-facing GETs with
     # the two cron-triggered writes (``/crawl/run``, ``/enrichment/auto-send``)
@@ -242,7 +229,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # already run under the admin sentinel in `uow_admin()` and bind the
     # tenant inside the service when they need it.
     from app.identity.dependencies import current_tenant
+    from app.identity.settings_router import router as settings_router
     from app.inbox.inbox_router import router as inbox_router
+    from app.inbox.mail_router import cron_router as mail_cron_router, router as mail_router
+    from app.integrations.loads_router import router as loads_router
+    from app.outreach.call_list_router import router as call_list_router
+    from app.outreach.capacity_router import router as capacity_router
+    from app.outreach.email_router import router as email_router
+    from app.outreach.unsub_router import unsub_router as unsubscribe_router
+    from app.prospecting.brokers_router import router as brokers_router
+    from app.prospecting.crawl_router import router as crawl_router
+    from app.prospecting.enrichment_router import router as enrichment_router
+    from app.prospecting.leads_router import router as leads_router
+    from app.prospecting.shipper_finder_router import router as shipper_finder_router
 
     user_or_cron = [Depends(require_user_or_cron)]
     user_only = [Depends(current_user), Depends(current_tenant)]
@@ -276,8 +275,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # `/admin/jobs` is user-only. The drain route also re-checks the cron
     # secret inside its handler so a bare bearer-less request can't trigger
     # a worker tick.
-    from app.integrations.jobs_router import admin_router as jobs_admin_router
-    from app.integrations.jobs_router import router as jobs_router
+    from app.integrations.jobs_router import admin_router as jobs_admin_router, router as jobs_router
 
     app.include_router(jobs_router, dependencies=user_or_cron)
     app.include_router(jobs_admin_router, dependencies=user_only)

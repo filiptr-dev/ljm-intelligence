@@ -15,8 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.shared.db import AsyncSession
 
 from app.analysis.models import (
     BrokerLookalike,
@@ -25,7 +24,20 @@ from app.analysis.models import (
     ObjectionCluster,
     PredictionRun,
 )
-from app.inbox.models import MailMessage, MessageInsight
+from app.analysis.repository import (
+    fetch_first_touch_rows,
+    fetch_insights_for_corpus,
+    fetch_loss_reason_counts,
+    fetch_messages_for_corpus,
+    fetch_thread_age_intents,
+    fetch_thread_age_messages,
+    fetch_workload_rows,
+    list_broker_predictions_rows,
+    list_lane_predictions_rows,
+    list_lookalikes_rows,
+    list_objections_rows,
+    wipe_prediction_tables,
+)
 
 # ---- shapes ---------------------------------------------------------------
 
@@ -129,41 +141,8 @@ def _percentile(xs: list[float], q: float) -> float | None:
 
 async def _collect_corpus(session: AsyncSession) -> tuple[list[Any], list[Any]]:
     """Pull (messages, insights) once; downstream analyses walk the lists."""
-    msgs = (
-        await session.execute(
-            select(
-                MailMessage.message_id,
-                MailMessage.mailbox,
-                MailMessage.thread_id,
-                MailMessage.from_addr,
-                MailMessage.to_addrs,
-                MailMessage.subject,
-                MailMessage.body_text,
-                MailMessage.sent_at,
-                MailMessage.email_lower,
-            )
-            .order_by(MailMessage.thread_id, MailMessage.sent_at.asc())
-        )
-    ).all()
-    ins = (
-        await session.execute(
-            select(
-                MessageInsight.mailbox,
-                MessageInsight.message_id,
-                MessageInsight.thread_id,
-                MessageInsight.intent,
-                MessageInsight.urgency,
-                MessageInsight.sentiment,
-                MessageInsight.broker_name,
-                MessageInsight.rate_usd,
-                MessageInsight.lane_from,
-                MessageInsight.lane_to,
-                MessageInsight.equipment,
-                MessageInsight.evidence,
-                MessageInsight.from_email_normalized,
-            )
-        )
-    ).all()
+    msgs = await fetch_messages_for_corpus(session)
+    ins = await fetch_insights_for_corpus(session)
     return msgs, ins
 
 
@@ -461,10 +440,7 @@ async def run_nightly(session: AsyncSession) -> dict[str, int]:
     objs = _compute_objections(ins)
 
     # Snapshot writes — a nightly re-run replaces last night's rows.
-    await session.execute(delete(BrokerPrediction))
-    await session.execute(delete(LanePrediction))
-    await session.execute(delete(BrokerLookalike))
-    await session.execute(delete(ObjectionCluster))
+    await wipe_prediction_tables(session)
 
     for r in brokers:
         session.add(BrokerPrediction(
@@ -516,11 +492,7 @@ async def run_nightly(session: AsyncSession) -> dict[str, int]:
 async def list_broker_predictions(
     session: AsyncSession, *, broker_domain: str | None = None, limit: int = 500
 ) -> list[BrokerPredictionRow]:
-    stmt = select(BrokerPrediction).order_by(BrokerPrediction.health_score.desc())
-    if broker_domain:
-        stmt = stmt.where(BrokerPrediction.broker_domain == broker_domain.lower())
-    stmt = stmt.limit(limit)
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = await list_broker_predictions_rows(session, broker_domain=broker_domain, limit=limit)
     return [
         BrokerPredictionRow(
             broker_domain=r.broker_domain,
@@ -544,15 +516,9 @@ async def list_lane_predictions(
     session: AsyncSession, *, origin: str | None = None, dest: str | None = None,
     equipment: str | None = None, limit: int = 500,
 ) -> list[LanePredictionRow]:
-    stmt = select(LanePrediction).order_by(LanePrediction.sample_size.desc())
-    if origin:
-        stmt = stmt.where(LanePrediction.origin.ilike(origin))
-    if dest:
-        stmt = stmt.where(LanePrediction.dest.ilike(dest))
-    if equipment:
-        stmt = stmt.where(LanePrediction.equipment == equipment)
-    stmt = stmt.limit(limit)
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = await list_lane_predictions_rows(
+        session, origin=origin, dest=dest, equipment=equipment, limit=limit
+    )
     return [
         LanePredictionRow(
             origin=r.origin, dest=r.dest, equipment=r.equipment,
@@ -570,25 +536,14 @@ async def list_lane_predictions(
 async def list_lookalikes(
     session: AsyncSession, *, broker_domain: str, top_n: int = 5
 ) -> list[LookalikeRow]:
-    rows = (
-        await session.execute(
-            select(BrokerLookalike)
-            .where(BrokerLookalike.broker_domain == broker_domain.lower())
-            .order_by(BrokerLookalike.score.desc())
-            .limit(top_n)
-        )
-    ).scalars().all()
+    rows = await list_lookalikes_rows(session, broker_domain=broker_domain, top_n=top_n)
     return [LookalikeRow(broker_domain=r.broker_domain, peer_domain=r.peer_domain, score=float(r.score)) for r in rows]
 
 
 async def list_objections(
     session: AsyncSession, *, broker_domain: str | None = None, limit: int = 100
 ) -> list[ObjectionRow]:
-    stmt = select(ObjectionCluster).order_by(ObjectionCluster.count.desc())
-    if broker_domain:
-        stmt = stmt.where(ObjectionCluster.broker_domain == broker_domain.lower())
-    stmt = stmt.limit(limit)
-    rows = (await session.execute(stmt)).scalars().all()
+    rows = await list_objections_rows(session, broker_domain=broker_domain, limit=limit)
     return [
         ObjectionRow(broker_domain=r.broker_domain, label=r.label, count=int(r.count or 0), exemplar=r.exemplar)
         for r in rows
@@ -600,11 +555,7 @@ async def list_objections(
 
 async def workload_heatmap(session: AsyncSession) -> list[WorkloadCell]:
     """Staff workload heatmap — count of our-outbound messages per (dow, hour)."""
-    rows = (
-        await session.execute(
-            select(MailMessage.sent_at, MailMessage.from_addr, MailMessage.mailbox)
-        )
-    ).all()
+    rows = await fetch_workload_rows(session)
     counter: Counter[tuple[int, int]] = Counter()
     for r in rows:
         if r.from_addr != r.mailbox:
@@ -623,15 +574,8 @@ async def thread_age_by_intent(session: AsyncSession) -> list[ThreadAgeBucket]:
     message after it. The gap is a 'thread age before answer'. Grouped by the
     intent on that first inbound.
     """
-    msgs = (await session.execute(
-        select(
-            MailMessage.thread_id, MailMessage.from_addr, MailMessage.mailbox,
-            MailMessage.sent_at, MailMessage.mailbox, MailMessage.message_id,
-        ).order_by(MailMessage.thread_id, MailMessage.sent_at.asc())
-    )).all()
-    ins = (await session.execute(
-        select(MessageInsight.mailbox, MessageInsight.message_id, MessageInsight.intent)
-    )).all()
+    msgs = await fetch_thread_age_messages(session)
+    ins = await fetch_thread_age_intents(session)
     intent_by_pk = {(i.mailbox, i.message_id): i.intent for i in ins}
     by_thread: dict[str, list] = defaultdict(list)
     for m in msgs:
@@ -664,28 +608,13 @@ async def loss_reasons(session: AsyncSession) -> list[LossReasonRow]:
 
     Uses objection cluster labels but across the whole corpus (not per-broker).
     """
-    rows = (
-        await session.execute(
-            select(ObjectionCluster.label, func.sum(ObjectionCluster.count))
-            .group_by(ObjectionCluster.label)
-            .order_by(func.sum(ObjectionCluster.count).desc())
-        )
-    ).all()
+    rows = await fetch_loss_reason_counts(session)
     return [LossReasonRow(reason=r[0], count=int(r[1] or 0)) for r in rows]
 
 
 async def first_touch_latency(session: AsyncSession) -> list[FirstTouchRow]:
     """Per-domain first-inbound-to-first-load-offer latency (newly-contacted brokers)."""
-    rows = (
-        await session.execute(
-            select(
-                BrokerPrediction.broker_domain, BrokerPrediction.first_touch_latency_days,
-                BrokerPrediction.computed_at,
-            )
-            .where(BrokerPrediction.first_touch_latency_days.isnot(None))
-            .order_by(BrokerPrediction.first_touch_latency_days.asc())
-        )
-    ).all()
+    rows = await fetch_first_touch_rows(session)
     return [
         FirstTouchRow(
             broker_domain=r[0],

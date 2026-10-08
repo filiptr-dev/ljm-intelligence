@@ -12,10 +12,28 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.shared.db import AsyncSession
 
-from app.inbox.models import MailMessage, MessageInsight, NoReplyTracker
+from app.inbox.models import MailMessage, NoReplyTracker
+from app.inbox.repository import (
+    count_all_messages,
+    count_emails,
+    count_negative_insights,
+    count_no_reply_rows,
+    count_urgent_insights,
+    fetch_emails_page,
+    fetch_inbound_sentiments,
+    fetch_intent_counts,
+    fetch_no_reply_rows,
+    fetch_relationship_rows,
+    fetch_response_time_rows,
+    fetch_staff_rows,
+    fetch_status_board_rows,
+    fetch_thread_rows,
+    fetch_triage_rows,
+    find_contact_id_by_email,
+    get_settings_row as _repo_get_settings_row,
+)
 
 # ---- shapes ---------------------------------------------------------------
 
@@ -154,34 +172,10 @@ async def list_emails(
 
     Returns rows ordered newest-first + the total match count (for pagination).
     """
-    j = MessageInsight.__table__.c
-    m = MailMessage.__table__.c
-
-    base = (
-        select(
-            m.message_id, m.mailbox, m.thread_id, m.from_addr, m.to_addrs, m.subject,
-            m.body_text, m.sent_at,
-            j.intent, j.urgency, j.sentiment, j.confidence, j.rate_usd, j.lane_from,
-            j.lane_to, j.broker_name, j.evidence,
-        )
-        .select_from(MailMessage.__table__.join(
-            MessageInsight.__table__,
-            and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
-        ))
-    )
-    if intent:
-        base = base.where(j.intent == intent)
-    if text_query:
-        q = f"%{text_query.lower()}%"
-        base = base.where(func.lower(m.subject + " " + m.body_text).like(q))
-
-    count_q = select(func.count()).select_from(base.subquery())
-    total = int((await session.execute(count_q)).scalar_one())
-
-    rows_q = base.order_by(m.sent_at.desc()).offset(offset).limit(limit)
-    result = await session.execute(rows_q)
+    total = await count_emails(session, intent=intent, text_query=text_query)
+    rows = await fetch_emails_page(session, intent=intent, text_query=text_query, offset=offset, limit=limit)
     out: list[EmailRow] = []
-    for r in result.all():
+    for r in rows:
         to_addr = (r.to_addrs or [""])[0] if r.to_addrs else ""
         direction = "out" if r.from_addr == r.mailbox else "in"
         out.append(
@@ -199,27 +193,13 @@ async def list_emails(
 
 
 async def intent_counts(session: AsyncSession) -> list[IntentCount]:
-    rows = (
-        await session.execute(
-            select(MessageInsight.intent, func.count())
-            .group_by(MessageInsight.intent)
-            .order_by(func.count().desc())
-        )
-    ).all()
+    rows = await fetch_intent_counts(session)
     return [IntentCount(intent=i, count=int(c)) for i, c in rows]
 
 
 async def sentiment_buckets(session: AsyncSession) -> SentimentBuckets:
     """Sentiment distribution over inbound-only messages (same rule the demo UI used)."""
-    j = MessageInsight.__table__.c
-    m = MailMessage.__table__.c
-    base = select(j.sentiment).select_from(
-        MessageInsight.__table__.join(
-            MailMessage.__table__,
-            and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
-        )
-    ).where(_inbound_filter())
-    values = [float(v or 0.0) for (v,) in (await session.execute(base)).all()]
+    values = [float(v or 0.0) for (v,) in await fetch_inbound_sentiments(session)]
     pos = sum(1 for v in values if v > 0.2)
     neg = sum(1 for v in values if v < -0.1)
     return SentimentBuckets(
@@ -231,25 +211,9 @@ async def triage_list(
     session: AsyncSession, *, urgent_only: bool = False, limit: int = 50
 ) -> list[TriageItem]:
     """Urgent-first list for the triage surface. Waiting-minutes derived live."""
-    j = MessageInsight.__table__.c
-    m = MailMessage.__table__.c
-    stmt = (
-        select(
-            m.message_id, m.mailbox, m.thread_id, m.from_addr, m.subject, m.sent_at, m.body_text,
-            j.intent, j.urgency, j.sentiment, j.broker_name,
-        )
-        .select_from(MailMessage.__table__.join(
-            MessageInsight.__table__,
-            and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
-        ))
-        .where(_inbound_filter())
-    )
-    if urgent_only:
-        stmt = stmt.where(j.urgency == "urgent")
     # SQL order is newest-first; the Python pass below re-sorts by urgency to
     # push "urgent" strings to the top (lexical sort wouldn't).
-    stmt = stmt.order_by(m.sent_at.desc()).limit(limit * 2 if not urgent_only else limit)
-    rows = (await session.execute(stmt)).all()
+    rows = await fetch_triage_rows(session, urgent_only=urgent_only, limit=limit)
     now = datetime.now(UTC)
     out: list[TriageItem] = []
     for r in rows:
@@ -271,11 +235,7 @@ async def triage_list(
 
 async def no_reply_list(session: AsyncSession, *, limit: int = 50) -> list[NoReplyRow]:
     now = datetime.now(UTC)
-    rows = (
-        await session.execute(
-            select(NoReplyTracker).order_by(NoReplyTracker.we_sent_at.asc()).limit(limit)
-        )
-    ).scalars().all()
+    rows = await fetch_no_reply_rows(session, limit=limit)
     out: list[NoReplyRow] = []
     for r in rows:
         we_sent = _as_utc(r.we_sent_at) or now
@@ -303,13 +263,7 @@ async def response_time_stats(session: AsyncSession, *, broker_domain: str | Non
     compute the gap at every direction flip. ``ours`` is a gap that ends with
     an outbound message; ``theirs`` is one that ends with an inbound message.
     """
-    stmt = select(
-        MailMessage.thread_id, MailMessage.from_addr, MailMessage.mailbox,
-        MailMessage.sent_at, MailMessage.email_lower,
-    ).order_by(MailMessage.thread_id, MailMessage.sent_at.asc())
-    if broker_domain:
-        stmt = stmt.where(MailMessage.email_lower.ilike(f"%@{broker_domain}"))
-    rows = (await session.execute(stmt)).all()
+    rows = await fetch_response_time_rows(session, broker_domain=broker_domain)
 
     threads: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
     for r in rows:
@@ -347,12 +301,7 @@ async def response_time_stats(session: AsyncSession, *, broker_domain: str | Non
 
 async def staff_performance(session: AsyncSession) -> list[StaffRow]:
     """Per-mailbox counts + a rough reply-speed median."""
-    rows = (
-        await session.execute(
-            select(MailMessage.mailbox, MailMessage.from_addr, MailMessage.thread_id, MailMessage.sent_at)
-            .order_by(MailMessage.mailbox, MailMessage.thread_id, MailMessage.sent_at)
-        )
-    ).all()
+    rows = await fetch_staff_rows(session)
     bucket: dict[str, dict] = defaultdict(lambda: {"inbound": 0, "outbound": 0, "gaps": [], "dropped": 0})
     thread_last_dir: dict[tuple[str, str], tuple[datetime, str] | None] = {}
     for r in rows:
@@ -390,21 +339,11 @@ async def staff_performance(session: AsyncSession) -> list[StaffRow]:
 
 
 async def overview_kpis(session: AsyncSession) -> OverviewKPIs:
-    j = MessageInsight.__table__.c
-    m = MailMessage.__table__.c
     now = datetime.now(UTC)
-    volume = int(
-        (await session.execute(select(func.count(m.message_id)).select_from(MailMessage.__table__))).scalar_one()
-    )
-    open_threads = int(
-        (await session.execute(select(func.count()).select_from(NoReplyTracker.__table__))).scalar_one()
-    )
-    urgent = int(
-        (await session.execute(select(func.count()).select_from(MessageInsight.__table__).where(j.urgency == "urgent"))).scalar_one()
-    )
-    negative = int(
-        (await session.execute(select(func.count()).select_from(MessageInsight.__table__).where(j.sentiment < -0.1))).scalar_one()
-    )
+    volume = await count_all_messages(session)
+    open_threads = await count_no_reply_rows(session)
+    urgent = await count_urgent_insights(session)
+    negative = await count_negative_insights(session)
     _ = now  # reserved for a windowed count once we add received_at filter
     return OverviewKPIs(volume_7d=volume, open_threads=open_threads, urgent=urgent, negative=negative)
 
@@ -415,18 +354,7 @@ async def relationship_health(session: AsyncSession, broker_domain: str) -> Rela
     Deliberately simple formula so the number is explainable: we start at 50,
     nudge up for praise + fast replies, nudge down for complaints + silence.
     """
-    j = MessageInsight.__table__.c
-    m = MailMessage.__table__.c
-    rows = (
-        await session.execute(
-            select(j.intent, j.sentiment, j.broker_name, m.sent_at, m.from_addr, m.mailbox)
-            .select_from(MessageInsight.__table__.join(
-                MailMessage.__table__,
-                and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
-            ))
-            .where(m.email_lower.ilike(f"%@{broker_domain}"))
-        )
-    ).all()
+    rows = await fetch_relationship_rows(session, broker_domain=broker_domain)
     if not rows:
         return RelationshipHealth(
             broker_domain=broker_domain, broker_name=None, health_score=50,
@@ -457,24 +385,7 @@ async def relationship_health(session: AsyncSession, broker_domain: str) -> Rela
 
 async def get_thread(session: AsyncSession, thread_id: str) -> list[EmailRow]:
     """All messages in a thread (newest-last), with their insights."""
-    j = MessageInsight.__table__.c
-    m = MailMessage.__table__.c
-    rows = (
-        await session.execute(
-            select(
-                m.message_id, m.mailbox, m.thread_id, m.from_addr, m.to_addrs, m.subject,
-                m.body_text, m.sent_at,
-                j.intent, j.urgency, j.sentiment, j.confidence, j.rate_usd, j.lane_from,
-                j.lane_to, j.broker_name, j.evidence,
-            )
-            .select_from(MailMessage.__table__.outerjoin(
-                MessageInsight.__table__,
-                and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
-            ))
-            .where(m.thread_id == thread_id)
-            .order_by(m.sent_at.asc())
-        )
-    ).all()
+    rows = await fetch_thread_rows(session, thread_id=thread_id)
     out: list[EmailRow] = []
     for r in rows:
         to_addr = (r.to_addrs or [""])[0] if r.to_addrs else ""
@@ -499,9 +410,14 @@ async def get_thread(session: AsyncSession, thread_id: str) -> list[EmailRow]:
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import delete as _sa_delete
-
 from app.analysis.models import ForgetContactAudit as _ForgetAudit
+from app.inbox.repository import (
+    delete_insights_by_email,
+    delete_messages_by_email,
+    delete_messages_past_retention,
+    delete_no_reply_by_email,
+    delete_no_reply_for_thread,
+)
 
 
 @dataclass
@@ -527,15 +443,7 @@ async def status_board(session: AsyncSession, *, limit: int = 200) -> list[Statu
       - last=out → ``waiting_on_them`` (they owe a reply).
       - closed when the thread's last message is >60 days old.
     """
-    rows = (
-        await session.execute(
-            select(
-                MailMessage.thread_id, MailMessage.mailbox, MailMessage.subject,
-                MailMessage.from_addr, MailMessage.to_addrs, MailMessage.sent_at,
-            )
-            .order_by(MailMessage.thread_id, MailMessage.sent_at.asc())
-        )
-    ).all()
+    rows = await fetch_status_board_rows(session)
     now = datetime.now(UTC)
     by_thread: dict[str, dict] = defaultdict(
         lambda: {
@@ -1042,8 +950,7 @@ async def _render_and_wrap(
     """
     from app.inbox.brand import get_accent, get_brand
     from app.inbox.email_render import EmailDesignOut, render_email
-    from app.prospecting.models import LeadContact
-    from app.services.unsub_config import (
+    from app.outreach.unsub_config import (
         build_unsub_link,
         build_unsub_link_by_email,
         effective_unsub,
@@ -1072,29 +979,14 @@ async def _render_and_wrap(
     # email-keyed token so the click still records a suppression keyed by
     # email, honouring CAN-SPAM / RFC 8058. Pre-fix we minted a hashed
     # pseudo-id that /unsubscribe could never resolve → 404 on click.
-    row = (
-        await session.execute(
-            # avoid circular import with identity
-            # pragma: inline SQL on settings row
-            __import__(
-                "sqlalchemy", fromlist=["select"]
-            ).select(__import__("app.identity.models", fromlist=["SettingsRow"]).SettingsRow)
-            .where(__import__("app.identity.models", fromlist=["SettingsRow"]).SettingsRow.id == 1)
-        )
-    ).scalar_one_or_none()
+    row = await _repo_get_settings_row(session)
     secret, base_url = effective_unsub(settings, row)
     unsub_url = ""
     if secret and base_url:
         to_norm = (to or "").strip().lower()
         contact_id: int | None = None
         if to_norm:
-            contact_id = (
-                await session.execute(
-                    select(LeadContact.id)
-                    .where(LeadContact.email == to_norm)
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+            contact_id = await find_contact_id_by_email(session, email=to_norm)
         if contact_id is not None:
             unsub_url = build_unsub_link(secret, base_url, contact_id)
         elif to_norm:
@@ -1189,9 +1081,7 @@ async def send_reply(
         raw={"mode": result.mode, "simulated": result.mode == "simulated"},
     ))
     # Clear no_reply_tracker for this thread (we just replied).
-    await session.execute(
-        _sa_delete(NoReplyTracker).where(NoReplyTracker.thread_id == thread_id)
-    )
+    await delete_no_reply_for_thread(session, thread_id=thread_id)
     return {"ok": True, "mode": result.mode, "message_id": new_msg_id, "to": to}
 
 
@@ -1271,21 +1161,10 @@ async def forget_contact(
         return {"ok": False, "reason": "invalid_email"}
     # messages where from_addr OR email_lower matches, OR to_addrs JSON contains the address.
     # SQL for the from side; the to-side is best-effort (JSON contains) handled on PG.
-    msgs_result = await session.execute(
-        _sa_delete(MailMessage).where(
-            (MailMessage.email_lower == email_norm)
-            | (func.lower(MailMessage.from_addr) == email_norm)
-        )
-    )
-    msgs_deleted = msgs_result.rowcount or 0
-    ins_result = await session.execute(
-        _sa_delete(MessageInsight).where(MessageInsight.from_email_normalized == email_norm)
-    )
-    insights_deleted = ins_result.rowcount or 0
+    msgs_deleted = await delete_messages_by_email(session, email=email_norm)
+    insights_deleted = await delete_insights_by_email(session, email=email_norm)
     # tracker rows pointing at this address.
-    await session.execute(
-        _sa_delete(NoReplyTracker).where(NoReplyTracker.to_email_normalized == email_norm)
-    )
+    await delete_no_reply_by_email(session, email=email_norm)
     session.add(_ForgetAudit(
         email_normalized=email_norm,
         messages_deleted=msgs_deleted,
@@ -1303,10 +1182,5 @@ async def forget_contact(
 async def retention_sweep(session: AsyncSession) -> dict:
     """Delete mail_messages whose ``retention_until`` is in the past."""
     now = datetime.now(UTC)
-    result = await session.execute(
-        _sa_delete(MailMessage).where(
-            MailMessage.retention_until.isnot(None),
-            MailMessage.retention_until < now,
-        )
-    )
-    return {"deleted": result.rowcount or 0}
+    deleted = await delete_messages_past_retention(session, now=now)
+    return {"deleted": deleted}

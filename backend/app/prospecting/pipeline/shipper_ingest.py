@@ -33,8 +33,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ShipperCandidate
-from app.pipeline.shipper_merge import IncomingCandidate, match_and_merge
+from app.prospecting.models import ShipperCandidate
+from app.prospecting.pipeline.shipper_merge import IncomingCandidate, match_and_merge
 
 log = logging.getLogger(__name__)
 

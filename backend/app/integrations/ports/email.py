@@ -1,5 +1,6 @@
 """Email mailbox + sender ports — one Protocol per direction of travel."""
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Protocol
 

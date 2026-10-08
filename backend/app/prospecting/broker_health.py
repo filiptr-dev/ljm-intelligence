@@ -120,8 +120,7 @@ def compute_health(inputs: HealthInputs) -> HealthScore:
 def _recency(days: int | None) -> float | None:
     if days is None:
         return None
-    if days < 0:
-        days = 0
+    days = max(days, 0)
     return 100.0 * max(0.0, 1.0 - (days / RECENCY_HORIZON_DAYS))
 
 
@@ -139,6 +138,5 @@ def _tone(avg: float | None) -> float | None:
 
 
 def _volume(sent_30d: int) -> float | None:
-    if sent_30d < 0:
-        sent_30d = 0
+    sent_30d = max(sent_30d, 0)
     return 100.0 * min(1.0, sent_30d / VOLUME_SATURATION)

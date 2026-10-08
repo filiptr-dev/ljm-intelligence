@@ -17,7 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from app.models import CapacityPost, Lead
+from app.outreach.models import CapacityPost
+from app.prospecting.models import Lead
 
 
 @dataclass(frozen=True, slots=True)

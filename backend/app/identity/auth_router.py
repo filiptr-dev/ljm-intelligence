@@ -25,7 +25,7 @@ from sqlalchemy import select
 from app.auth.deps import UserPrincipal, current_user
 from app.auth.passwords import verify_password
 from app.auth.tokens import effective_auth_jwt_secret, mint_access_token
-from app.models import User
+from app.identity.models import User
 from app.shared.rate_limit import check_login_rate, resolve_client_ip
 
 log = logging.getLogger(__name__)

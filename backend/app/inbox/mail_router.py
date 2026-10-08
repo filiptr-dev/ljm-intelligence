@@ -23,7 +23,6 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Header, Request
 from pydantic import BaseModel, EmailStr, Field
 
-from app.shared.cron_auth import check_secret
 from app.config import Settings
 from app.integrations.mail_service import (
     backfill as svc_backfill,
@@ -35,6 +34,7 @@ from app.integrations.mail_service import (
     test_read as svc_test_read,
     test_send as svc_test_send,
 )
+from app.shared.cron_auth import check_secret
 
 log = logging.getLogger(__name__)
 

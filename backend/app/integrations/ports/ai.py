@@ -1,5 +1,6 @@
 """AI provider port — Gemini / Claude / Null all speak this."""
 from __future__ import annotations
+
 from typing import Any, Protocol
 
 

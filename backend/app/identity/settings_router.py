@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
+from app.identity.models import SettingsRow
 from app.identity.platform_service import (
     SettingsSnapshot,
     UnsubMissingError,
@@ -23,7 +24,6 @@ from app.identity.platform_service import (
     put_settings as svc_put_settings,
     validate_ai_features,
 )
-from app.models import SettingsRow
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -125,12 +125,15 @@ async def put_settings(request: Request, patch: SettingsPatch) -> SettingsOut:
 
 # ---- Connector settings — Gmail owner-only (plan Step 7) ------------------
 
+import json
+import secrets
+
+from sqlalchemy import delete as _sa_delete, select as _sa_select
+
 from app.identity.credentials import CredentialVault, VaultConfigError
 from app.identity.models import TenantFeatureFlag
 from app.shared.orm import LJM_TENANT_ID
 from app.shared.tenant import TenantId
-from sqlalchemy import select as _sa_select, delete as _sa_delete
-import json, secrets
 
 
 class GmailConnectorIn(BaseModel):
@@ -316,7 +319,7 @@ def _loadboard_connector(src: str) -> str:
 
 async def _last_run(session, src: str) -> tuple[str | None, str | None]:
     """Return ``(status, iso_started_at)`` for the most recent agent_run."""
-    from app.models import AgentRun
+    from app.prospecting.models import AgentRun
 
     row = (
         await session.execute(

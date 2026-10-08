@@ -28,7 +28,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.models import CapacityPost, ShipperCandidate
+from app.outreach.models import CapacityPost
+from app.prospecting.models import ShipperCandidate
 
 
 @dataclass(frozen=True, slots=True)

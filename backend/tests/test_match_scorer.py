@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.models import CapacityPost, Lead
-from app.pipeline.match import score_broker_for_post
+from app.prospecting.pipeline.match import score_broker_for_post
 
 
 def _post(**kw) -> CapacityPost:

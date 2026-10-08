@@ -23,11 +23,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.models import ShipperCandidate
-from app.pipeline.shipper_ingest import (
+from app.prospecting.pipeline.shipper_ingest import (
     ingest_osm_incomings,
     project_fmcsa_shippers_to_candidates,
 )
-from app.pipeline.shipper_merge import IncomingCandidate
+from app.prospecting.pipeline.shipper_merge import IncomingCandidate
 
 NOW = datetime.now(UTC)
 
@@ -194,7 +194,7 @@ async def test_osm_repeat_hits_same_osm_ref(sm):
 
 async def test_pipeline_run_shipper_stage_continues_on_overpass_failure(sm, monkeypatch):
     """Full `_run_shipper_stage` — Overpass raises for one state; FMCSA still lands, others continue."""
-    from app.pipeline import run as run_mod
+    from app.prospecting.pipeline import run as run_mod
 
     # Two shippers so the FMCSA projection has work.
     fmcsa_leads = [
@@ -226,7 +226,7 @@ async def test_pipeline_run_shipper_stage_continues_on_overpass_failure(sm, monk
 
 
 async def test_shipper_stage_respects_disabled_flag(sm, monkeypatch):
-    from app.pipeline import run as run_mod
+    from app.prospecting.pipeline import run as run_mod
 
     async def fake_fetch(state, **kwargs):
         raise AssertionError("should not be called when disabled")

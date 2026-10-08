@@ -19,8 +19,9 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CallOutcome, CapacityPost, Lead, SentLog
-from app.pipeline.call_rank import CALLBACK_DEFAULT_OFFSET_DAYS, CallRow, rank_call_list
+from app.outreach.models import CallOutcome, CapacityPost, SentLog
+from app.prospecting.models import Lead
+from app.prospecting.pipeline.call_rank import CALLBACK_DEFAULT_OFFSET_DAYS, CallRow, rank_call_list
 
 ALLOWED_OUTCOMES = ("booked", "callback", "not_interested", "no_answer")
 

@@ -15,15 +15,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
-from app.models import CrawlRun, Lead, LeadSource
-from app.pipeline.shipper_ingest import (
+from app.integrations.adapters.enrichment.fmcsa import fetch_fmcsa
+from app.integrations.adapters.web.emails import add_contact_email
+from app.integrations.adapters.web.osm_overpass import elements_to_incomings, fetch_overpass_elements
+from app.prospecting.models import CrawlRun, Lead, LeadSource
+from app.prospecting.pipeline.shipper_ingest import (
     ingest_osm_incomings,
     project_fmcsa_shippers_to_candidates,
 )
 from app.shared.region import IN_REGION_STATES, in_region
-from app.sources.emails import add_contact_email
-from app.integrations.adapters.enrichment.fmcsa import fetch_fmcsa
-from app.sources.osm_overpass import elements_to_incomings, fetch_overpass_elements
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ async def run_crawl(
     `fmcsa_stopped_reason="limit"`). `None` = no extra cap: the paginator's page caps
     and wall-clock budget bound the run, exactly as before.
     """
-    from app.pipeline.gemini_stage import run_gemini_stage
+    from app.prospecting.pipeline.gemini_stage import run_gemini_stage
 
     started = datetime.now(UTC)
     if run_id is None:
@@ -240,7 +240,7 @@ async def run_crawl(
         # enrichment failure never touches the FMCSA / shipper / Gemini passes
         # we just committed.
         try:
-            from app.pipeline.enrichment import discover_new_shippers, run_enrichment_stage
+            from app.prospecting.pipeline.enrichment import discover_new_shippers, run_enrichment_stage
 
             enrichment_counts = await run_enrichment_stage(sessionmaker, settings, run_id=run_id, started=started)
             _merge_counts(counts, enrichment_counts)
@@ -254,7 +254,7 @@ async def run_crawl(
         # is True (default False). Own try/except so a bad send-day never rolls
         # back enrichment. Loud status in `crawl_runs.counts`.
         try:
-            from app.models import SettingsRow
+            from app.identity.models import SettingsRow
             from app.outreach.service import auto_send
 
             async with sessionmaker() as _s:

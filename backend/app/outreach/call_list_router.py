@@ -17,25 +17,17 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from app.pipeline.call_rank import CallRow
 from app.prospecting.call_list_service import (
     ALLOWED_OUTCOMES,
     LeadNotFoundError,
     OutcomeNotFoundError,
+    delete_outcome as svc_delete_outcome,
+    get_history as svc_get_history,
+    load_and_rank as svc_load_and_rank,
+    log_outcome as svc_log_outcome,
     today_utc,
 )
-from app.prospecting.call_list_service import (
-    delete_outcome as svc_delete_outcome,
-)
-from app.prospecting.call_list_service import (
-    get_history as svc_get_history,
-)
-from app.prospecting.call_list_service import (
-    load_and_rank as svc_load_and_rank,
-)
-from app.prospecting.call_list_service import (
-    log_outcome as svc_log_outcome,
-)
+from app.prospecting.pipeline.call_rank import CallRow
 
 # Backwards-compat alias: ``app/api/overview.py`` imported ``_load_and_rank`` from
 # here. Keep the name reachable so the overview route (and any ad-hoc importer)

@@ -18,7 +18,6 @@ from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source
 from app.integrations.adapters.loadboard.paste import PasteSource
 from app.integrations.adapters.loadboard.truckstop import TruckstopSource
 
-
 _DRIVER_ATTR = {
     "dat": "loads_dat_driver",
     "chr": "loads_chr_driver",
