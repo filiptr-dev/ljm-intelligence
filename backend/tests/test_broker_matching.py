@@ -6,7 +6,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
@@ -78,8 +78,8 @@ async def test_api_path_sets_link(sm):
 
 
 async def test_inbox_path_sets_link(sm):
-    from types import SimpleNamespace
     from datetime import UTC, datetime
+    from types import SimpleNamespace
 
     from app.inbox.triage import _upsert_load_from_offer
 

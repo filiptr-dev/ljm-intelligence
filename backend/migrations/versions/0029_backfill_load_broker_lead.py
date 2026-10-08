@@ -26,9 +26,24 @@ down_revision: str | None = "0028"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Copy of app.prospecting.pipeline.shipper_merge.FREE_MAIL_DOMAINS (frozen at 0029).
 _FREE = frozenset(
-    "gmail.com googlemail.com yahoo.com yahoo.co.uk hotmail.com outlook.com live.com "
-    "msn.com aol.com icloud.com me.com mac.com protonmail.com proton.me".split()
+    {
+        "gmail.com",
+        "googlemail.com",
+        "yahoo.com",
+        "yahoo.co.uk",
+        "hotmail.com",
+        "outlook.com",
+        "live.com",
+        "msn.com",
+        "aol.com",
+        "icloud.com",
+        "me.com",
+        "mac.com",
+        "protonmail.com",
+        "proton.me",
+    }
 )
 _SUFFIXES = frozenset({"llc", "inc", "corp", "co", "ltd"})
 
@@ -47,7 +62,7 @@ def backfill(bind) -> int:
         if email:
             by_email[email.strip().lower()].append(lid)
         if domain:
-            by_domain[domain.strip().lower()].append(lid)
+            by_domain[domain].append(lid)
         if _norm(name):
             by_name[_norm(name)].append(lid)
         if phone:
@@ -63,7 +78,7 @@ def backfill(bind) -> int:
     n = 0
     for load_id, email, phone, name in rows:
         e = email.strip().lower() if email else ""
-        dom = e.rsplit("@", 1)[1] if "@" in e else ""
+        dom = e.rsplit("@", 1)[1].strip().removeprefix("www.") if "@" in e else ""
         if dom in _FREE:
             dom = ""
         lid = one(by_email, e) or one(by_domain, dom) or one(by_name, _norm(name)) or one(by_phone, phone)

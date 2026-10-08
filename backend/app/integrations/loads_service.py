@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.identity.models import SettingsRow
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 from app.integrations.adapters.loadboard.registry import all_sources, by_kind, enabled_sources
-from app.prospecting.models import Lead, Load
+from app.prospecting.models import Load
 
 log = logging.getLogger(__name__)
 
