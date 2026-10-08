@@ -26,6 +26,19 @@ import { readSessionCookie } from "@/lib/auth/bff"
 const BACKEND = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765"
 
 export const dynamic = "force-dynamic"
+// Vercel caps Hobby/Pro function duration; our upstream (Render free) can
+// cold-start for 30–60s, so give this route the max we're allowed and
+// bound the upstream fetch inside that budget.
+export const maxDuration = 60
+
+// Keep the upstream fetch inside the function budget. 55s leaves a few
+// seconds of slack before Vercel kills the invocation so we can return a
+// clean 504 instead of a terminated connection.
+const UPSTREAM_TIMEOUT_MS = 55_000
+// A single short probe is enough to nudge Render out of sleep; we don't
+// care about the response — just the side-effect of waking the dyno. The
+// daily-crawl workflow uses the same pattern.
+const WARMUP_TIMEOUT_MS = 3_000
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -69,9 +82,26 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
   // we attach the secret here so an island can call `api.POST("/crawl/run")`
   // through the generic proxy without the UI ever learning the secret.
   const joinedPath = (path || []).join("/")
-  if (joinedPath === "crawl/run" && method === "POST") {
+  const isCrawlRun = joinedPath === "crawl/run" && method === "POST"
+  if (isCrawlRun) {
     const cronSecret = process.env.CRON_SECRET || ""
     if (cronSecret) headers.set("x-cron-secret", cronSecret)
+
+    // Best-effort warm-up for Render free-tier cold starts. The dyno can
+    // take 30–60s to come back from sleep; firing the actual POST at a
+    // cold instance exceeds the function budget and the UI silently falls
+    // back to Simulated. Hit /health first (same trick the daily-crawl
+    // workflow uses) so the real request lands on a warm instance.
+    try {
+      await fetch(`${BACKEND.replace(/\/$/, "")}/health`, {
+        method: "GET",
+        signal: AbortSignal.timeout(WARMUP_TIMEOUT_MS),
+        cache: "no-store",
+      })
+    } catch {
+      // Ignore — this is best-effort. If the warm-up fails the main
+      // request's own timeout + error handling will surface the state.
+    }
   }
   const init: RequestInit = { method, headers, cache: "no-store" }
   if (method !== "GET" && method !== "HEAD") {
@@ -81,11 +111,25 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
     // without it but Node 20+ accepts the flag.
   }
 
+  // Bound the upstream fetch so a slow cold start becomes a clean 504
+  // we can toast on, not a terminated Vercel function returning HTML.
+  const controller = new AbortController()
+  const abortTimer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   let upstream: Response
   try {
-    upstream = await fetch(target, init)
+    upstream = await fetch(target, { ...init, signal: controller.signal })
   } catch (e) {
+    const err = e as { name?: string } | null
+    const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError"
+    if (isTimeout) {
+      return Response.json(
+        { detail: "backend waking up, try again" },
+        { status: 504 },
+      )
+    }
     return Response.json({ detail: "backend unreachable", error: String(e) }, { status: 502 })
+  } finally {
+    clearTimeout(abortTimer)
   }
 
   const outHeaders = new Headers()

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { toast } from "sonner"
 import { api } from "@/lib/api/client"
 
 /** Poll `/health` through the typed client so the UI can flip a Live/Simulated
@@ -84,9 +85,33 @@ export function useLatestRun(pollMs = 4000) {
         // `limit` omitted = the paginator's own caps (same as the daily cron)
         { params: { query: limit === undefined ? { trigger: "on_demand" } : { trigger: "on_demand", limit } } },
       )
+      if (!resp.response.ok) {
+        // Surface the backend-waking vs real-error distinction the proxy
+        // encodes in the status + detail. Up to now this silently returned
+        // null and the UI fell back to Simulated with no explanation.
+        const status = resp.response.status
+        const detail =
+          (resp.error as { detail?: string } | undefined)?.detail
+          ?? (status === 504
+            ? "backend waking up, try again"
+            : status === 502
+              ? "backend unreachable"
+              : `request failed (${status})`)
+        toast.error(`Crawl didn't start — ${detail}`)
+        return null
+      }
       await fetchLatest()
       const data = resp.data as { job_id?: number | null } | undefined
       return data?.job_id ?? null
+    } catch (e) {
+      // Network-layer / aborted fetch. Still better than a silent slip to
+      // Simulated — tell the operator a real request failed.
+      toast.error(
+        `Crawl didn't start — ${
+          (e as { message?: string } | null)?.message || "network error"
+        }`,
+      )
+      return null
     } finally {
       setRunning(false)
     }
