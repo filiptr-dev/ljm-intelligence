@@ -409,6 +409,16 @@ if _PG_HARNESS:
 
 
 @pytest.fixture(autouse=True)
+def _reset_kpi_cache():
+    """The 60s in-process KPI cache would leak results between tests that
+    reuse the same lead ids."""
+    from app.analysis.kpi_service import CACHE
+
+    CACHE._store.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_login_rate_limiter():
     """Tests hammer `/auth/login` repeatedly; S0.5's in-process sliding
     window would otherwise bleed state across tests and 429 the next one.

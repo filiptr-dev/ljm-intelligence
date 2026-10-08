@@ -303,3 +303,20 @@ async def test_csv_export_streams_segment(client):
     assert len(data) == len(header)
     # name is the 2nd column (index 1); must be the escaped form.
     assert data[1] == "'=SUM(1+1)"
+
+
+async def test_overview_metrics_second_call_hits_cache(client: AsyncClient):
+    """Second call within the TTL must not open a DB session."""
+    sm = client._sm  # type: ignore[attr-defined]
+    async with sm() as s:
+        s.add(Lead(id="L-cache", name="Cache Co", kind="Broker", state="NJ"))
+        await s.commit()
+
+    first = await get_overview_metrics(sm, ["L-cache"])
+    assert "L-cache" in first
+
+    def _boom():
+        raise AssertionError("second call re-queried the DB")
+
+    second = await get_overview_metrics(_boom, ["L-cache"])
+    assert second == first

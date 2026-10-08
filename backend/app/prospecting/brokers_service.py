@@ -897,6 +897,32 @@ async def get_overview_metrics(
     if not lead_ids:
         return {}
 
+    # 60s per-tenant cache (the kpi_service _Cache). Segment depends on the
+    # caller-supplied inputs, so they are part of the key.
+    import hashlib
+
+    from app.analysis.kpi_service import CACHE as _cache
+    from app.shared.tenant import current_tenant
+
+    try:
+        tenant = str(current_tenant())
+    except RuntimeError:  # outside a request/uow scope (direct service calls)
+        tenant = "default"
+    variant = hashlib.sha1(
+        repr((
+            sorted(lead_ids),
+            sorted((k, repr(v)) for k, v in (action_by_lead or {}).items()),
+            sorted(
+                (k, (v.outcome, str(v.logged_at)) if v else None)
+                for k, v in (latest_call_by_lead or {}).items()
+            ),
+            sorted((k, str(v)) for k, v in (last_activity_by_lead or {}).items()),
+        )).encode()
+    ).hexdigest()
+    cached = await _cache.get(tenant, "brokers_overview", variant)
+    if cached is not None:
+        return cached
+
     now = _now()
     year_cutoff = now - timedelta(days=WIN_RATE_WINDOW_DAYS)
     thirty_cutoff = now - timedelta(days=VOLUME_WINDOW_DAYS)
@@ -1160,6 +1186,7 @@ async def get_overview_metrics(
             days_since_last_contact=days_since,
             segment=segment,
         )
+    await _cache.set(tenant, "brokers_overview", variant, result)
     return result
 
 
