@@ -227,6 +227,14 @@ class SettingsRow(Base):
     # Nullable so an older row that pre-dates the migration still reads clean;
     # the key helper writes one on first use (mirror of auth_jwt_secret).
     cred_key: Mapped[str | None] = mapped_column(String(64))
+    # Agent global kill switch (migration 0027). ``'off'`` | ``'on'``. Env
+    # ``LOADS_AGENT_KILL=1`` still wins when set — this column is the DB-backed
+    # fallback so the operator can disable every headless-agent source from the
+    # Settings page without a Render redeploy. Server default ``'off'`` so a
+    # pre-existing row keeps running.
+    loads_agent_kill: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="off", server_default=text("'off'")
+    )
 
 
 class User(TenantMixin, Base):

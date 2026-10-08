@@ -41,6 +41,7 @@ import {
 import { api } from "@/lib/api/client"
 import { AiProvidersPanel } from "./ai-providers-panel"
 import { ConnectorsPanel } from "./connectors-panel"
+import { LoadboardsPanel } from "./loadboards-panel"
 
 type FitWeights = Record<string, number>
 
@@ -438,6 +439,7 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
         <div className="space-y-4 xl:sticky xl:top-20 xl:self-start">
           <AiProvidersPanel />
           <ConnectorsPanel />
+          <LoadboardsPanel />
           <Panel title="How this works">
             <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground marker:text-safety">
               <li>The crawler finds new brokers/shippers every day at 3 PM ET.</li>
