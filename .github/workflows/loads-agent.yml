@@ -23,13 +23,14 @@ concurrency:
 
 jobs:
   run:
-    if: github.event.inputs.source == '' || github.event.inputs.source == matrix.src
     runs-on: ubuntu-latest
     timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
-        src: [dat, truckstop, loadboard123, chr, broker_page]
+        # Manual run with a source → just that one; cron / empty input → all five.
+        # (A job-level `if:` can't read `matrix`, so the filter lives in the matrix itself.)
+        src: ${{ fromJSON(github.event.inputs.source && format('["{0}"]', github.event.inputs.source) || '["dat","truckstop","loadboard123","chr","broker_page"]') }}
     steps:
       - uses: actions/checkout@v4
 
