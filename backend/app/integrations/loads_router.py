@@ -7,7 +7,7 @@ Reads come under ``user_only``. The ``refresh-all`` cron endpoint accepts
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
@@ -348,7 +348,7 @@ async def set_session_blob(
     from app.shared.orm import LJM_TENANT_ID
     from app.shared.tenant import TenantId
 
-    saved_at = datetime.utcnow().isoformat()
+    saved_at = datetime.now(UTC).isoformat()
     async with request.app.state.sessionmaker() as s:
         try:
             vault = await CredentialVault.for_session(s)

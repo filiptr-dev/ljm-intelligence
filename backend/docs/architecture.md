@@ -245,3 +245,5 @@ next pass has a scope that fits a reasonable budget:
     stdlib-only); Sentry init.
 13. procrastinate worker + `jobs.py` wrapper + same-transaction
     dispatch. Needs the service extraction above.
+
+Note: the vault key bootstrap assumes a single process (Render, 1 worker); multiple workers would race on first-time key creation.

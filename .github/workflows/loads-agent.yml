@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   run:
+    if: github.event.inputs.source == '' || github.event.inputs.source == matrix.src
     runs-on: ubuntu-latest
     timeout-minutes: 8
     strategy:

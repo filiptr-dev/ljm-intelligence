@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.integrations.adapters.loadboard.agent_browser.login import (
@@ -10,6 +11,9 @@ from app.integrations.adapters.loadboard.agent_browser.login import (
 )
 
 LOGIN_URL = "https://www.123loadboard.com/login"
+
+
+log = logging.getLogger(__name__)
 
 
 async def login(page: Any, credentials: dict) -> dict:
@@ -25,7 +29,7 @@ async def login(page: Any, credentials: dict) -> dict:
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=15000)
     except Exception:
-        pass
+        log.debug("wait_for_load_state timed out, continuing", exc_info=True)
     await default_detect(page)
     return await page.context.storage_state()
 
