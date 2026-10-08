@@ -378,10 +378,62 @@ class Load(TenantMixin, Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     raw: Mapped[dict | None] = mapped_column(JSONType)
+    # Take-it flow (migration 0024). Status is the user-visible lifecycle;
+    # ``broker_lead_id`` links the row back to a known broker when we have
+    # one (same lane posted on dat + inbox collapses to one row and the FK
+    # is attached from the inbox side, which carries the broker email/MC).
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="new", server_default=text("'new'")
+    )
+    status_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    broker_lead_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("leads.id", ondelete="SET NULL")
+    )
+    # Deterministic sha256[:32] of the normalised (broker|o_state|d_state|
+    # pickup::date|equipment) tuple — same inputs → same hash → group URL
+    # survives a re-ingest. Backfilled by migration 0024.
+    dedupe_group_hash: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="", server_default=text("''")
+    )
 
     __table_args__ = (
         Index("loads_source_ref_uq", "source", "source_ref", unique=True),
         Index("loads_pickup_idx", "pickup_date"),
+        Index("loads_dedupe_group_idx", "dedupe_group_hash"),
+        Index("loads_broker_lead_idx", "broker_lead_id"),
+    )
+
+
+class AgentRun(TenantMixin, Base):
+    """Headless-agent run log — one row per run.
+
+    Written by ``agent_browser.driver.AgentSource.fetch`` on every attempt
+    (success *and* failure). The daily cap is a ``COUNT(*)`` filtered by
+    ``source`` + ``started_at::date = today``; we never need to delete, the
+    history is cheap and small.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ok", server_default=text("'ok'")
+    )
+    steps: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("agent_runs_source_started_idx", "source", "started_at"),
+        Index("agent_runs_tenant_started_idx", "tenant_id", "started_at"),
     )
 
 

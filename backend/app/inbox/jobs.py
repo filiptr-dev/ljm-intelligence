@@ -110,9 +110,58 @@ async def retention_sweep(tenant_id: str) -> None:
 
 @app.task(name="inbox.extract_load_from_message", queue="default", pass_context=False)
 async def extract_load_from_message(tenant_id: str, message_id: str) -> None:
-    """Reserved slot — owned by inbox-analysis plan. No-op until that lands."""
+    """Parse a broker email body into zero-or-more loads via the AI seam.
+
+    Owned by [[ljm-intelligence-loads-aggregator-headless-agent-plan]].
+
+    * Loads the ``MailMessage`` by id and feeds its text through the
+      ``inbox_analysis`` provider as JSON.
+    * Each returned row flows through ``loads_service._store_batch``, which
+      attaches a ``broker_lead_id`` via the standard email → phone →
+      (name, origin_state) ladder and stamps the dedupe hash.
+    * Source is ``inbox``, ``source_ref="msg:<id>"`` — the unique index on
+      ``(source, source_ref)`` makes a second call a clean no-op.
+    * NullProvider / missing key → zero rows, zero crash (Gemini optional).
+    """
     _bind(tenant_id)
-    log.debug("inbox.extract_load_from_message: no-op (reserved)")
+    from app.config import get_settings
+    from app.db import create_engine, create_sessionmaker
+    from app.inbox.models import MailMessage
+    from app.integrations.adapters.ai import provider as ai_provider
+    from app.integrations.loads_extract import extract_loads_from_text
+    from app.integrations.loads_service import _store_batch
+    from sqlalchemy import select
+
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        sm = create_sessionmaker(engine)
+        async with sm() as s:
+            row = (
+                await s.execute(select(MailMessage).where(MailMessage.id == message_id))
+            ).scalar_one_or_none()
+        if row is None:
+            log.warning("inbox.extract_load: message %s not found", message_id)
+            return
+        text = (row.body_text or "")[:32000]
+        if not text.strip():
+            return
+        provider = ai_provider.get_for("inbox_analysis", settings=settings)
+        raws = await extract_loads_from_text(
+            provider,
+            text,
+            source="inbox",
+            source_ref=f"msg:{message_id}",
+        )
+        if not raws:
+            return
+        inserted, skipped = await _store_batch(sm, raws)
+        log.info(
+            "inbox.extract_load: %s inserted=%d skipped=%d",
+            message_id, inserted, skipped,
+        )
+    finally:
+        await engine.dispose()
 
 
 @app.task(name="inbox.extract_contact_from_signature", queue="default", pass_context=False)

@@ -158,6 +158,26 @@ class Settings(BaseSettings):
     # Cron shared secret — used from Slice 2 on.
     cron_secret: SecretStr | None = None
 
+    # Loads headless agent — plan 2026-10-08-loads-aggregator-headless-agent.
+    # All default absent-safe (`off` / `0`) so adding them to the env never
+    # blocks boot on existing deployments. Per-source driver vocabulary is
+    # `off | api | agent`; a value outside the enum resolves to `off` in the
+    # driver-switch wrappers.
+    loads_dat_driver: Literal["off", "api", "agent"] = "off"
+    loads_chr_driver: Literal["off", "api", "agent"] = "off"
+    loads_lb123_driver: Literal["off", "api", "agent"] = "off"
+    loads_truckstop_driver: Literal["off", "api", "agent"] = "off"
+    # Global kill — set to "1" to disable every agent-driven source without
+    # unsetting individual driver envs.
+    loads_agent_kill: str = ""
+    # Agent sidecar URL (`navigate` / `read_page` / `scroll` / `wait` /
+    # `finish`). Missing → agent sources short-circuit as disabled.
+    agent_browser_url: str = ""
+    agent_daily_runs_per_source: int = Field(default=48, ge=1, le=1000)
+    agent_max_steps: int = Field(default=20, ge=1, le=200)
+    agent_max_input_tokens: int = Field(default=120000, ge=1000, le=1_000_000)
+    agent_max_output_tokens: int = Field(default=4000, ge=100, le=100_000)
+
     # Queue: in-process drain kick after on-demand user triggers (MF1).
     # On Render free with no worker service, dispatching to the queue and
     # waiting for the 5-minute cron tick is a user-visible regression —

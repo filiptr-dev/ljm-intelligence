@@ -36,6 +36,7 @@ from app.outreach.models import (  # noqa: F401
     Suppression,
 )
 from app.prospecting.models import (  # noqa: F401
+    AgentRun,
     CrawlRun,
     EnrichmentCandidate,
     FitScoreHistory,
@@ -49,6 +50,7 @@ from app.prospecting.models import (  # noqa: F401
 )
 
 __all__ = [
+    "AgentRun",
     "AiUsageLog",
     "BrokerLookalike",
     "BrokerPrediction",

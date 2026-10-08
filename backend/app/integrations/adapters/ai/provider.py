@@ -63,6 +63,11 @@ DEFAULT_FEATURES: dict[str, dict[str, str]] = {
     "lead_scoring": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     "enrichment_extractor": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
     "shipper_discovery": {"provider": "gemini", "model": "gemini-3.5-flash-lite"},
+    # Headless-agent tool loop (plan 2026-10-08-loads-aggregator-headless-agent).
+    # Cheap-flash by default — the loop is step-bounded and the output is
+    # structured (`{"tool":..., "args":...}`), hallucinations show up as
+    # `unknown_tool` errors not silent corruption.
+    "loads_agent": {"provider": "gemini", "model": "gemini-3.5-flash"},
 }
 
 FEATURE_NAMES: tuple[str, ...] = tuple(DEFAULT_FEATURES.keys())
