@@ -43,6 +43,7 @@ export default async function IntelligencePage() {
                   <TableCell>{b.health_score}</TableCell>
                 </TableRow>
               ))}
+              {topBrokers.length === 0 ? <TableRow><TableCell colSpan={3} className="text-sm text-muted-foreground">No broker predictions yet — the nightly analysis runs after your first inbox sync.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -60,6 +61,7 @@ export default async function IntelligencePage() {
                   <TableCell>{l.sample_size}</TableCell>
                 </TableRow>
               ))}
+              {lanes.length === 0 ? <TableRow><TableCell colSpan={5} className="text-sm text-muted-foreground">No lane prices yet — we need at least a few quoted threads before the first p50/p75/p90 lands.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -89,6 +91,7 @@ export default async function IntelligencePage() {
                   <TableCell>{String(b.best_send_hour).padStart(2, "0")}:00</TableCell>
                 </TableRow>
               ))}
+              {bestHours.length === 0 ? <TableRow><TableCell colSpan={2} className="text-sm text-muted-foreground">No send-time patterns yet — we learn this from reply timing once your inbox is analyzed.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -115,6 +118,7 @@ export default async function IntelligencePage() {
                   <TableCell>{b.reply_speed_lift.toFixed(2)}×</TableCell>
                 </TableRow>
               ))}
+              {brokers.length === 0 ? <TableRow><TableCell colSpan={2} className="text-sm text-muted-foreground">No reply-speed lift yet — needs at least one full back-and-forth per broker.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -132,6 +136,7 @@ export default async function IntelligencePage() {
                   <TableCell>{o.count}</TableCell>
                 </TableRow>
               ))}
+              {objections.length === 0 ? <TableRow><TableCell colSpan={3} className="text-sm text-muted-foreground">No objections clustered yet — the nightly analysis buckets these from inbound replies.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -143,6 +148,7 @@ export default async function IntelligencePage() {
               {loss_reasons.map((l) => (
                 <TableRow key={l.reason}><TableCell>{l.reason}</TableCell><TableCell>{l.count}</TableCell></TableRow>
               ))}
+              {loss_reasons.length === 0 ? <TableRow><TableCell colSpan={2} className="text-sm text-muted-foreground">No loss reasons tagged yet.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -159,6 +165,7 @@ export default async function IntelligencePage() {
                   <TableCell>{t.count}</TableCell>
                 </TableRow>
               ))}
+              {thread_age.length === 0 ? <TableRow><TableCell colSpan={4} className="text-sm text-muted-foreground">No thread timings yet — we measure this across your inbound threads.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -173,6 +180,7 @@ export default async function IntelligencePage() {
                   <TableCell>{f.latency_days !== null && f.latency_days !== undefined ? f.latency_days.toFixed(1) : "—"}</TableCell>
                 </TableRow>
               ))}
+              {first_touch.length === 0 ? <TableRow><TableCell colSpan={2} className="text-sm text-muted-foreground">No first-touch latencies yet — needs at least one broker who moved from first contact to first load.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
@@ -180,6 +188,7 @@ export default async function IntelligencePage() {
 
       <div className="mt-5">
         <Panel title="Staff workload heatmap" description="When our team is actually sending (hours × day of week).">
+          {workload.length === 0 ? <p className="text-sm text-muted-foreground">No sends recorded yet — this heatmap fills in once your team starts sending.</p> : null}
           <WorkloadHeatmap cells={workload} />
         </Panel>
       </div>
@@ -192,6 +201,7 @@ export default async function IntelligencePage() {
               {brokers.slice(0, 10).map((b) => (
                 <LookalikesRow key={b.broker_domain} brokerDomain={b.broker_domain} brokerName={b.broker_name} health={b.health_score} />
               ))}
+              {brokers.length === 0 ? <TableRow><TableCell colSpan={3} className="text-sm text-muted-foreground">No broker peers yet — lookalikes fill in after the first nightly analysis.</TableCell></TableRow> : null}
             </TableBody>
           </Table>
         </Panel>
