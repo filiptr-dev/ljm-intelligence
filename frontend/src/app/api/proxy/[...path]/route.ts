@@ -19,6 +19,16 @@
  * Keep this handler stupid: no business logic, no shape rewriting. The
  * typed `openapi-fetch` client on the server + the islands' direct fetches
  * both talk to the same backend contract.
+ *
+ * Stripped on the way back: `set-cookie`, `transfer-encoding` (and the rest
+ * of the hop-by-hop set), plus `content-encoding` and `content-length` —
+ * Node/undici transparently decompresses the upstream body for us (br/gzip),
+ * so the bytes we hand to `new Response(upstream.body, …)` are already
+ * plain. Forwarding the original `content-encoding: br` on a decoded body
+ * makes the browser fail with ERR_CONTENT_DECODING_FAILED, which surfaces
+ * to islands as `TypeError: Failed to fetch`. We also drop the client's
+ * `accept-encoding` on the way UP so upstream is more likely to send
+ * identity, keeping this belt-and-suspenders.
  */
 
 import { readSessionCookie } from "@/lib/auth/bff"
@@ -63,10 +73,20 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
 
   const headers = new Headers()
   // Forward safe request headers; drop host / cookie / authorization and let
-  // us set them.
+  // us set them. Also drop `accept-encoding` — if upstream brotli-compresses
+  // the response, undici decodes it for us but we'd then be left echoing a
+  // `content-encoding: br` header onto a plain body (see response loop
+  // below). Asking upstream for identity sidesteps that mismatch entirely.
   for (const [k, v] of req.headers.entries()) {
     const lk = k.toLowerCase()
-    if (lk === "host" || lk === "cookie" || lk === "authorization" || HOP_BY_HOP.has(lk)) continue
+    if (
+      lk === "host" ||
+      lk === "cookie" ||
+      lk === "authorization" ||
+      lk === "accept-encoding" ||
+      HOP_BY_HOP.has(lk)
+    )
+      continue
     headers.set(k, v)
   }
   headers.set("authorization", `Bearer ${token}`)
@@ -134,7 +154,14 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
 
   const outHeaders = new Headers()
   for (const [k, v] of upstream.headers.entries()) {
-    if (HOP_BY_HOP.has(k.toLowerCase())) continue
+    const lk = k.toLowerCase()
+    // undici decompresses the upstream body for us, so `content-encoding`
+    // and the upstream `content-length` no longer describe the bytes we're
+    // about to send. Echoing them makes the browser try to br/gzip-decode a
+    // plain body → ERR_CONTENT_DECODING_FAILED → `TypeError: Failed to
+    // fetch` on the island. Let the runtime recompute the length.
+    if (lk === "content-encoding" || lk === "content-length") continue
+    if (HOP_BY_HOP.has(lk)) continue
     outHeaders.set(k, v)
   }
   return new Response(upstream.body, { status: upstream.status, headers: outHeaders })
