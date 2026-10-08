@@ -19,8 +19,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._auth import verify_unsubscribe_token  # noqa: F401 — kept for back-compat re-exports
-from app.lib.tokens import verify_any_unsubscribe_token
+from app.shared.cron_auth import verify_unsubscribe_token  # noqa: F401 — kept for back-compat re-exports
+from app.shared.tokens import verify_any_unsubscribe_token
 from app.models import (
     EnrichmentCandidate,
     Lead,

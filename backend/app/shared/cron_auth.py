@@ -23,7 +23,7 @@ import logging
 from fastapi import HTTPException
 
 from app.config import Settings
-from app.lib.tokens import sign_unsubscribe_token, verify_unsubscribe_token
+from app.shared.tokens import sign_unsubscribe_token, verify_unsubscribe_token
 
 __all__ = ["check_secret", "sign_unsubscribe_token", "verify_unsubscribe_token"]
 

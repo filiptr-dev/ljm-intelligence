@@ -13,7 +13,7 @@ import pytest
 from pydantic import SecretStr
 
 from app.config import Settings
-from app.lib.circuit_breaker import CircuitBreaker
+from app.shared.circuit_breaker import CircuitBreaker
 from app.integrations.adapters.loadboard.chr import ChrSource
 from app.integrations.adapters.loadboard.dat import DatSource
 from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source

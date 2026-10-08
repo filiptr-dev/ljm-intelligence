@@ -23,7 +23,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Header, Request
 from pydantic import BaseModel, EmailStr, Field
 
-from app.api._auth import check_secret
+from app.shared.cron_auth import check_secret
 from app.config import Settings
 from app.integrations.mail_service import (
     backfill as svc_backfill,
@@ -170,7 +170,7 @@ async def backfill(
         months=payload.months,
     )
     if job_id is not None:
-        from app.api.jobs import kick_in_process_drain
+        from app.integrations.jobs_router import kick_in_process_drain
         background.add_task(
             kick_in_process_drain, request.app.state.sessionmaker, settings,
             seconds=settings.jobs_in_process_kick_seconds,
@@ -209,7 +209,7 @@ async def incremental(
         mailbox=str(payload.mailbox) if payload.mailbox else None,
     )
     if job_id is not None:
-        from app.api.jobs import kick_in_process_drain
+        from app.integrations.jobs_router import kick_in_process_drain
         background.add_task(
             kick_in_process_drain, request.app.state.sessionmaker, settings,
             seconds=settings.jobs_in_process_kick_seconds,

@@ -23,7 +23,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from app.api._auth import check_secret
+from app.shared.cron_auth import check_secret
 from app.config import Settings
 
 log = logging.getLogger(__name__)

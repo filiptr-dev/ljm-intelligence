@@ -20,7 +20,7 @@ from app.pipeline.shipper_ingest import (
     ingest_osm_incomings,
     project_fmcsa_shippers_to_candidates,
 )
-from app.region import IN_REGION_STATES, in_region
+from app.shared.region import IN_REGION_STATES, in_region
 from app.sources.emails import add_contact_email
 from app.integrations.adapters.enrichment.fmcsa import fetch_fmcsa
 from app.sources.osm_overpass import elements_to_incomings, fetch_overpass_elements

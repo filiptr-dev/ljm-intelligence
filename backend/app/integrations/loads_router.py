@@ -13,7 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.api._auth import check_secret
+from app.shared.cron_auth import check_secret
 from app.config import Settings
 from app.integrations.loads_service import (
     UnknownSourceError,
@@ -192,7 +192,7 @@ async def refresh_all(
         source_kind=None,
     )
     if job_id is not None:
-        from app.api.jobs import kick_in_process_drain
+        from app.integrations.jobs_router import kick_in_process_drain
         background.add_task(
             kick_in_process_drain, request.app.state.sessionmaker, settings,
             seconds=settings.jobs_in_process_kick_seconds,

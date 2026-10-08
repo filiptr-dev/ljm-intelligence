@@ -60,7 +60,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 from app.models import CallOutcome, CapacityPost, ShipperCandidate
-from app.region import IN_REGION_STATES
+from app.shared.region import IN_REGION_STATES
 
 # Hard cap on server-side page size — Slice 3 will read this in the cursor pagination path
 # so the ranker and the route never disagree on what "one page" means.

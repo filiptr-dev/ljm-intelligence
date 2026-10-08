@@ -25,7 +25,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Re
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from app.api._auth import check_secret
+from app.shared.cron_auth import check_secret
 from app.config import Settings
 from app.integrations.enrichment_service import (
     InvalidUnsubscribeTokenError,
@@ -278,7 +278,7 @@ async def auto_send(
         dry_run=body.dry_run,
     )
     if job_id is not None:
-        from app.api.jobs import kick_in_process_drain
+        from app.integrations.jobs_router import kick_in_process_drain
         background.add_task(
             kick_in_process_drain, request.app.state.sessionmaker, settings,
             seconds=settings.jobs_in_process_kick_seconds,
@@ -289,73 +289,3 @@ async def auto_send(
         )
 
     return await _auto_send_impl(request, body)
-
-
-# ---------- public unsubscribe --------------------------------------------
-
-
-class UnsubscribeOut(BaseModel):
-    ok: bool
-    email: str | None
-    already: bool
-
-
-unsub_router = APIRouter(tags=["unsubscribe"])
-
-
-async def _verify_or_400(request: Request, token: str):
-    """Return the verified :class:`UnsubscribeTarget` or raise 400."""
-    try:
-        return await svc_verify_token(
-            request.app.state.sessionmaker, request.app.state.settings, token
-        )
-    except UnsubscribeConfigError as exc:
-        raise HTTPException(400, "unsubscribe not configured") from exc
-    except InvalidUnsubscribeTokenError as exc:
-        raise HTTPException(400, "invalid unsubscribe token") from exc
-
-
-@unsub_router.get("/unsubscribe", response_class=HTMLResponse)
-async def unsubscribe_confirm_page(request: Request, t: str = Query(..., min_length=1)) -> HTMLResponse:
-    """GET renders a confirm page — NEVER mutates.
-
-    Email security scanners (Microsoft Safe Links, Google, Proofpoint) auto-fetch
-    every URL in every outbound email. If GET mutated, one scanned inbox would
-    unsubscribe the recipient before they read the message. Confirm-then-POST is
-    the CAN-SPAM one-click contract (RFC 8058); we honor it.
-    """
-    _ = await _verify_or_400(request, t)
-    # Escape the token before echoing it back into HTML. Even though
-    # `_verify_or_400` has already verified the token signature, the raw
-    # string can still contain ``<``/``>`` characters that would break out
-    # of the attribute context on a malformed input — defence in depth.
-    import html as _htmllib
-
-    t_safe = _htmllib.escape(t, quote=True)
-    html = (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<title>Unsubscribe — LJM International</title>"
-        "<meta name='robots' content='noindex,nofollow'>"
-        "</head><body style='font-family:system-ui;max-width:32rem;margin:4rem auto;padding:1rem'>"
-        "<h1>Unsubscribe from LJM International outreach</h1>"
-        "<p>Click the button below to stop all future emails to this address.</p>"
-        f"<form method='POST' action='/unsubscribe?t={t_safe}'>"
-        "<button type='submit' style='padding:0.75rem 1.5rem;font-size:1rem;"
-        "background:#0a0a0a;color:#fff;border:0;border-radius:4px'>Confirm unsubscribe</button>"
-        "</form>"
-        "</body></html>"
-    )
-    return HTMLResponse(html)
-
-
-@unsub_router.post("/unsubscribe", response_model=UnsubscribeOut)
-async def unsubscribe_post(request: Request, t: str = Query(..., min_length=1)) -> UnsubscribeOut:
-    """POST performs the suppression. Same route also accepts RFC 8058
-    ``List-Unsubscribe=One-Click`` payloads via ``?t=<token>`` on the query
-    string. Invalid / forged token → 400 with zero side effects."""
-    target = await _verify_or_400(request, t)
-    try:
-        result = await svc_apply_unsubscribe(request.app.state.sessionmaker, target)
-    except NotFoundError as exc:
-        raise HTTPException(404, "contact not found") from exc
-    return UnsubscribeOut(ok=result.ok, email=result.email, already=result.already)

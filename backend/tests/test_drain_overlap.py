@@ -107,7 +107,7 @@ async def pg_sm():
 @pg_only
 @pytest.mark.asyncio
 async def test_overlapping_drains_never_raise_and_second_skips(pg_sm) -> None:
-    from app.api.jobs import _drain_once
+    from app.integrations.jobs_router import _drain_once
     from app.shared.queue import app as queue_app, dispatch
 
     if "tests.slow_noop" not in queue_app.tasks:
@@ -138,7 +138,7 @@ async def test_overlapping_drains_never_raise_and_second_skips(pg_sm) -> None:
 @pg_only
 @pytest.mark.asyncio
 async def test_drain_skips_when_another_process_holds_the_lock(pg_sm) -> None:
-    from app.api.jobs import _drain_once
+    from app.integrations.jobs_router import _drain_once
 
     async with pg_sm() as other:
         await other.execute(text("SELECT pg_advisory_xact_lock(hashtext('jobs.drain'))"))
@@ -151,7 +151,7 @@ async def test_drain_skips_when_another_process_holds_the_lock(pg_sm) -> None:
 @pg_only
 @pytest.mark.asyncio
 async def test_stalled_doing_job_is_failed_and_crawl_run_closed(pg_sm) -> None:
-    from app.api.jobs import _drain_once
+    from app.integrations.jobs_router import _drain_once
     from app.shared.queue import dispatch
 
     async with pg_sm() as s:

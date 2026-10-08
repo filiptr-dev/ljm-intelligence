@@ -361,7 +361,7 @@ async def test_every_sent_email_has_footer_from_fixed_base_never_request_host(sm
 
 async def test_sender_gets_footer_and_list_unsubscribe_headers(sm, app):
     """The real sender always receives the footer + RFC 8058 headers."""
-    from app.api.enrichment import AutoSendIn, _auto_send_impl
+    from app.prospecting.enrichment_router import AutoSendIn, _auto_send_impl
 
     app.state.settings = _hermetic_settings(unsubscribe_base_url="https://env-override.example/")
     await _arm_with_one_contact(sm)

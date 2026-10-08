@@ -34,7 +34,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.region import IN_REGION_STATES
+from app.shared.region import IN_REGION_STATES
 from app.sources.emails import normalize_email
 
 log = logging.getLogger(__name__)

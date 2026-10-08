@@ -726,7 +726,7 @@ async def test_unsubscribe_get_does_not_mutate(sm, client):
     mutated, one scanned inbox would unsubscribe the recipient before they
     read the message. Confirm-then-POST is the CAN-SPAM one-click contract
     (RFC 8058); we honor it."""
-    from app.api._auth import sign_unsubscribe_token
+    from app.shared.cron_auth import sign_unsubscribe_token
 
     async with sm() as s:
         s.add(Lead(id="MC-UN-G", name="U", kind="Shipper", state="NJ", raw={}, evidence={}, recommendations=[]))
@@ -751,7 +751,7 @@ async def test_unsubscribe_get_does_not_mutate(sm, client):
 
 
 async def test_unsubscribe_post_with_valid_token_suppresses(sm, client):
-    from app.api._auth import sign_unsubscribe_token
+    from app.shared.cron_auth import sign_unsubscribe_token
 
     async with sm() as s:
         s.add(Lead(id="MC-UN-P", name="U", kind="Shipper", state="NJ", raw={}, evidence={}, recommendations=[]))
@@ -871,7 +871,7 @@ async def test_unsubscribe_get_escapes_token_in_form_action(sm, client):
     characters that need escaping if the signing path ever widens; this
     test pins the defence-in-depth escape.
     """
-    from app.api._auth import sign_unsubscribe_token
+    from app.shared.cron_auth import sign_unsubscribe_token
 
     async with sm() as s:
         s.add(Lead(id="MC-UN-E", name="U", kind="Shipper", state="NJ", raw={}, evidence={}, recommendations=[]))

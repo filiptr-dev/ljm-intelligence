@@ -197,24 +197,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from fastapi import Depends
 
-    from app.analysis.router import router as analysis_router
-    from app.api.ai import router as ai_router
-    from app.api.auth import router as auth_router
-    from app.api.brokers import router as brokers_router
-    from app.api.call_list import router as call_list_router
-    from app.api.capacity import router as capacity_router
-    from app.api.crawl import router as crawl_router
-    from app.api.email import router as email_router
-    from app.api.enrichment import router as enrichment_router
-    from app.api.enrichment import unsub_router as unsubscribe_router
-    from app.api.leads import router as leads_router
-    from app.api.loads import router as loads_router
-    from app.api.mail import cron_router as mail_cron_router
-    from app.api.mail import router as mail_router
-    from app.api.overview import router as overview_router
-    from app.api.settings import router as settings_router
-    from app.api.shipper_finder import router as shipper_finder_router
-    from app.auth.deps import current_user, require_user_or_cron
+    # 2026-10-08 onion/SOLID refactor: former `app/api/*.py` files folded into
+    # their owning modules as `<topic>_router.py`; per-module `router.py` is a
+    # thin aggregator (lint-imports contracts 1/2 are enforced on those).
+    # Each sub-router is mounted here with its own deps because deps differ
+    # per route group (user_only vs user_or_cron vs open unsubscribe).
+    from app.analysis.ai_router import router as ai_router
+    from app.analysis.analysis_router import router as analysis_router
+    from app.analysis.overview_router import router as overview_router
+    from app.identity.auth.deps import current_user, require_user_or_cron
+    from app.identity.auth_router import router as auth_router
+    from app.identity.settings_router import router as settings_router
+    from app.integrations.loads_router import router as loads_router
+    from app.outreach.call_list_router import router as call_list_router
+    from app.outreach.capacity_router import router as capacity_router
+    from app.outreach.email_router import router as email_router
+    from app.outreach.unsub_router import unsub_router as unsubscribe_router
+    from app.prospecting.brokers_router import router as brokers_router
+    from app.prospecting.crawl_router import router as crawl_router
+    from app.prospecting.enrichment_router import router as enrichment_router
+    from app.prospecting.leads_router import router as leads_router
+    from app.prospecting.shipper_finder_router import router as shipper_finder_router
+    from app.inbox.mail_router import cron_router as mail_cron_router
+    from app.inbox.mail_router import router as mail_router
 
     # ``require_user_or_cron`` fronts routers that mix user-facing GETs with
     # the two cron-triggered writes (``/crawl/run``, ``/enrichment/auto-send``)
@@ -237,7 +242,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # already run under the admin sentinel in `uow_admin()` and bind the
     # tenant inside the service when they need it.
     from app.identity.dependencies import current_tenant
-    from app.inbox.router import router as inbox_router
+    from app.inbox.inbox_router import router as inbox_router
 
     user_or_cron = [Depends(require_user_or_cron)]
     user_only = [Depends(current_user), Depends(current_tenant)]
@@ -271,8 +276,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # `/admin/jobs` is user-only. The drain route also re-checks the cron
     # secret inside its handler so a bare bearer-less request can't trigger
     # a worker tick.
-    from app.api.jobs import admin_router as jobs_admin_router
-    from app.api.jobs import router as jobs_router
+    from app.integrations.jobs_router import admin_router as jobs_admin_router
+    from app.integrations.jobs_router import router as jobs_router
 
     app.include_router(jobs_router, dependencies=user_or_cron)
     app.include_router(jobs_admin_router, dependencies=user_only)

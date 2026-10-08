@@ -18,7 +18,7 @@ from datetime import datetime
 import httpx
 
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
-from app.lib.circuit_breaker import CircuitBreaker
+from app.shared.circuit_breaker import CircuitBreaker
 
 log = logging.getLogger(__name__)
 

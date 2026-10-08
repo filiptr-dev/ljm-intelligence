@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings
 from app.models import Lead, LeadSource, Score
-from app.region import in_region
+from app.shared.region import in_region
 from app.integrations.adapters.ai.gemini_score import GeminiScorer
 from app.sources.emails import add_contact_email
 from app.sources.gemini_search import GeminiDiscoverer

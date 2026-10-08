@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from pydantic import SecretStr
 
-from app.region import IN_REGION_STATES
+from app.shared.region import IN_REGION_STATES
 from app.sources.emails import normalize_email
 from app.integrations.adapters.ai.provider import GeminiProvider, LLMProvider, NullProvider
 

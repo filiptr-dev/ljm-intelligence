@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from app.config import Settings
-from app.lib.tokens import sign_unsubscribe_email_token, sign_unsubscribe_token
+from app.shared.tokens import sign_unsubscribe_email_token, sign_unsubscribe_token
 
 
 class _HasSecret(Protocol):

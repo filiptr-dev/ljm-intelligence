@@ -46,7 +46,7 @@ from app.models import (
     ShipperCandidate,
 )
 from app.pipeline.shipper_merge import normalize_name
-from app.region import IN_REGION_STATES
+from app.shared.region import IN_REGION_STATES
 from app.scoring.fit_score import DEFAULT_WEIGHTS, build_signals, compute_fit
 from app.sources.emails import normalize_email
 from app.sources.fetcher import Fetcher, HttpxTrafilaturaFetcher

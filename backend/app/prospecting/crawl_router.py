@@ -38,7 +38,7 @@ class CrawlRunOut(BaseModel):
     error: str | None = None
 
 
-from app.api._auth import check_secret as _check_secret  # re-export for backward compat
+from app.shared.cron_auth import check_secret as _check_secret  # re-export for backward compat
 
 
 @router.post("/run", status_code=202)
@@ -98,7 +98,7 @@ async def start_run(
         # not minutes (the GH-Actions cron fires every 5 min). The advisory
         # lock on hashtext('jobs.drain') serialises this with any concurrent
         # cron tick; the loser no-ops.
-        from app.api.jobs import kick_in_process_drain
+        from app.integrations.jobs_router import kick_in_process_drain
         background.add_task(
             kick_in_process_drain, sessionmaker, settings,
             seconds=settings.jobs_in_process_kick_seconds,

@@ -35,7 +35,7 @@ from pathlib import Path
 import httpx
 
 from app.pipeline.shipper_merge import IncomingCandidate
-from app.region import bbox_for_state
+from app.shared.region import bbox_for_state
 
 log = logging.getLogger(__name__)
 
