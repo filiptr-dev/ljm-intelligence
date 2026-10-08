@@ -95,6 +95,11 @@ export type SingleEmailBuilderProps = {
    * keeps the client-side simulated path.
    */
   onSend?: EmailSendAdapter
+  /**
+   * Called after any completed send (incl. scheduled). Lets a modal host close
+   * itself, since `router.push(backHref)` is a no-op when already on that page.
+   */
+  onDone?: () => void
   /** Starting design — defaults to engine's `DEFAULT_DESIGN`. */
   defaultDesign?: EmailDesign
   /** Default tone — defaults to "friendly" (unchanged from before). */
@@ -104,7 +109,7 @@ export type SingleEmailBuilderProps = {
 export function SingleEmailBuilder({
   contacts, initialToId, initialPurpose, backHref, backLabel,
   initialRecipient, initialSubject, initialBody,
-  onSend, defaultDesign, defaultTone,
+  onSend, onDone, defaultDesign, defaultTone,
 }: SingleEmailBuilderProps) {
   const router = useRouter()
   const { sendEmail } = useEngine()
@@ -257,6 +262,7 @@ export function SingleEmailBuilder({
       description: when === "now" ? "You'll see when it's opened and what they reply." : "Scheduled send is simulated until the queue backend lands.",
     })
     router.push(backHref)
+    onDone?.()
   }
 
   const recipients = to ? [to as Recipient] : []

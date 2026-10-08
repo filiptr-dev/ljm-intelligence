@@ -375,6 +375,7 @@ export function LoadsBoard() {
               initialSubject={compose.subject}
               initialBody={compose.body}
               onSend={composeAdapter}
+              onDone={() => setCompose(null)}
             />
           </div>
         </div>
