@@ -922,7 +922,8 @@ async def get_overview_metrics(
     ).hexdigest()
     cached = await _cache.get(tenant, "brokers_overview", variant)
     if cached is not None:
-        return cached
+        # Hand back a copy so callers can't mutate the cached dict.
+        return dict(cached)
 
     now = _now()
     year_cutoff = now - timedelta(days=WIN_RATE_WINDOW_DAYS)
@@ -1199,7 +1200,7 @@ async def get_overview_metrics(
             segment=segment,
             revenue_usd=revenue_by_lead.get(lid, 0.0),
         )
-    await _cache.set(tenant, "brokers_overview", variant, result)
+    await _cache.set(tenant, "brokers_overview", variant, dict(result))
     return result
 
 

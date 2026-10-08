@@ -277,6 +277,17 @@ async def set_group_status(
             .values(status=status, status_at=now)
         )
         count = int(result.rowcount or 0)
+    if count:
+        # Broker overview revenue counts booked loads; drop the cached metrics
+        # so a status flip shows immediately instead of after the 60s TTL.
+        from app.analysis.kpi_service import bump_cache_key
+        from app.shared.tenant import current_tenant
+
+        try:
+            tenant = str(current_tenant())
+        except RuntimeError:
+            tenant = "default"
+        bump_cache_key(tenant, "brokers_overview")
     return count
 
 

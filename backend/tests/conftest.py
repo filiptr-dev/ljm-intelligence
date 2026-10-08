@@ -96,12 +96,11 @@ def _reset_pg16_schema(url: str) -> None:
     import psycopg
 
     sync_url = url.replace("postgresql+psycopg://", "postgresql://")
-    with psycopg.connect(sync_url, autocommit=True) as conn:
-        with conn.cursor() as cur:
-            # test_tenancy_isolation leaves app_user behind; drop OWNED first
-            # so DROP ROLE doesn't fail on dependent privileges.
-            cur.execute(
-                """
+    with psycopg.connect(sync_url, autocommit=True) as conn, conn.cursor() as cur:
+        # test_tenancy_isolation leaves app_user behind; drop OWNED first
+        # so DROP ROLE doesn't fail on dependent privileges.
+        cur.execute(
+            """
                 DO $$
                 BEGIN
                   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='app_user') THEN
@@ -110,10 +109,10 @@ def _reset_pg16_schema(url: str) -> None:
                   END IF;
                 END $$;
                 """
-            )
-            cur.execute("DROP SCHEMA public CASCADE")
-            cur.execute("CREATE SCHEMA public")
-            cur.execute("GRANT ALL ON SCHEMA public TO pg")
+        )
+        cur.execute("DROP SCHEMA public CASCADE")
+        cur.execute("CREATE SCHEMA public")
+        cur.execute("GRANT ALL ON SCHEMA public TO pg")
 
     # Alembic upgrade head against the test URL.
     backend_root = Path(__file__).resolve().parent.parent
@@ -327,7 +326,6 @@ _main_mod.create_app = _test_create_app
 
 import pytest
 
-
 if _PG_HARNESS:
     @pytest.fixture
     def _pg_restore_seeds():
@@ -371,41 +369,40 @@ if _PG_HARNESS:
         import psycopg
 
         sync_url = _PG_TEST_URL.replace("postgresql+psycopg://", "postgresql://")
-        with psycopg.connect(sync_url, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                # NOTE: don't touch the app_user role here — tenancy-isolation
-                # tests create and reuse it across their own test cases.
-                # The session-start _reset_pg16_schema already dropped it once
-                # so stale privileges don't survive a prior test session.
-                # Grab every user table in public (skip alembic_version so
-                # upgrade state survives), truncate them all in one shot.
-                # Skip only the LJM organization row + alembic_version.
-                # Everything else — including users and settings — is cleared
-                # between tests; tests that need migration-seeded users/settings
-                # must re-seed inside their own fixture (we provide the
-                # `_pg_restore_seeds` fixture below for that).
-                cur.execute(
-                    """
+        with psycopg.connect(sync_url, autocommit=True) as conn, conn.cursor() as cur:
+            # NOTE: don't touch the app_user role here — tenancy-isolation
+            # tests create and reuse it across their own test cases.
+            # The session-start _reset_pg16_schema already dropped it once
+            # so stale privileges don't survive a prior test session.
+            # Grab every user table in public (skip alembic_version so
+            # upgrade state survives), truncate them all in one shot.
+            # Skip only the LJM organization row + alembic_version.
+            # Everything else — including users and settings — is cleared
+            # between tests; tests that need migration-seeded users/settings
+            # must re-seed inside their own fixture (we provide the
+            # `_pg_restore_seeds` fixture below for that).
+            cur.execute(
+                """
                     SELECT tablename FROM pg_tables
                     WHERE schemaname='public'
                       AND tablename NOT IN ('alembic_version', 'organizations')
                     """
-                )
-                tables = [row[0] for row in cur.fetchall()]
-                if tables:
-                    joined = ", ".join(f'"{t}"' for t in tables)
-                    cur.execute(f"TRUNCATE {joined} RESTART IDENTITY CASCADE")
-                # Re-seed the LJM tenant row + demo owner identity so
-                # TenantMixin inserts have a valid FK target.
-                from app.shared.orm import LJM_TENANT_ID
-                cur.execute(
-                    """
+            )
+            tables = [row[0] for row in cur.fetchall()]
+            if tables:
+                joined = ", ".join(f'"{t}"' for t in tables)
+                cur.execute(f"TRUNCATE {joined} RESTART IDENTITY CASCADE")
+            # Re-seed the LJM tenant row + demo owner identity so
+            # TenantMixin inserts have a valid FK target.
+            from app.shared.orm import LJM_TENANT_ID
+            cur.execute(
+                """
                     INSERT INTO organizations (id, slug, name, plan, settings, created_at)
                     VALUES (%s, 'ljm', 'LJM International', 'standard', '{}', now())
                     ON CONFLICT (id) DO NOTHING
                     """,
-                    (LJM_TENANT_ID,),
-                )
+                (LJM_TENANT_ID,),
+            )
 
 
 @pytest.fixture(autouse=True)
