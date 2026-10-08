@@ -1,45 +1,47 @@
 # Architecture — LJM Intelligence
 
-**Status:** foundation laid 2026-10-01, modularisation in progress.
-**Approved plan:** `symbiosis-brain/projects/ljm-intelligence/plan/2026-10-01-architecture-foundation-tenant-ready.md`.
+**Status:** onion/SOLID refactor complete (branch `refactor/onion`).
+**Plan:** `symbiosis-brain/projects/ljm-intelligence/plan/2026-10-08-architecture-onion-solid.md`.
 
-LJM Intelligence is a **modular monolith** with strict DDD boundaries. We are an
-industry-neutral platform with freight-specific adapters bolted on; LJM is
-tenant #1 and the only tenant for v1, but every table, every query, and every
-job already carries a `tenant_id` so growth into a multi-tenant SaaS does not
-require re-stamping every row.
+LJM Intelligence is a **modular monolith**. Industry-neutral platform with
+freight-specific adapters; LJM is tenant #1, and every table, query and job
+carries a `tenant_id`.
 
 ## Module map
 
-Seven top-level modules under `backend/app/`:
-
 ```
 app/
-  identity/        orgs (tenants), users, auth, tenant context
-  integrations/    connector registry + ports + adapters (email, loadboard, ai, enrichment)
-  prospecting/     freight-specific: find brokers/shippers/leads, FMCSA
-  outreach/        industry-neutral: call lists, enrichment, auto-send
-  inbox/           messages, threads (uses an integrations email port)
-  analysis/        AI intent/sentiment, per-tenant usage metering
-  shared/          db/session, logging, http clients, tenant context, events
+  identity/        orgs, users, auth, credentials, platform/tenant settings
+  integrations/    connector registry, ports/, adapters/, loads, mail, crawl services
+  prospecting/     freight: brokers, leads, shipper finder, scoring, pipeline/
+  outreach/        call lists, email, capacity, unsubscribe
+  inbox/           messages, threads, triage, mail rendering
+  analysis/        AI intent/sentiment, usage metering, KPI/overview
+  shared/          db, orm, repository base, queue, tenant, http, logging, rate limit
+  auth/            token/password helpers + auth deps
 ```
 
-Each module uses a Python-idiomatic DDD file layout (fastapi-best-practices +
-Cosmic Python): `router.py`, `schemas.py`, `models.py`, `service.py`,
-`dependencies.py`, `repository.py`, with `domain.py` only where a real
-Value Object or invariant lives, and `jobs.py` added when queue work arrives.
+## Onion layers (inside each module)
 
-## Layer rules (enforced by import-linter in `.importlinter`)
+- **Outer (HTTP):** `*_router.py` / `router.py` + `schemas.py`. Thin: parse,
+  call a service, return. Never import `repository`, other modules' `models`
+  or `router`, or the `app.models` shim.
+- **Application:** `*_service.py` / `service.py`. Orchestrate use cases against
+  ports; never import FastAPI or SQLAlchemy query-builder symbols
+  (`select/delete/update/func`) and never commit on their own.
+- **Infrastructure:** `repository.py`, `models.py`, `adapters/`, `jobs.py`.
+  All query building lives here.
+- **Core:** `domain.py` and `integrations/ports/` are pure Python (no framework
+  or sibling imports). Dependencies point inward only.
 
-1. **`router.py`** may import this module's `schemas`, `service`, `dependencies`,
-   and other modules' `service` or ports. It never imports another module's
-   `router`, `models`, or `repository`.
-2. **`service.py`** takes a session; never commits itself. Imports this
-   module's `models`, `repository`, `domain`, and other modules' services or
-   domain events. Never imports FastAPI.
-3. **`domain.py`** is pure Python. No FastAPI, no SQLAlchemy, no siblings.
-4. **Freight adapters** (FMCSA, DAT, CHR, …) are only imported by
-   `prospecting/`. Every other core module is industry-neutral.
+Freight adapters (FMCSA, DAT, CHR) are imported by `prospecting/` only.
+
+## Enforcement
+
+Contracts live in `backend/.importlinter` (routers vs routers/models/repository,
+domain purity, services vs query builder, freight adapters, legacy packages).
+Run `uv run lint-imports`.
+
 
 The contracts live in `backend/.importlinter`; CI runs `uv run lint-imports`.
 
