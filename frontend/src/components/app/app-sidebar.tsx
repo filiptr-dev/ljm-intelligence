@@ -11,6 +11,7 @@ import {
   Mail,
   MapPinned,
   Megaphone,
+  Package,
   PhoneCall,
   Radar,
   Route as RouteIcon,
@@ -51,6 +52,7 @@ const GROW = [
   { href: "/messages", label: "Emails", icon: Send },
 ]
 const TOOLS = [
+  { href: "/loads", label: "Loads", icon: Package },
   { href: "/capacity", label: "Capacity Posts", icon: Truck },
   { href: "/call-list", label: "Call List", icon: PhoneCall },
   { href: "/shippers", label: "Shipper Finder", icon: MapPinned },
