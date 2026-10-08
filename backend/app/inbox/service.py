@@ -620,7 +620,12 @@ async def ai_draft_reply(
             provider = None
 
     ai_body: str | None = None
-    if provider is not None and getattr(provider, "kind", None) != "null":
+    ai_error: str | None = None
+    if provider is None:
+        ai_error = "provider_null"
+    elif getattr(provider, "kind", None) == "null":
+        ai_error = "provider_null"
+    else:
         prompt = _ai_draft_prompt(broker, intent, lane_from, lane_to, rate, last_in.body_text or "")
         try:
             call = await asyncio.wait_for(
@@ -628,20 +633,24 @@ async def ai_draft_reply(
             )
             if getattr(call, "status", None) == "ok" and (call.text or "").strip():
                 ai_body = call.text.strip()
+            else:
+                ai_error = f"empty_response:{getattr(call, 'status', None)}"
         except TimeoutError:
+            ai_error = f"timeout:{AI_DRAFT_TIMEOUT_S:g}s"
             _l.info("ai_draft_reply: provider timeout → template fallback")
         except Exception as exc:  # noqa: BLE001 — any adapter error ⇒ template.
+            ai_error = f"error:{type(exc).__name__}"
             _l.info("ai_draft_reply: provider error %s → template fallback", type(exc).__name__)
 
     if ai_body is not None:
         body = ai_body
         html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
-        return AiDraftOut(subject=subject, body_text=body, body_html=html)
+        return AiDraftOut(subject=subject, body_text=body, body_html=html, ai_used=True)
 
     # ---- Template fallback (original behaviour).
     body = _template_body(intent, broker, lane_from, lane_to, rate)
     html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
-    return AiDraftOut(subject=subject, body_text=body, body_html=html)
+    return AiDraftOut(subject=subject, body_text=body, body_html=html, ai_error=ai_error)
 
 
 async def ai_draft_compose(
@@ -786,7 +795,10 @@ async def ai_rewrite(
             provider = None
 
     out: str | None = None
-    if provider is not None and getattr(provider, "kind", None) != "null":
+    ai_error: str | None = None
+    if provider is None or getattr(provider, "kind", None) == "null":
+        ai_error = "provider_null"
+    else:
         prompt = (
             f"Rewrite the following email in a {tone} tone. Keep every fact, "
             f"keep the length roughly the same. No preamble, no explanations — "
@@ -800,14 +812,21 @@ async def ai_rewrite(
             )
             if getattr(call, "status", None) == "ok" and (call.text or "").strip():
                 out = call.text.strip()
+            else:
+                ai_error = f"empty_response:{getattr(call, 'status', None)}"
         except TimeoutError:
+            ai_error = f"timeout:{AI_DRAFT_TIMEOUT_S:g}s"
             _l.info("ai_rewrite: provider timeout → identity fallback")
         except Exception as exc:  # noqa: BLE001
+            ai_error = f"error:{type(exc).__name__}"
             _l.info("ai_rewrite: provider error %s → identity fallback", type(exc).__name__)
 
     final = out or body_text
     html = "".join(f"<p>{p}</p>" for p in final.split("\n\n"))
-    return AiDraftOut(subject="", body_text=final, body_html=html)
+    return AiDraftOut(
+        subject="", body_text=final, body_html=html,
+        ai_used=out is not None, ai_error=None if out is not None else ai_error,
+    )
 
 
 @dataclass
