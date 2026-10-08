@@ -593,9 +593,23 @@ class AiDraftOut:
     subject: str
     body_text: str
     body_html: str
+    # ``ai_used`` is True only when a non-null provider returned non-empty
+    # text within the timeout. On the template fallback it stays False and
+    # ``ai_error`` carries a short machine-friendly reason (provider_null,
+    # resolve_failed, timeout, empty_response, error:<ExcType>). The two
+    # fields are optional metadata — existing call sites that don't pass
+    # them keep working, and only the compose endpoint surfaces them to
+    # the response model today.
+    ai_used: bool = False
+    ai_error: str | None = None
 
 
-AI_DRAFT_TIMEOUT_S = 8.0
+# The provider budget was 8s, which is tighter than Gemini's typical p95
+# for a 3–5 sentence draft when the service is cold or the network wobbles
+# — the request would silently fall back to the stock template and the UI
+# would show "stock email". 25s keeps the browser well inside Vercel's
+# function limit and gives the model enough rope to answer honestly.
+AI_DRAFT_TIMEOUT_S = 25.0
 
 
 def _template_body(intent: str, broker: str, lane_from: str, lane_to: str, rate: float | None) -> str:
@@ -745,6 +759,9 @@ async def ai_draft_compose(
     _l = _log.getLogger(__name__)
     broker = (recipient_name or (to.split("@", 1)[0] if to else "there")).title()
 
+    ai_used = False
+    ai_error: str | None = None
+
     if provider is None:
         try:
             from app.config import get_settings
@@ -752,12 +769,27 @@ async def ai_draft_compose(
 
             provider = get_for("inbox_draft_reply", settings=get_settings())
         except Exception as exc:  # noqa: BLE001
-            _l.info("ai_draft_compose: provider resolve failed: %s", type(exc).__name__)
+            _l.warning(
+                "ai_draft_compose: provider resolve failed: %s: %s",
+                type(exc).__name__, exc,
+            )
             provider = None
+            ai_error = f"resolve_failed:{type(exc).__name__}"
 
     body: str | None = None
     subject = f"{purpose.replace('_', ' ').title()} — LJM International"
-    if provider is not None and getattr(provider, "kind", None) != "null":
+    if provider is None:
+        if ai_error is None:
+            # Reached when the caller passed provider=None and no settings
+            # error raised either (shouldn't normally happen).
+            ai_error = "provider_null"
+            _l.warning("ai_draft_compose: provider is None → template fallback")
+    elif getattr(provider, "kind", None) == "null":
+        ai_error = "provider_null"
+        _l.warning(
+            "ai_draft_compose: provider kind=null (no API key configured) → template fallback"
+        )
+    else:
         prompt = (
             f"You are LJM, a trucking carrier. Draft a short, {tone} outreach email (3-5 "
             f"sentences) to a company. Keep the signature on its own line as '— LJM'. "
@@ -773,18 +805,35 @@ async def ai_draft_compose(
             call = await asyncio.wait_for(
                 provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
             )
-            if getattr(call, "status", None) == "ok" and (call.text or "").strip():
-                text = call.text.strip()
+            status = getattr(call, "status", None)
+            text = (getattr(call, "text", None) or "").strip()
+            if status == "ok" and text:
                 lines = text.splitlines()
                 if lines and lines[0].lower().startswith("subject:"):
                     subject = lines[0].split(":", 1)[1].strip() or subject
                     body = "\n".join(lines[1:]).strip()
                 else:
                     body = text
+                if body:
+                    ai_used = True
+            else:
+                ai_error = f"empty_response:{status}"
+                _l.warning(
+                    "ai_draft_compose: provider returned non-ok/empty (status=%s) → template fallback",
+                    status,
+                )
         except TimeoutError:
-            _l.info("ai_draft_compose: provider timeout → template fallback")
+            ai_error = f"timeout:{AI_DRAFT_TIMEOUT_S:g}s"
+            _l.warning(
+                "ai_draft_compose: provider timeout after %ss → template fallback",
+                AI_DRAFT_TIMEOUT_S,
+            )
         except Exception as exc:  # noqa: BLE001
-            _l.info("ai_draft_compose: provider error %s → template fallback", type(exc).__name__)
+            ai_error = f"error:{type(exc).__name__}"
+            _l.warning(
+                "ai_draft_compose: provider error %s: %s → template fallback",
+                type(exc).__name__, exc,
+            )
 
     if not body:
         body = (
@@ -795,7 +844,10 @@ async def ai_draft_compose(
             f"— LJM"
         )
     html = "".join(f"<p>{p}</p>" for p in body.split("\n\n"))
-    return AiDraftOut(subject=subject, body_text=body, body_html=html)
+    return AiDraftOut(
+        subject=subject, body_text=body, body_html=html,
+        ai_used=ai_used, ai_error=ai_error if not ai_used else None,
+    )
 
 
 async def ai_rewrite(

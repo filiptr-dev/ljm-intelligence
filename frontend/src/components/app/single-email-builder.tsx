@@ -171,6 +171,14 @@ export function SingleEmailBuilder({
           })
           setSubject(renderTemplate(d.subject, to))
           await streamInto(renderTemplate(d.body_text, to), setBody)
+          // The backend always returns a usable body — either the AI's or
+          // a stock template. Tell the operator honestly which one landed
+          // so they don't send a stock email thinking it's AI-written.
+          if (d.ai_used === false) {
+            toast.error(
+              `AI couldn't write it — ${d.ai_error || "unknown error"}, template inserted`,
+            )
+          }
         }
         return
       }

@@ -296,6 +296,12 @@ class AiDraftOutModel(BaseModel):
     subject: str
     body_text: str
     body_html: str
+    # True when a real AI provider produced the body; False when the
+    # service fell back to the stock template. The UI uses this to show
+    # an honest "AI couldn't write it" toast instead of silently handing
+    # the operator a stock email that reads like the AI wrote it.
+    ai_used: bool = False
+    ai_error: str | None = None
 
 
 class ForgetContactIn(BaseModel):

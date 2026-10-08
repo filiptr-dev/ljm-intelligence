@@ -1793,6 +1793,13 @@ export interface components {
             body_text: string;
             /** Body Html */
             body_html: string;
+            /**
+             * Ai Used
+             * @default false
+             */
+            ai_used: boolean;
+            /** Ai Error */
+            ai_error?: string | null;
         };
         /** AskIn */
         AskIn: {
