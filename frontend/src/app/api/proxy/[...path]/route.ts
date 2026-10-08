@@ -131,13 +131,14 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
     // without it but Node 20+ accepts the flag.
   }
 
-  // Bound the upstream fetch so a slow cold start becomes a clean 504
-  // we can toast on, not a terminated Vercel function returning HTML.
-  const controller = new AbortController()
-  const abortTimer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+  // Bound the upstream fetch ONLY for /crawl/run (the call that can hit a
+  // Render cold start) so it becomes a clean 504 we can toast on. Every other
+  // route keeps the default (unbounded by us) timeout.
+  const controller = isCrawlRun ? new AbortController() : null
+  const abortTimer = controller ? setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS) : null
   let upstream: Response
   try {
-    upstream = await fetch(target, { ...init, signal: controller.signal })
+    upstream = await fetch(target, controller ? { ...init, signal: controller.signal } : init)
   } catch (e) {
     const err = e as { name?: string } | null
     const isTimeout = err?.name === "AbortError" || err?.name === "TimeoutError"
@@ -149,7 +150,7 @@ async function handler(req: Request, ctx: { params: Promise<{ path: string[] }> 
     }
     return Response.json({ detail: "backend unreachable", error: String(e) }, { status: 502 })
   } finally {
-    clearTimeout(abortTimer)
+    if (abortTimer) clearTimeout(abortTimer)
   }
 
   const outHeaders = new Headers()
