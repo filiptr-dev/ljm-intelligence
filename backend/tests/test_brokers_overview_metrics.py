@@ -355,3 +355,18 @@ async def test_overview_cache_returns_copy_and_clears_on_booked(client: AsyncCli
 
     with pytest.raises(AssertionError):
         await get_overview_metrics(_boom, ["L-copy"])
+
+
+async def test_overview_cache_deep_copy_isolates_nested_values(client: AsyncClient):
+    sm = client._sm  # type: ignore[attr-defined]
+    async with sm() as s:
+        s.add(Lead(id="L-deep", name="Deep Co", kind="Broker", state="NJ"))
+        await s.commit()
+    first = await get_overview_metrics(sm, ["L-deep"])
+    first["L-deep"].monthly_series.append("POISON")
+    first["L-deep"].monthly_series.clear()
+    second = await get_overview_metrics(sm, ["L-deep"])
+    third = await get_overview_metrics(sm, ["L-deep"])
+    assert "POISON" not in second["L-deep"].monthly_series
+    assert second["L-deep"].monthly_series == third["L-deep"].monthly_series
+    assert len(second["L-deep"].monthly_series) > 0
