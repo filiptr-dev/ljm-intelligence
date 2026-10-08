@@ -30,6 +30,7 @@ import logging
 from typing import Any
 
 from procrastinate import App, PsycopgConnector
+from procrastinate.exceptions import AlreadyEnqueued
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -83,13 +84,19 @@ def _is_postgres() -> bool:
     return url.startswith(("postgresql://", "postgresql+psycopg://", "postgres://"))
 
 
-async def dispatch(task_name: str, /, **kwargs: Any) -> int | None:
+async def dispatch(
+    task_name: str, /, queueing_lock: str | None = None, **kwargs: Any
+) -> int | None:
     """Enqueue a registered task by name. Non-transactional.
 
     Returns the procrastinate job id, or ``None`` if the queue layer is
     disabled (e.g. SQLite in local tests). Use :func:`defer_on` when the
     caller is in the middle of a SQLAlchemy transaction — the job INSERT
     will ride that transaction and roll back with it.
+
+    With ``queueing_lock`` set, a second dispatch while a job holding the
+    same lock is still queued raises ``procrastinate.exceptions.AlreadyEnqueued``
+    (callers decide how to count it).
     """
     if not _is_postgres():
         return None
@@ -100,13 +107,15 @@ async def dispatch(task_name: str, /, **kwargs: Any) -> int | None:
         # worker's pool mid-flight and crash the current job.
         already_open = getattr(app.connector, "_async_pool", None) is not None
         if already_open:
-            job = app.configure_task(name=task_name)
+            job = app.configure_task(name=task_name, queueing_lock=queueing_lock)
             job_id = await job.defer_async(**kwargs)
             return int(job_id)
         async with app.open_async():
-            job = app.configure_task(name=task_name)
+            job = app.configure_task(name=task_name, queueing_lock=queueing_lock)
             job_id = await job.defer_async(**kwargs)
             return int(job_id)
+    except AlreadyEnqueued:
+        raise
     except Exception as exc:  # noqa: BLE001
         log.warning("dispatch(%s) failed: %s", task_name, exc)
         return None

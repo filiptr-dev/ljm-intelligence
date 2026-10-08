@@ -59,19 +59,18 @@ async def send_to_contact(contact_id: int, tone: str = "professional") -> None:
         except Exception as exc:  # noqa: BLE001
             log.warning("send_to_contact: draft failed for %s: %s", contact_id, exc)
             return
-        # Resolve `to` from the contact row.
-        from sqlalchemy import select
-        from app.prospecting.models import LeadContact
+        from app.outreach import repository as repo
 
         async with sm() as s:
-            c = (
-                await s.execute(select(LeadContact).where(LeadContact.id == contact_id))
-            ).scalar_one_or_none()
+            c = await repo.get_contact(s, contact_id)
             if c is None or not c.email:
                 log.info("send_to_contact: contact %s missing or no email", contact_id)
                 return
             to_addr = c.email
             lead_id = c.lead_id
+            if await repo.contact_already_sent(s, contact_id, d.subject):
+                log.info("send_to_contact: contact %s already sent this campaign, skipping", contact_id)
+                return
         result = await svc_send(
             sm, settings,
             to=to_addr, subject=d.subject, body=d.body, body_html=d.body_html,

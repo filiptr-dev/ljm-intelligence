@@ -46,3 +46,19 @@ async def list_outreach_candidates(
 async def list_suppressed_emails(s: AsyncSession) -> set[str]:
     rows = (await s.execute(select(Suppression.email))).scalars().all()
     return {e.lower() for e in rows if e}
+
+
+async def get_contact(s: AsyncSession, contact_id: int) -> LeadContact | None:
+    return (
+        await s.execute(select(LeadContact).where(LeadContact.id == contact_id))
+    ).scalar_one_or_none()
+
+
+async def contact_already_sent(s: AsyncSession, contact_id: int, subject: str | None) -> bool:
+    """True if a SentLog row exists for this contact with the same subject.
+
+    Campaigns carry no persisted id, so the drafted subject is the identity.
+    """
+    q = select(func.count()).select_from(SentLog).where(SentLog.contact_id == contact_id)
+    q = q.where(SentLog.subject == subject) if subject is not None else q.where(SentLog.subject.is_(None))
+    return int((await s.execute(q)).scalar_one() or 0) > 0

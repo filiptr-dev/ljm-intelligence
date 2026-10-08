@@ -11,6 +11,8 @@ all lives in the service.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import logging
 from typing import Literal
 
@@ -206,12 +208,20 @@ async def run_campaign(payload: CampaignIn, request: Request) -> CampaignOut:
     ]
     enqueued = 0
     if not payload.dry_run:
+        from procrastinate.exceptions import AlreadyEnqueued
+
+        # One campaign per segment+tone per UTC day: a re-run can't double-queue.
+        campaign_key = f"{payload.segment}:{payload.tone}:{datetime.now(timezone.utc):%Y%m%d}"
         for r in recipients:
-            jid = await dispatch(
-                "outreach.send_to_contact",
-                contact_id=r.contact_id,
-                tone=payload.tone,
-            )
+            try:
+                jid = await dispatch(
+                    "outreach.send_to_contact",
+                    queueing_lock=f"campaign:{campaign_key}:{r.contact_id}",
+                    contact_id=r.contact_id,
+                    tone=payload.tone,
+                )
+            except AlreadyEnqueued:
+                continue  # counted as skipped
             if jid is not None:
                 enqueued += 1
     return CampaignOut(recipients=recipients, enqueued=enqueued, dry_run=payload.dry_run)
