@@ -6,3 +6,4 @@ local-dev.db
 local-dev.db-journal
 *.sqlite
 *.sqlite3
+.venv

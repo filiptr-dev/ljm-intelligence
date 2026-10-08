@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 
-async def login(page: Any, credentials: dict | None = None) -> dict:  # noqa: ARG001
+async def login(page: Any, credentials: dict | None = None) -> dict:
     # Nothing to do — return an empty storage_state so the dispatcher can
     # treat the return shape uniformly.
     return {"cookies": [], "origins": []}

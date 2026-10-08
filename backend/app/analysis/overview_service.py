@@ -21,10 +21,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
-from app.models import CallOutcome, CapacityPost, CrawlRun, Lead
-from app.pipeline.match import score_broker_for_post
+from app.outreach.models import CallOutcome, CapacityPost
 from app.prospecting.broker_rank_service import count_brokers_by_action
 from app.prospecting.call_list_service import load_and_rank as _load_and_rank
+from app.prospecting.models import CrawlRun, Lead
+from app.prospecting.pipeline.match import score_broker_for_post
 
 ET = ZoneInfo("America/New_York")
 

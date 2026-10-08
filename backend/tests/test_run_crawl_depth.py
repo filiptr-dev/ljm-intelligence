@@ -28,9 +28,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.models import CrawlRun, Lead
-from app.pipeline import gemini_stage as gemini_stage_mod
-from app.pipeline import run as run_mod
-from app.pipeline.run import run_crawl
+from app.prospecting.pipeline import gemini_stage as gemini_stage_mod
+from app.prospecting.pipeline import run as run_mod
+from app.prospecting.pipeline.run import run_crawl
 from app.integrations.adapters.enrichment.fmcsa import DiscoveredLead
 
 # ---------- fixtures / helpers ------------------------------------------------

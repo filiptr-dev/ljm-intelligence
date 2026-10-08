@@ -8,7 +8,7 @@ module (e.g. `app.prospecting.models.Lead`); callers that already used
 
 from __future__ import annotations
 
-from app.analysis.models import (  # noqa: F401
+from app.analysis.models import (
     AiUsageLog,
     BrokerLookalike,
     BrokerPrediction,
@@ -17,7 +17,7 @@ from app.analysis.models import (  # noqa: F401
     ObjectionCluster,
     PredictionRun,
 )
-from app.identity.models import (  # noqa: F401
+from app.identity.models import (
     Organization,
     OrganizationMember,
     PlatformSettings,
@@ -27,15 +27,15 @@ from app.identity.models import (  # noqa: F401
     TenantSettings,
     User,
 )
-from app.inbox.models import MailCursor, MailMessage, MessageInsight, NoReplyTracker  # noqa: F401
-from app.outreach.models import (  # noqa: F401
+from app.inbox.models import MailCursor, MailMessage, MessageInsight, NoReplyTracker
+from app.outreach.models import (
     CallOutcome,
     CapacityPost,
     EmailTemplate,
     SentLog,
     Suppression,
 )
-from app.prospecting.models import (  # noqa: F401
+from app.prospecting.models import (
     AgentRun,
     CrawlRun,
     EnrichmentCandidate,
@@ -55,15 +55,13 @@ __all__ = [
     "BrokerLookalike",
     "BrokerPrediction",
     "CallOutcome",
-    "ForgetContactAudit",
-    "LanePrediction",
-    "ObjectionCluster",
-    "PredictionRun",
     "CapacityPost",
     "CrawlRun",
     "EmailTemplate",
     "EnrichmentCandidate",
     "FitScoreHistory",
+    "ForgetContactAudit",
+    "LanePrediction",
     "Lead",
     "LeadContact",
     "LeadContactProvenance",
@@ -73,9 +71,11 @@ __all__ = [
     "MailMessage",
     "MessageInsight",
     "NoReplyTracker",
+    "ObjectionCluster",
     "Organization",
     "OrganizationMember",
     "PlatformSettings",
+    "PredictionRun",
     "Score",
     "SentLog",
     "SettingsRow",

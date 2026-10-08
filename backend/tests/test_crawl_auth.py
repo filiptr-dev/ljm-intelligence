@@ -76,8 +76,8 @@ async def test_crawl_run_accepts_correct_secret_and_returns_202() -> None:
         return []
 
     with (
-        patch("app.pipeline.run.fetch_fmcsa", side_effect=fake_fetch),
-        patch("app.pipeline.run.fetch_overpass_elements", side_effect=fake_overpass),
+        patch("app.prospecting.pipeline.run.fetch_fmcsa", side_effect=fake_fetch),
+        patch("app.prospecting.pipeline.run.fetch_overpass_elements", side_effect=fake_overpass),
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:

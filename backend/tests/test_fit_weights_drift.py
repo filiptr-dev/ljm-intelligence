@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.scoring.fit_score import DEFAULT_WEIGHTS
+from app.prospecting.scoring import DEFAULT_WEIGHTS
 
 _META_FILE = (
     Path(__file__).resolve().parent.parent.parent / "frontend" / "src" / "app" / "(app)" / "settings" / "fit-weight-meta.ts"

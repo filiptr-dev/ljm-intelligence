@@ -23,7 +23,6 @@ import base64
 import json
 import os
 import secrets
-from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import select, text
@@ -123,7 +122,7 @@ class CredentialVault:
         self._aesgcm = AESGCM(key)
 
     @classmethod
-    async def for_session(cls, session: AsyncSession) -> "CredentialVault":
+    async def for_session(cls, session: AsyncSession) -> CredentialVault:
         """Resolve the key via env → DB → bootstrap; return a ready vault."""
         key = await effective_vault_key(session)
         return cls(key=key)

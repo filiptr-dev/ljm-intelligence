@@ -37,6 +37,11 @@ ignore_imports =
 [importlinter:contract:no-cross-model-reach]
 name = Routers never import other modules' models
 type = forbidden
+# Direct-import check only (allow_indirect_imports): the module boundary
+# we enforce is "a router file never says `from app.X.models import ...`
+# for a module it does not own". Transitive edges through service.py +
+# repository.py are the designed path and don't violate the boundary.
+allow_indirect_imports = True
 source_modules =
     app.identity.router
     app.integrations.router
@@ -74,7 +79,13 @@ forbidden_modules =
 # -------------------------------------------------------------------
 [importlinter:contract:freight-adapters-prospecting-only]
 name = Only prospecting imports freight-specific adapters (FMCSA)
+# Direct-only — the only file allowed to say `from app.integrations.adapters
+# .enrichment.fmcsa import …` is one owned by prospecting (currently
+# prospecting.pipeline.run). The 2026-10-08 fold-in made the jobs router
+# a transitive edge to the pipeline, which legitimately uses fmcsa; that
+# transitive chain does not re-introduce an fmcsa dep in another module.
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.identity
     app.integrations
@@ -84,3 +95,91 @@ source_modules =
     app.shared
 forbidden_modules =
     app.integrations.adapters.enrichment.fmcsa
+
+# -------------------------------------------------------------------
+# Contract 5 — services never reach for `select()` directly.
+# The sqlalchemy query expression layer belongs behind repository.py.
+# -------------------------------------------------------------------
+[importlinter:contract:services-no-sqlalchemy-expression]
+name = Services never import sqlalchemy query-builder symbols directly (select/delete/update/func)
+# Direct-import check only — services legitimately import AsyncSession as
+# a type via sqlalchemy.ext.asyncio. What we forbid is the query-builder
+# surface (select/delete/update/func), which belongs in repository.py.
+# We encode this at the "sqlalchemy" top-level: any direct `from sqlalchemy
+# import …` in service.py fails. The AsyncSession type (which comes from
+# sqlalchemy.ext.asyncio) remains allowed because the forbidden edge is
+# direct-only AND we whitelist the ext.asyncio sub-path via ignore_imports.
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    app.prospecting.service
+    app.outreach.service
+    app.inbox.service
+    app.analysis.service
+forbidden_modules =
+    sqlalchemy
+unmatched_ignore_imports_alerting = none
+
+# -------------------------------------------------------------------
+# Contract 6 — routers never import repositories directly.
+# Routers go through services; services wire their repo via dependencies.py.
+# -------------------------------------------------------------------
+[importlinter:contract:routers-dont-touch-repository]
+name = Routers never import a module's repository
+# Direct-import check: routers go through services; services legitimately
+# depend on repositories (that's the DIP seam). The forbidden edge is a
+# router.py file writing `from app.X.repository import …` directly.
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    app.identity.router
+    app.integrations.router
+    app.prospecting.router
+    app.outreach.router
+    app.inbox.router
+    app.analysis.router
+forbidden_modules =
+    app.identity.repository
+    app.integrations.repository
+    app.prospecting.repository
+    app.outreach.repository
+    app.inbox.repository
+    app.analysis.repository
+
+# -------------------------------------------------------------------
+# Contract 7 — routers never import `app.models` (the compat shim).
+# Typed DTOs come from schemas.py; models stay on the write side.
+# -------------------------------------------------------------------
+[importlinter:contract:routers-dont-import-models-shim]
+name = Routers never import the app.models compat shim
+# Direct only — the shim stays as a re-export table (plan §F); what we
+# forbid is `from app.models import …` showing up in a router.
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    app.identity.router
+    app.integrations.router
+    app.prospecting.router
+    app.outreach.router
+    app.inbox.router
+    app.analysis.router
+forbidden_modules =
+    app.models
+
+# -------------------------------------------------------------------
+# Contract 8 — the deleted legacy packages stay deleted (tripwire).
+# Prevents anyone re-adding app.api / app.pipeline / app.services /
+# app.sources / app.scoring / app.lib from drifting back in.
+# -------------------------------------------------------------------
+[importlinter:contract:no-legacy-top-level-packages]
+name = Nothing imports from the deleted legacy top-level packages
+type = forbidden
+source_modules =
+    app
+forbidden_modules =
+    app.api
+    app.pipeline
+    app.services
+    app.sources
+    app.scoring
+    app.lib

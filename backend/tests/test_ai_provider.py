@@ -20,7 +20,7 @@ from pydantic import SecretStr
 
 from app.config import Settings
 from app.main import create_app
-from app.services.ai_usage import record
+from app.analysis.ai_usage_service import record
 from app.integrations.adapters.ai.provider import (
     ALLOWED_MODELS,
     DEFAULT_FEATURES,

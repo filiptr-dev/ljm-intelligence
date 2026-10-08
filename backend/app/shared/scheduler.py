@@ -35,7 +35,7 @@ _TENANT = LJM_TENANT_ID
 
 @app.periodic(cron="0 19 * * *")  # 15:00 America/New_York during EST (UTC 19)
 @app.task(name="scheduler.crawl_daily_est", queue="default", pass_context=False)
-async def _crawl_daily_est(timestamp: int) -> None:  # noqa: ARG001 — procrastinate contract
+async def _crawl_daily_est(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron")
@@ -43,7 +43,7 @@ async def _crawl_daily_est(timestamp: int) -> None:  # noqa: ARG001 — procrast
 
 @app.periodic(cron="0 20 * * *")  # 15:00 America/New_York during EDT (UTC 20)
 @app.task(name="scheduler.crawl_daily_edt", queue="default", pass_context=False)
-async def _crawl_daily_edt(timestamp: int) -> None:  # noqa: ARG001
+async def _crawl_daily_edt(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron")
@@ -51,7 +51,7 @@ async def _crawl_daily_edt(timestamp: int) -> None:  # noqa: ARG001
 
 @app.periodic(cron="5 19 * * *")  # 5min after the EST crawl
 @app.task(name="scheduler.auto_send_after_crawl", queue="default", pass_context=False)
-async def _auto_send_after_crawl(timestamp: int) -> None:  # noqa: ARG001
+async def _auto_send_after_crawl(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("outreach.auto_send", tenant_id=_TENANT, dry_run=False)
@@ -59,7 +59,7 @@ async def _auto_send_after_crawl(timestamp: int) -> None:  # noqa: ARG001
 
 @app.periodic(cron="*/15 * * * *")  # every 15 min — closes the Gmail cron gap
 @app.task(name="scheduler.mail_incremental_tick", queue="default", pass_context=False)
-async def _mail_incremental_tick(timestamp: int) -> None:  # noqa: ARG001
+async def _mail_incremental_tick(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("inbox.mail_incremental", tenant_id=_TENANT, mailbox=None)
@@ -67,7 +67,7 @@ async def _mail_incremental_tick(timestamp: int) -> None:  # noqa: ARG001
 
 @app.periodic(cron="0 * * * *")  # every hour — closes the loads cron gap
 @app.task(name="scheduler.loads_refresh_tick", queue="default", pass_context=False)
-async def _loads_refresh_tick(timestamp: int) -> None:  # noqa: ARG001
+async def _loads_refresh_tick(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("loads.refresh", tenant_id=_TENANT, source_kind=None)
@@ -75,7 +75,7 @@ async def _loads_refresh_tick(timestamp: int) -> None:  # noqa: ARG001
 
 @app.periodic(cron="0 3 * * *")  # 03:00 UTC nightly
 @app.task(name="scheduler.retention_sweep_nightly", queue="default", pass_context=False)
-async def _retention_sweep_nightly(timestamp: int) -> None:  # noqa: ARG001
+async def _retention_sweep_nightly(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("inbox.retention_sweep", tenant_id=_TENANT)
@@ -83,7 +83,7 @@ async def _retention_sweep_nightly(timestamp: int) -> None:  # noqa: ARG001
 
 @app.periodic(cron="30 3 * * *")  # 03:30 UTC nightly
 @app.task(name="scheduler.analysis_nightly_tick", queue="default", pass_context=False)
-async def _analysis_nightly_tick(timestamp: int) -> None:  # noqa: ARG001
+async def _analysis_nightly_tick(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("analysis.nightly", tenant_id=_TENANT)

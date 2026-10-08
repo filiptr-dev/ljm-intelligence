@@ -30,7 +30,9 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CallOutcome, CapacityPost, CrawlRun, Lead, Load, MailMessage, SentLog
+from app.inbox.models import MailMessage
+from app.outreach.models import CallOutcome, CapacityPost, SentLog
+from app.prospecting.models import CrawlRun, Lead, Load
 
 ET = ZoneInfo("America/New_York")
 

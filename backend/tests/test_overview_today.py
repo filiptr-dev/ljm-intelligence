@@ -149,7 +149,7 @@ async def test_shape_and_deterministic_merge(client: AsyncClient) -> None:
 
 async def test_to_call_today_matches_ranker(client: AsyncClient) -> None:
     """``tiles.to_call_today`` equals the full ranker's output length."""
-    from app.pipeline.call_rank import rank_call_list
+    from app.prospecting.pipeline.call_rank import rank_call_list
 
     leads = [_lead(i, name=f"Lead {i}", current_score=50 + i) for i in range(1, 8)]
     await _seed(client, leads=leads)

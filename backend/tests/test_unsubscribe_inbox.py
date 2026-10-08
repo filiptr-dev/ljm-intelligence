@@ -70,7 +70,7 @@ async def client(app):
 
 
 def test_email_token_roundtrips():
-    from app.lib.tokens import (
+    from app.shared.tokens import (
         sign_unsubscribe_email_token,
         verify_any_unsubscribe_token,
         verify_unsubscribe_email_token,
@@ -84,14 +84,14 @@ def test_email_token_roundtrips():
 
 
 def test_email_token_wrong_secret_fails():
-    from app.lib.tokens import sign_unsubscribe_email_token, verify_unsubscribe_email_token
+    from app.shared.tokens import sign_unsubscribe_email_token, verify_unsubscribe_email_token
 
     tok = sign_unsubscribe_email_token("a@b.com", "s1")
     assert verify_unsubscribe_email_token(tok, "s2") is None
 
 
 def test_email_token_tampered_payload_fails():
-    from app.lib.tokens import sign_unsubscribe_email_token, verify_unsubscribe_email_token
+    from app.shared.tokens import sign_unsubscribe_email_token, verify_unsubscribe_email_token
 
     tok = sign_unsubscribe_email_token("a@b.com", "s1")
     # Swap payload for a different email — sig no longer matches.
@@ -103,7 +103,7 @@ def test_email_token_tampered_payload_fails():
 
 
 def test_contact_token_still_works():
-    from app.lib.tokens import sign_unsubscribe_token, verify_any_unsubscribe_token
+    from app.shared.tokens import sign_unsubscribe_token, verify_any_unsubscribe_token
 
     tok = sign_unsubscribe_token(42, "s1")
     assert verify_any_unsubscribe_token(tok, "s1") == ("contact", 42)
@@ -112,7 +112,7 @@ def test_contact_token_still_works():
 def test_contact_token_rejects_email_prefix():
     """A legacy caller that only uses the int-only verify path must not see
     an email token as a bogus contact id."""
-    from app.lib.tokens import sign_unsubscribe_email_token, verify_unsubscribe_token
+    from app.shared.tokens import sign_unsubscribe_email_token, verify_unsubscribe_token
 
     tok = sign_unsubscribe_email_token("a@b.com", "s1")
     assert verify_unsubscribe_token(tok, "s1") is None
@@ -125,7 +125,7 @@ async def test_inbox_sent_email_without_contact_unsubscribes_by_email(sm, client
     """Fresh recipient we never enriched. Mint an email-keyed token (what the
     inbox render path now mints) → POST /unsubscribe → 200 and a Suppression
     row keyed by email."""
-    from app.lib.tokens import sign_unsubscribe_email_token
+    from app.shared.tokens import sign_unsubscribe_email_token
 
     token = sign_unsubscribe_email_token("fresh@shipper.co", "test-unsub-secret")
     r = await client.post(f"/unsubscribe?t={token}")
@@ -148,7 +148,7 @@ async def test_inbox_sent_email_with_matching_contact_uses_contact_token(sm):
     path mints the classic contact-id token — same path as outreach."""
     from app.identity.models import SettingsRow
     from app.inbox.service import _render_and_wrap  # type: ignore[attr-defined]
-    from app.lib.tokens import verify_any_unsubscribe_token
+    from app.shared.tokens import verify_any_unsubscribe_token
 
     async with sm() as s:
         # Seed a per-tenant settings row with the shared secret.
@@ -187,7 +187,7 @@ async def test_inbox_sent_email_without_contact_mints_email_token(sm):
     """No lead_contacts row → inbox render mints the email-keyed token."""
     from app.identity.models import SettingsRow
     from app.inbox.service import _render_and_wrap  # type: ignore[attr-defined]
-    from app.lib.tokens import verify_any_unsubscribe_token
+    from app.shared.tokens import verify_any_unsubscribe_token
 
     async with sm() as s:
         s.add(SettingsRow(id=1, unsubscribe_secret="test-unsub-secret"))

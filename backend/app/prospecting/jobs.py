@@ -39,7 +39,7 @@ async def crawl_leads(
     # if the pipeline modules fail at import time (defensive — the task
     # fails loudly instead of poisoning registration).
     from app.config import get_settings
-    from app.pipeline.run import _new_run_id, abort_crawl_run, run_crawl
+    from app.prospecting.pipeline.run import _new_run_id, abort_crawl_run, run_crawl
 
     settings = get_settings()
     # The app factory wires sessionmaker into app.state; from a worker

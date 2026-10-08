@@ -19,18 +19,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._auth import verify_unsubscribe_token  # noqa: F401 — kept for back-compat re-exports
-from app.lib.tokens import verify_any_unsubscribe_token
-from app.models import (
-    EnrichmentCandidate,
-    Lead,
-    LeadContact,
-    SettingsRow,
-    ShipperCandidate,
-    Suppression,
-)
-from app.pipeline.enrichment import enrich_company
-from app.services.unsub_config import effective_secret
+from app.identity.models import SettingsRow
+from app.outreach.models import Suppression
+from app.outreach.unsub_config import effective_secret
+from app.prospecting.models import EnrichmentCandidate, Lead, LeadContact, ShipperCandidate
+from app.prospecting.pipeline.enrichment import enrich_company
+from app.shared.cron_auth import verify_unsubscribe_token  # noqa: F401 — kept for back-compat re-exports
+from app.shared.tokens import verify_any_unsubscribe_token
 
 
 class NotFoundError(Exception):

@@ -17,7 +17,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.sources import osm_overpass
+from app.integrations.adapters.web import osm_overpass
 
 
 def _mock_client(handler) -> httpx.AsyncClient:

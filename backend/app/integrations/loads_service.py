@@ -17,13 +17,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.identity.models import SettingsRow
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 from app.integrations.adapters.loadboard.registry import all_sources, by_kind, enabled_sources
-from app.models import Lead, Load, SettingsRow
+from app.prospecting.models import Lead, Load
 
 log = logging.getLogger(__name__)
 
@@ -293,14 +294,13 @@ async def set_group_status(
     if status not in ("new", "contacted", "booked", "lost"):
         raise ValueError(f"unknown status: {status}")
     now = datetime.now(UTC)
-    async with sessionmaker() as s:
-        async with s.begin():
-            result = await s.execute(
-                update(Load)
-                .where(Load.dedupe_group_hash == group_hash)
-                .values(status=status, status_at=now)
-            )
-            count = int(result.rowcount or 0)
+    async with sessionmaker() as s, s.begin():
+        result = await s.execute(
+            update(Load)
+            .where(Load.dedupe_group_hash == group_hash)
+            .values(status=status, status_at=now)
+        )
+        count = int(result.rowcount or 0)
     return count
 
 

@@ -22,17 +22,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
-
 from app.config import Settings
-from app.models import Lead, LeadContact, SentLog, SettingsRow, Suppression
-from app.pipeline.enrichment import mark_contact_contacted
-from app.services.unsub_config import (
+from app.outreach.models import SentLog
+from app.outreach.repository import (
+    count_sent_since,
+    get_settings_row,
+    list_outreach_candidates,
+    list_suppressed_emails,
+)
+from app.outreach.unsub_config import (
     build_unsub_link,
     effective_unsub,
     unsub_headers,
     with_unsub_footer,
 )
+from app.prospecting.pipeline.enrichment import mark_contact_contacted
 
 
 @dataclass
@@ -69,7 +73,7 @@ async def auto_send(
     now = datetime.now(UTC)
 
     async with sessionmaker() as s:
-        cfg = (await s.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+        cfg = await get_settings_row(s)
     if cfg is None or not cfg.auto_outreach_enabled:
         return AutoSendResult("disabled", 0, 0, 0, dry_run)
     if not (settings.outreach_postal_address or "").strip():
@@ -87,26 +91,17 @@ async def auto_send(
 
     async with sessionmaker() as s:
         today_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
-        sent_today = (
-            await s.execute(select(func.count()).select_from(SentLog).where(SentLog.sent_at >= today_start))
-        ).scalar_one()
+        sent_today = await count_sent_since(s, today_start)
         remaining = max(0, cfg.auto_outreach_daily_cap - int(sent_today or 0))
         if remaining == 0:
             return AutoSendResult("ok", 0, 0, 0, dry_run)
 
-        stmt = (
-            select(LeadContact)
-            .join(Lead, Lead.id == LeadContact.lead_id)
-            .where(LeadContact.pipeline_status == cfg.auto_outreach_status_filter)
-            .where(LeadContact.email.is_not(None))
-            .where(Lead.fit_score.is_not(None))
-            .where(Lead.fit_score >= cfg.auto_outreach_min_fit)
-            .order_by(Lead.fit_score.desc(), LeadContact.id)
+        candidates = await list_outreach_candidates(
+            s,
+            status_filter=cfg.auto_outreach_status_filter,
+            min_fit=cfg.auto_outreach_min_fit,
         )
-        candidates = (await s.execute(stmt)).scalars().all()
-
-        supp = (await s.execute(select(Suppression.email))).scalars().all()
-        suppressed = {e.lower() for e in supp if e}
+        suppressed = await list_suppressed_emails(s)
 
         sent = 0
         skipped_supp = 0

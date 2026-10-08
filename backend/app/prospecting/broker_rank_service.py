@@ -38,12 +38,12 @@ from typing import Any
 
 from sqlalchemy import text
 
-from app.pipeline.broker_next_action import (
+from app.prospecting.brokers_service import BrokerRowData, ContactField, NextActionRow
+from app.prospecting.pipeline.broker_next_action import (
     NextAction,
     NextActionInput,
     compute,
 )
-from app.prospecting.brokers_service import BrokerRowData, ContactField, NextActionRow
 from app.shared.db import uow, uow_admin
 from app.shared.tenant import ADMIN_SENTINEL, _tenant_ctx
 

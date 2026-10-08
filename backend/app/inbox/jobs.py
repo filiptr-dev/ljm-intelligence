@@ -124,13 +124,14 @@ async def extract_load_from_message(tenant_id: str, message_id: str) -> None:
     * NullProvider / missing key → zero rows, zero crash (Gemini optional).
     """
     _bind(tenant_id)
+    from sqlalchemy import select
+
     from app.config import get_settings
     from app.db import create_engine, create_sessionmaker
     from app.inbox.models import MailMessage
     from app.integrations.adapters.ai import provider as ai_provider
     from app.integrations.loads_extract import extract_loads_from_text
     from app.integrations.loads_service import _store_batch
-    from sqlalchemy import select
 
     settings = get_settings()
     engine = create_engine(settings)

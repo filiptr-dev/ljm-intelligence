@@ -36,4 +36,4 @@ async def login(page: Any, credentials: dict) -> dict:
     return await page.context.storage_state()
 
 
-__all__ = ["login", "LoginChallenge"]
+__all__ = ["LoginChallenge", "login"]

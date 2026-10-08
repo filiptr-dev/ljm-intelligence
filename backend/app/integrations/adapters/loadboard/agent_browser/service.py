@@ -173,8 +173,8 @@ def _clean_page(html: str) -> str:
         pass
     import re
 
-    stripped = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.I)
-    stripped = re.sub(r"<style[\s\S]*?</style>", " ", stripped, flags=re.I)
+    stripped = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
+    stripped = re.sub(r"<style[\s\S]*?</style>", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"<[^>]+>", " ", stripped)
     return re.sub(r"\s+", " ", stripped).strip()
 

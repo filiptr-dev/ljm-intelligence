@@ -35,10 +35,9 @@ async def uow(
 ) -> AsyncIterator[AsyncSession]:
     """Open one session + one transaction + bind the tenant for RLS."""
     set_tenant(tenant)
-    async with sessionmaker() as session:
-        async with session.begin():
-            await session.execute(_SET_TENANT_SQL, {"tid": str(tenant)})
-            yield session
+    async with sessionmaker() as session, session.begin():
+        await session.execute(_SET_TENANT_SQL, {"tid": str(tenant)})
+        yield session
 
 
 @asynccontextmanager
@@ -51,7 +50,6 @@ async def uow_admin(
     way to drop the tenant filter; you have to call this function by name.
     """
     set_tenant(ADMIN_SENTINEL)
-    async with sessionmaker() as session:
-        async with session.begin():
-            await session.execute(_SET_TENANT_SQL, {"tid": ""})
-            yield session
+    async with sessionmaker() as session, session.begin():
+        await session.execute(_SET_TENANT_SQL, {"tid": ""})
+        yield session

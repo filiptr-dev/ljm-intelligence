@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.pipeline.shipper_merge import (
+from app.prospecting.pipeline.shipper_merge import (
     IncomingCandidate,
     _normalize_domain,
     match_and_merge,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.pipeline.broker_next_action import (
+from app.prospecting.pipeline.broker_next_action import (
     PRIORITY,
     NextActionInput,
     compute,

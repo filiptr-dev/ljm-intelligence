@@ -6,13 +6,11 @@ Re-exported via `app.models` so Alembic autogenerate still sees the full
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    CheckConstraint,
-    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -21,7 +19,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    false,
     func,
     text,
 )

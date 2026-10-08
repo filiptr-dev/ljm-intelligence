@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import CapacityPost, Lead, ShipperCandidate
-from app.pipeline.match import score_broker_for_post
-from app.pipeline.shipper_match import match_shippers_for_post
+from app.outreach.models import CapacityPost
+from app.prospecting.models import Lead, ShipperCandidate
+from app.prospecting.pipeline.match import score_broker_for_post
+from app.prospecting.pipeline.shipper_match import match_shippers_for_post
 from app.shared.tenant import current_tenant
 
 

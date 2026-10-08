@@ -16,10 +16,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.shared.db import AsyncSession
 
-from app.models import Lead, LeadContact, LeadSource, Score
+from app.prospecting.models import Lead
+from app.prospecting.repository import (
+    count_leads,
+    get_lead,
+    latest_score_for_lead,
+    leads_base_query,
+    list_contacts_for_lead,
+    list_lead_sources,
+    list_leads_page,
+    list_sources_for_lead,
+)
 
 
 @dataclass
@@ -91,33 +100,13 @@ async def list_leads(
     limit: int = 50,
 ) -> LeadsPageResult:
     """Paged, filtered list. Reuses the N+1-safe batch source fetch."""
-    base = select(Lead)
-    if state:
-        base = base.where(Lead.state == state.upper())
-    if kind:
-        base = base.where(Lead.kind == kind)
-    if min_score is not None:
-        base = base.where(Lead.current_score >= min_score)
-    if q:
-        like = f"%{q}%"
-        base = base.where(Lead.name.ilike(like))
-
-    total_res = await session.execute(select(func.count()).select_from(base.subquery()))
-    total = int(total_res.scalar() or 0)
-
-    rows = await session.execute(
-        base.order_by(desc(Lead.last_seen_at), desc(Lead.id)).offset(offset).limit(limit)
-    )
-    leads = list(rows.scalars().all())
+    base = leads_base_query(state=state, kind=kind, min_score=min_score, q=q)
+    total = await count_leads(session, base)
+    leads = await list_leads_page(session, base, offset=offset, limit=limit)
 
     source_map: dict[str, list[str]] = {}
     if leads:
-        src_rows = await session.execute(
-            select(LeadSource.lead_id, LeadSource.source).where(
-                LeadSource.lead_id.in_([lead.id for lead in leads])
-            )
-        )
-        for lid, src in src_rows.all():
+        for lid, src in await list_lead_sources(session, [lead.id for lead in leads]):
             source_map.setdefault(lid, [])
             if src not in source_map[lid]:
                 source_map[lid].append(src)
@@ -131,21 +120,12 @@ async def list_leads(
 
 
 async def show_lead(session: AsyncSession, lead_id: str) -> LeadDetailRow | None:
-    res = await session.execute(select(Lead).where(Lead.id == lead_id))
-    l = res.scalar_one_or_none()
+    l = await get_lead(session, lead_id)
     if not l:
         return None
-    srcs = (
-        await session.execute(select(LeadSource.source).where(LeadSource.lead_id == lead_id))
-    ).scalars().all()
-    contacts = (
-        await session.execute(select(LeadContact).where(LeadContact.lead_id == lead_id))
-    ).scalars().all()
-    score_row = (
-        await session.execute(
-            select(Score).where(Score.lead_id == lead_id).order_by(desc(Score.created_at)).limit(1)
-        )
-    ).scalar_one_or_none()
+    srcs = await list_sources_for_lead(session, lead_id)
+    contacts = await list_contacts_for_lead(session, lead_id)
+    score_row = await latest_score_for_lead(session, lead_id)
     row = _lead_to_row(l, list(dict.fromkeys(srcs)))
     return LeadDetailRow(
         **row.__dict__,
