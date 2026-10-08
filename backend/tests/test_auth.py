@@ -18,7 +18,7 @@ from app.main import create_app
 from app.models import SettingsRow, User
 
 OWNER_EMAIL = "owner@ljm.com"
-OWNER_PASSWORD = "password"
+OWNER_PASSWORD = "Admin123!@#LJM"
 JWT_SECRET = "test-jwt-secret-for-pytest-only-32chars"
 
 
@@ -121,7 +121,7 @@ async def test_login_bad_password_401(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_login_unknown_email_401(client: AsyncClient) -> None:
-    r = await client.post("/auth/login", json={"email": "ghost@ljm-demo.local", "password": "password"})
+    r = await client.post("/auth/login", json={"email": "ghost@ljm-demo.local", "password": OWNER_PASSWORD})
     assert r.status_code == 401
 
 
