@@ -264,7 +264,8 @@ export interface paths {
          * @description Encrypt + store Gmail service-account JSON in the vault.
          *
          *     This is the owner-only path that lets LJM grant the connector without
-         *     exposing creds on an env var. Vault needs ``TENANT_CRED_KEY``.
+         *     exposing creds on an env var. The vault key resolves env → DB → bootstrap,
+         *     so no ``TENANT_CRED_KEY`` env is required on Render.
          */
         post: operations["connect_gmail_settings_connectors_gmail_post"];
         /**
@@ -315,6 +316,127 @@ export interface paths {
          * @description Flip ``inbox.source`` between simulated (False) and gmail (True).
          */
         post: operations["inbox_source_switch_settings_connectors_gmail_inbox_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/loadboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Loadboard Creds
+         * @description One row per source + the broker-page URL allowlist.
+         */
+        get: operations["list_loadboard_creds_settings_connectors_loadboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/loadboard/{src}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Loadboard Cred
+         * @description Encrypt + store username+password for one load board.
+         *
+         *     The vault key resolves env → DB → bootstrap: no ``TENANT_CRED_KEY`` env
+         *     is needed on Render. The response never echoes the password back.
+         */
+        post: operations["set_loadboard_cred_settings_connectors_loadboard__src__post"];
+        /**
+         * Clear Loadboard Cred
+         * @description Delete the stored credential for one load board.
+         */
+        delete: operations["clear_loadboard_cred_settings_connectors_loadboard__src__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/loadboard/{src}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Loadboard Cred
+         * @description Shallow check: credential present + vault decrypts + last-run status.
+         *
+         *     This never actually logs into DAT/Truckstop/etc — that happens inside
+         *     the sidecar on the GH Actions runner. The purpose of this verb is "did
+         *     the password save survive the round-trip through AES-GCM?" so the UI
+         *     can show a green check immediately after a save.
+         */
+        post: operations["test_loadboard_cred_settings_connectors_loadboard__src__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/loadboard/broker-page-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Broker Page Urls
+         * @description Replace the public-broker-board URL allowlist (one entry per URL).
+         *
+         *     Each entry is ``{"label": str, "url": str, "enabled": bool}``. Lives on
+         *     the singleton settings row; the ``ai_page`` source reads it.
+         */
+        put: operations["set_broker_page_urls_settings_connectors_loadboard_broker_page_urls_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/loadboard/drivers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Loadboard Drivers */
+        get: operations["get_loadboard_drivers_settings_connectors_loadboard_drivers_get"];
+        /**
+         * Put Loadboard Drivers
+         * @description Persist driver + kill-switch values on the settings row.
+         *
+         *     Only the fields the caller sends are updated. The registry overlay is
+         *     refreshed in-process so the next ``/loads/sources`` call sees the change
+         *     without a restart. Env still wins at read time — set ``LOADS_<SRC>_DRIVER``
+         *     to anything other than ``off`` to pin a source regardless of this DB value.
+         */
+        put: operations["put_loadboard_drivers_settings_connectors_loadboard_drivers_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1520,8 +1642,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Loads */
+        /**
+         * List Loads
+         * @description Deduped group rows — one entry per lane, with multi-source badges.
+         *
+         *     Rows in ``booked`` / ``lost`` are hidden so the operator only sees
+         *     actionable work. The old flat list stays available at ``/loads/all``
+         *     for admin/debug callers.
+         */
         get: operations["list_loads_loads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Loads Flat
+         * @description Flat, un-grouped list — useful for debugging the dedupe view.
+         */
+        get: operations["list_loads_flat_loads_all_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1593,6 +1742,118 @@ export interface paths {
         /** Refresh All */
         post: operations["refresh_all_loads_sources_refresh_all_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/paste": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Paste Loads
+         * @description Operator pastes a block of broker text; AI turns it into load rows.
+         *
+         *     Owner-only guard is TODO once a real auth decorator is agreed; v1 is
+         *     behind the same cookie session as the rest of ``/loads``. NullProvider
+         *     (no API key) returns zero items, zero crash.
+         */
+        post: operations["paste_loads_loads_paste_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/{group_hash}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Status
+         * @description Flip every row in a dedupe group's status atomically.
+         *
+         *     Transactional — either every row reads the new status, or none do. A
+         *     group that no longer has any rows (hash collision, race) returns 404.
+         */
+        post: operations["set_status_loads__group_hash__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/{group_hash}/inquiry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Group Inquiry
+         * @description Build a load-inquiry email via the existing ``/email/draft`` builder.
+         *
+         *     Zero new builder — we reuse the single email path with
+         *     ``purpose='load_inquiry'`` so the voice stays consistent with every
+         *     other outbound message LJM sends.
+         */
+        post: operations["group_inquiry_loads__group_hash__inquiry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/sources/{src}/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Blob */
+        get: operations["get_session_blob_loads_sources__src__session_get"];
+        put?: never;
+        /** Set Session Blob */
+        post: operations["set_session_blob_loads_sources__src__session_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loads/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Demo Loads
+         * @description Delete every demo-seeded row (``source IN ('demo','demo2')``).
+         *
+         *     Operator path for the "scraper now has real data, flush the demo" moment.
+         *     Idempotent — running twice returns the second ``deleted=0``.
+         */
+        delete: operations["purge_demo_loads_loads_demo_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1957,6 +2218,13 @@ export interface components {
             /** Total */
             total: number;
             segments_count?: components["schemas"]["SegmentsCountOut"] | null;
+        };
+        /** BrokerPageUrlsIn */
+        BrokerPageUrlsIn: {
+            /** Urls */
+            urls?: {
+                [key: string]: unknown;
+            }[];
         };
         /** BrokerPredictionOut */
         BrokerPredictionOut: {
@@ -2680,6 +2948,19 @@ export interface components {
             /** Job Id */
             job_id?: number | null;
         };
+        /** InquiryOut */
+        InquiryOut: {
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+            /** Compose Url */
+            compose_url: string;
+            /** Broker Email */
+            broker_email: string | null;
+            /** Broker Phone */
+            broker_phone: string | null;
+        };
         /** IntentCountOut */
         IntentCountOut: {
             /** Intent */
@@ -2968,22 +3249,22 @@ export interface components {
             /** Items */
             items: components["schemas"]["LiveFeedItemOut"][];
         };
-        /** LoadOut */
-        LoadOut: {
-            /** Id */
-            id: number;
-            /** Source */
-            source: string;
-            /** Broker Name */
-            broker_name: string;
-            /** Origin City */
-            origin_city: string | null;
-            /** Origin State */
-            origin_state: string | null;
-            /** Dest City */
-            dest_city: string | null;
-            /** Dest State */
-            dest_state: string | null;
+        /** LoadGroupOut */
+        LoadGroupOut: {
+            /** Group Hash */
+            group_hash: string;
+            /** Broker */
+            broker: {
+                [key: string]: unknown;
+            };
+            /** Origin */
+            origin: {
+                [key: string]: unknown;
+            };
+            /** Dest */
+            dest: {
+                [key: string]: unknown;
+            };
             /** Pickup Date */
             pickup_date: string | null;
             /** Equipment */
@@ -2992,8 +3273,82 @@ export interface components {
             rate_usd: number | null;
             /** Miles */
             miles: number | null;
+            /** Rate Per Mile */
+            rate_per_mile: number | null;
             /** Posted At */
             posted_at: string | null;
+            /** Sources */
+            sources: {
+                [key: string]: unknown;
+            }[];
+            /** Status */
+            status: string;
+            /** Status At */
+            status_at: string | null;
+            /**
+             * Is Demo
+             * @default false
+             */
+            is_demo: boolean;
+        };
+        /** LoadboardCredIn */
+        LoadboardCredIn: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
+        /** LoadboardCredOut */
+        LoadboardCredOut: {
+            /** Source */
+            source: string;
+            /** Configured */
+            configured: boolean;
+            /** Username Masked */
+            username_masked?: string | null;
+            /** Last Run Status */
+            last_run_status?: string | null;
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** LoadboardCredsListOut */
+        LoadboardCredsListOut: {
+            /** Items */
+            items: components["schemas"]["LoadboardCredOut"][];
+            /** Broker Page Urls */
+            broker_page_urls: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** LoadboardDriverIn */
+        LoadboardDriverIn: {
+            /** Dat */
+            dat?: ("off" | "api" | "agent") | null;
+            /** Chr */
+            chr?: ("off" | "api" | "agent") | null;
+            /** Loadboard123 */
+            loadboard123?: ("off" | "api" | "agent") | null;
+            /** Truckstop */
+            truckstop?: ("off" | "api" | "agent") | null;
+            /** Agent Kill */
+            agent_kill?: ("off" | "on") | null;
+        };
+        /** LoadboardDriverOut */
+        LoadboardDriverOut: {
+            /** Dat */
+            dat: string;
+            /** Chr */
+            chr: string;
+            /** Loadboard123 */
+            loadboard123: string;
+            /** Truckstop */
+            truckstop: string;
+            /** Agent Kill */
+            agent_kill: string;
+            /** Env Override Active */
+            env_override_active: boolean;
         };
         /** LoadsBookedTile */
         LoadsBookedTile: {
@@ -3007,7 +3362,7 @@ export interface components {
         /** LoadsListOut */
         LoadsListOut: {
             /** Items */
-            items: components["schemas"]["LoadOut"][];
+            items: components["schemas"]["LoadGroupOut"][];
         };
         /** LoginIn */
         LoginIn: {
@@ -3399,6 +3754,11 @@ export interface components {
             /** Value */
             value: boolean;
         };
+        /** PasteIn */
+        PasteIn: {
+            /** Text */
+            text: string;
+        };
         /** PostIn */
         PostIn: {
             /** Kind */
@@ -3718,6 +4078,20 @@ export interface components {
             /** Inbound Total */
             inbound_total: number;
         };
+        /** SessionBlobIn */
+        SessionBlobIn: {
+            /** Blob */
+            blob: string;
+        };
+        /** SessionBlobOut */
+        SessionBlobOut: {
+            /** Source */
+            source: string;
+            /** Present */
+            present: boolean;
+            /** Saved At */
+            saved_at?: string | null;
+        };
         /** SettingsOut */
         SettingsOut: {
             /** Threshold */
@@ -3943,6 +4317,23 @@ export interface components {
             next_step: string;
             /** Message Count */
             message_count: number;
+        };
+        /** StatusIn */
+        StatusIn: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "new" | "contacted" | "booked" | "lost";
+        };
+        /** StatusOut */
+        StatusOut: {
+            /** Group Hash */
+            group_hash: string;
+            /** Status */
+            status: string;
+            /** Rows Updated */
+            rows_updated: number;
         };
         /** SuggestionList */
         SuggestionList: {
@@ -4808,6 +5199,241 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OwnerSwitchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_loadboard_creds_settings_connectors_loadboard_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardCredsListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_loadboard_cred_settings_connectors_loadboard__src__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                src: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoadboardCredIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardCredOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_loadboard_cred_settings_connectors_loadboard__src__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                src: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardCredOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_loadboard_cred_settings_connectors_loadboard__src__test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                src: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardCredOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_broker_page_urls_settings_connectors_loadboard_broker_page_urls_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrokerPageUrlsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardCredsListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_loadboard_drivers_settings_connectors_loadboard_drivers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardDriverOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_loadboard_drivers_settings_connectors_loadboard_drivers_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoadboardDriverIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadboardDriverOut"];
                 };
             };
             /** @description Validation Error */
@@ -7146,6 +7772,42 @@ export interface operations {
             };
         };
     };
+    list_loads_flat_loads_all_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_sources_loads_sources_get: {
         parameters: {
             query?: never;
@@ -7265,6 +7927,220 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RefreshAllOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    paste_loads_loads_paste_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadsListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_status_loads__group_hash__status_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path: {
+                group_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    group_inquiry_loads__group_hash__inquiry_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path: {
+                group_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InquiryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_blob_loads_sources__src__session_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                src: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionBlobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_session_blob_loads_sources__src__session_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Cron-Secret"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                src: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionBlobIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionBlobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_demo_loads_loads_demo_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "X-Cron-Secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
