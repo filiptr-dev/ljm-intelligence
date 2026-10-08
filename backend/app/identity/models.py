@@ -208,7 +208,7 @@ class User(TenantMixin, Base):
     """App login account (migration 0008).
 
     V1 is single-owner: migration 0008 seeds exactly one row
-    (``owner@ljm-demo.local``) and no UI adds more. The ``role`` column stays
+    (``owner@ljm.com``) and no UI adds more. The ``role`` column stays
     for the seam when staff/Google-SSO lands later.
 
     ``password_hash`` is nullable so a future Google-SSO user — who has no

@@ -24,10 +24,6 @@ services:
       # because the pooler doesn't support LISTEN/NOTIFY. See docs/ops.md.
       - key: DATABASE_URL_DIRECT
         sync: false
-      # S0.2 — seed owner password for migration 0008. Production refuses
-      # to run the migration without this env var set.
-      - key: SEED_OWNER_PASSWORD
-        sync: false
       # MF2 — shared secret with the Vercel Next BFF (`LJM_PROXY_SECRET`
       # on Vercel). Lets the backend trust the Vercel-forwarded real
       # client IP so the per-IP login rate limiter doesn't collapse every

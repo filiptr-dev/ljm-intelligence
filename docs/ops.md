@@ -47,7 +47,6 @@ Required (production):
 - `DATABASE_URL` — Postgres connection (Neon paid).
 - `DATABASE_URL_DIRECT` — direct, no pgbouncer (alembic + worker use this).
 - `JWT_SECRET` — session signing.
-- `SEED_OWNER_PASSWORD` — bootstrap owner creds.
 - `GEMINI_API_KEY` — paid-tier Gemini (startup assertion refuses to boot without it).
 - `TENANT_CRED_KEY` — base64 32-byte key for `CredentialVault` AES-GCM.
 - `CRON_SECRET` — guards `/jobs/drain` + mail cron routes.

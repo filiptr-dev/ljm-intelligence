@@ -17,7 +17,7 @@ from app.db import Base
 from app.main import create_app
 from app.models import SettingsRow, User
 
-OWNER_EMAIL = "owner@ljm-demo.local"
+OWNER_EMAIL = "owner@ljm.com"
 OWNER_PASSWORD = "password"
 JWT_SECRET = "test-jwt-secret-for-pytest-only-32chars"
 

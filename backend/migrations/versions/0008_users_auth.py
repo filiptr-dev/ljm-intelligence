@@ -5,13 +5,12 @@ Revises: 0007
 Create Date: 2026-10-01
 
 Simplest-useful login per plan amendments 2 + 3:
-  * ONE account, seeded here: ``owner@ljm-demo.local``. The password hash is
-    sourced from the ``SEED_OWNER_PASSWORD`` environment variable (S0.2
-    doctrine, 2026-10-01) and only falls back to the historical dev value
-    when the migration is running in a non-production environment AND the
-    env var is unset — so the string is never present in source and prod
-    deploys refuse to seed without an explicit secret. See also
-    ``app.shared.seed`` which re-applies the env password on each boot.
+  * ONE account, seeded here: ``owner@ljm.com`` with password ``password``.
+    Per the 2026-10-08 user call the demo credentials live in the DB, not
+    in env — a fresh DB works with no env var set. The historical
+    ``SEED_OWNER_PASSWORD`` indirection has been removed; migration 0023
+    rewrites the email + hash on upgrade for DBs that still carry the
+    pre-change seed.
   * No ``must_change_password``, no password-change route, no team UI, no
     rate-limit table, no refresh-token table. The access JWT is long-lived
     (default 7 days) and stateless; logout clears the session cookie on the
@@ -27,7 +26,6 @@ Idempotency: the seed uses ``INSERT ... ON CONFLICT`` on Postgres, and
 password after they've set a real one. Downgrade drops the whole table.
 """
 
-import os
 import secrets
 from collections.abc import Sequence
 
@@ -42,27 +40,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 # Keep in sync with ``app.auth.passwords`` — the two are tiny on purpose.
-_SEED_EMAIL = "owner@ljm-demo.local"
+_SEED_EMAIL = "owner@ljm.com"
 _SEED_NAME = "LJM Owner"
-
-
-def _seed_password_from_env() -> str:
-    """Resolve the seed password at upgrade time.
-
-    Production MUST set ``SEED_OWNER_PASSWORD`` — the migration refuses to run
-    without it (RuntimeError). Non-prod environments (dev / test / CI) fall
-    back to a well-known dev secret so the local workflow stays one-step.
-    """
-    env_pw = os.environ.get("SEED_OWNER_PASSWORD")
-    if env_pw:
-        return env_pw
-    if os.environ.get("APP_ENV") == "production":
-        raise RuntimeError(
-            "SEED_OWNER_PASSWORD must be set in production before running 0008 migration"
-        )
-    # Dev-only sentinel. Not present in source matching `_DEMO_PASSWORD` so the
-    # S0.2 grep doctrine passes; still obvious enough for a local dev to find.
-    return "dev-" + "only" + "-seed"
+_SEED_PASSWORD = "password"
 # A plain 26-char uppercase token stands in for a ULID so we don't drag a
 # ULID lib into the migration layer; the format is "26 chars, URL-safe" which
 # matches the project's existing ``shipper_candidates.id`` shape well enough.
@@ -116,7 +96,7 @@ def upgrade() -> None:
     # Dialect-split: Postgres and SQLite both support an idempotent insert,
     # but spell it differently. We only ever run on these two.
     dialect = bind.dialect.name
-    pw_hash = _now_argon2_hash(_seed_password_from_env())
+    pw_hash = _now_argon2_hash(_SEED_PASSWORD)
     if dialect == "postgresql":
         bind.execute(
             sa.text(

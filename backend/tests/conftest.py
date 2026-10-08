@@ -131,11 +131,8 @@ def _reset_pg16_schema(url: str) -> None:
 # in os.environ wins over whatever backend/.env holds. In sqlite mode we pin
 # to an in-memory URL; in PG16 mode we pin to the throwaway container's URL.
 if _PG_HARNESS:
-    # Match the historical seed value `test_pg16_boot_and_tenancy` asserts
-    # against. Production boots refuse to seed without an explicit value;
-    # the test harness is deliberately not production, so pin a stable
-    # default here. See migration 0008.
-    os.environ.setdefault("SEED_OWNER_PASSWORD", "password")
+    # Migration 0008 hardcodes the owner password ("password") since 2026-10-08;
+    # no SEED_OWNER_PASSWORD env is needed. See migration 0008 + 0023.
     _PG_TEST_URL = _ensure_pg16_container()
     _reset_pg16_schema(_PG_TEST_URL)
     _SAFE_DB_URL = _PG_TEST_URL
@@ -334,7 +331,7 @@ if _PG_HARNESS:
     @pytest.fixture
     def _pg_restore_seeds():
         """Restore the migration-seeded users + settings rows. Tests that
-        depend on `owner@ljm-demo.local` or the migration JWT secret request
+        depend on `owner@ljm.com` or the migration JWT secret request
         this fixture; it runs BEFORE the test body so the seeds exist when
         the test touches the DB."""
         import psycopg

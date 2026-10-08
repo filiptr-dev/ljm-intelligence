@@ -29,7 +29,7 @@ async def _prep_db(app) -> None:
 
 
 def _owner() -> UserPrincipal:
-    return UserPrincipal(id="U1", email="owner@ljm-demo.local", role="owner")
+    return UserPrincipal(id="U1", email="owner@ljm.com", role="owner")
 
 
 @pytest.mark.asyncio
