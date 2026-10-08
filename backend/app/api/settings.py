@@ -197,7 +197,8 @@ async def connect_gmail(payload: GmailConnectorIn, request: Request) -> GmailCon
     """Encrypt + store Gmail service-account JSON in the vault.
 
     This is the owner-only path that lets LJM grant the connector without
-    exposing creds on an env var. Vault needs ``TENANT_CRED_KEY``.
+    exposing creds on an env var. The vault key resolves env → DB → bootstrap,
+    so no ``TENANT_CRED_KEY`` env is required on Render.
     """
     try:
         info = json.loads(payload.sa_json)
@@ -205,13 +206,12 @@ async def connect_gmail(payload: GmailConnectorIn, request: Request) -> GmailCon
         return GmailConnectorOut(ok=False, reason="invalid_json")
     if not isinstance(info, dict) or "client_email" not in info or "private_key" not in info:
         return GmailConnectorOut(ok=False, reason="missing_sa_fields")
-    try:
-        vault = CredentialVault()
-    except VaultConfigError as exc:
-        return GmailConnectorOut(ok=False, reason=f"vault_unavailable:{exc}")
-    session = request.state.session if hasattr(request.state, "session") else None
     # Vault + flag writes share one session.
     async with request.app.state.sessionmaker() as s:
+        try:
+            vault = await CredentialVault.for_session(s)
+        except VaultConfigError as exc:
+            return GmailConnectorOut(ok=False, reason=f"vault_unavailable:{exc}")
         await vault.put(
             s, TenantId(LJM_TENANT_ID), "gmail", "service_account",
             {"sa_json": payload.sa_json, "impersonate": payload.impersonate},
@@ -263,3 +263,227 @@ async def inbox_source_switch(payload: OwnerSwitchIn, request: Request) -> Owner
         await _set_flag(s, "inbox.source", {"value": "gmail" if payload.enabled else "simulated"})
         await s.commit()
     return OwnerSwitchOut(ok=True, flag="inbox.source", value=payload.enabled)
+
+
+# ---- Connector settings — Load-board logins (per source) -------------------
+# Owner-only path for pasting load-board usernames + passwords straight into
+# the DB vault. No env vars needed — the vault key resolves env → DB → bootstrap
+# (see ``app.identity.credentials.effective_vault_key``). The password is write-
+# only: the readback endpoint reports ``configured: true`` + a masked username,
+# never the password itself.
+
+LOADBOARD_SRCS = ("dat", "truckstop", "loadboard123", "chr")
+
+
+class LoadboardCredIn(BaseModel):
+    username: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class LoadboardCredOut(BaseModel):
+    source: str
+    configured: bool
+    username_masked: str | None = None
+    last_run_status: str | None = None
+    last_run_at: str | None = None
+    reason: str | None = None
+
+
+class LoadboardCredsListOut(BaseModel):
+    items: list[LoadboardCredOut]
+    broker_page_urls: list[dict]
+
+
+class BrokerPageUrlsIn(BaseModel):
+    urls: list[dict] = Field(default_factory=list)
+
+
+def _mask_username(u: str) -> str:
+    u = (u or "").strip()
+    if "@" in u:
+        local, _, domain = u.partition("@")
+        return (local[:2] + "***") + "@" + domain
+    if len(u) <= 3:
+        return "***"
+    return u[:2] + "***" + u[-1:]
+
+
+def _loadboard_connector(src: str) -> str:
+    if src not in LOADBOARD_SRCS:
+        raise HTTPException(404, f"unknown source: {src}")
+    return f"loadboard_{src}"
+
+
+async def _last_run(session, src: str) -> tuple[str | None, str | None]:
+    """Return ``(status, iso_started_at)`` for the most recent agent_run."""
+    from app.models import AgentRun
+
+    row = (
+        await session.execute(
+            _sa_select(AgentRun)
+            .where(AgentRun.source == src)
+            .order_by(AgentRun.started_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None, None
+    return row.status, (row.started_at.isoformat() if row.started_at else None)
+
+
+@router.get("/connectors/loadboard", response_model=LoadboardCredsListOut)
+async def list_loadboard_creds(request: Request) -> LoadboardCredsListOut:
+    """One row per source + the broker-page URL allowlist."""
+    from app.identity.credentials import CredentialVault, VaultConfigError, VaultNotFound
+
+    items: list[LoadboardCredOut] = []
+    async with request.app.state.sessionmaker() as s:
+        # Vault key resolves env → DB → bootstrap; a VaultConfigError here would
+        # mean we can't even write a key (e.g. no settings row and bootstrap
+        # failed). In that case every slot is "not configured" with a reason.
+        try:
+            vault: CredentialVault | None = await CredentialVault.for_session(s)
+        except VaultConfigError as exc:
+            vault = None
+            vault_reason = f"vault_unavailable:{exc}"
+        else:
+            vault_reason = None
+        for src in LOADBOARD_SRCS:
+            bundle: dict | None = None
+            if vault is not None:
+                try:
+                    bundle = await vault.get(
+                        s, TenantId(LJM_TENANT_ID), _loadboard_connector(src), "password"
+                    )
+                except VaultNotFound:
+                    bundle = None
+                except Exception:  # noqa: BLE001
+                    bundle = None
+            status, started = await _last_run(s, src)
+            items.append(
+                LoadboardCredOut(
+                    source=src,
+                    configured=bool(bundle),
+                    username_masked=_mask_username(str((bundle or {}).get("username") or "")) if bundle else None,
+                    last_run_status=status,
+                    last_run_at=started,
+                    reason=vault_reason if not bundle else None,
+                )
+            )
+        # broker-page URLs live on the settings row (migration 0025).
+        row = (
+            await s.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+        ).scalar_one_or_none()
+        urls = list((getattr(row, "load_source_urls", None) or []) if row else [])
+    return LoadboardCredsListOut(items=items, broker_page_urls=urls)
+
+
+@router.post("/connectors/loadboard/{src}", response_model=LoadboardCredOut)
+async def set_loadboard_cred(src: str, payload: LoadboardCredIn, request: Request) -> LoadboardCredOut:
+    """Encrypt + store username+password for one load board.
+
+    The vault key resolves env → DB → bootstrap: no ``TENANT_CRED_KEY`` env
+    is needed on Render. The response never echoes the password back.
+    """
+    from app.identity.credentials import CredentialVault, VaultConfigError
+
+    conn = _loadboard_connector(src)
+    async with request.app.state.sessionmaker() as s:
+        try:
+            vault = await CredentialVault.for_session(s)
+        except VaultConfigError as exc:
+            return LoadboardCredOut(source=src, configured=False, reason=f"vault_unavailable:{exc}")
+        await vault.put(
+            s, TenantId(LJM_TENANT_ID), conn, "password",
+            {"username": payload.username, "password": payload.password},
+        )
+        await s.commit()
+    return LoadboardCredOut(
+        source=src,
+        configured=True,
+        username_masked=_mask_username(payload.username),
+    )
+
+
+@router.delete("/connectors/loadboard/{src}", response_model=LoadboardCredOut)
+async def clear_loadboard_cred(src: str, request: Request) -> LoadboardCredOut:
+    """Delete the stored credential for one load board."""
+    from app.identity.models import TenantCredential
+
+    conn = _loadboard_connector(src)
+    async with request.app.state.sessionmaker() as s:
+        await s.execute(
+            _sa_delete(TenantCredential).where(
+                TenantCredential.tenant_id == LJM_TENANT_ID,
+                TenantCredential.connector == conn,
+            )
+        )
+        await s.commit()
+    return LoadboardCredOut(source=src, configured=False)
+
+
+@router.post("/connectors/loadboard/{src}/test", response_model=LoadboardCredOut)
+async def test_loadboard_cred(src: str, request: Request) -> LoadboardCredOut:
+    """Shallow check: credential present + vault decrypts + last-run status.
+
+    This never actually logs into DAT/Truckstop/etc — that happens inside
+    the sidecar on the GH Actions runner. The purpose of this verb is "did
+    the password save survive the round-trip through AES-GCM?" so the UI
+    can show a green check immediately after a save.
+    """
+    from app.identity.credentials import CredentialVault, VaultConfigError, VaultNotFound
+
+    conn = _loadboard_connector(src)
+    async with request.app.state.sessionmaker() as s:
+        try:
+            vault = await CredentialVault.for_session(s)
+        except VaultConfigError as exc:
+            return LoadboardCredOut(source=src, configured=False, reason=f"vault_unavailable:{exc}")
+        try:
+            bundle = await vault.get(s, TenantId(LJM_TENANT_ID), conn, "password")
+        except VaultNotFound:
+            return LoadboardCredOut(source=src, configured=False, reason="no_credential")
+        except Exception as exc:  # noqa: BLE001
+            return LoadboardCredOut(source=src, configured=False, reason=f"decrypt_failed:{exc}")
+        status, started = await _last_run(s, src)
+    return LoadboardCredOut(
+        source=src,
+        configured=True,
+        username_masked=_mask_username(str(bundle.get("username") or "")),
+        last_run_status=status,
+        last_run_at=started,
+    )
+
+
+@router.put("/connectors/loadboard/broker-page-urls", response_model=LoadboardCredsListOut)
+async def set_broker_page_urls(payload: BrokerPageUrlsIn, request: Request) -> LoadboardCredsListOut:
+    """Replace the public-broker-board URL allowlist (one entry per URL).
+
+    Each entry is ``{"label": str, "url": str, "enabled": bool}``. Lives on
+    the singleton settings row; the ``ai_page`` source reads it.
+    """
+    cleaned: list[dict] = []
+    for raw in payload.urls or []:
+        if not isinstance(raw, dict):
+            continue
+        url = str(raw.get("url") or "").strip()
+        if not url or not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        cleaned.append(
+            {
+                "label": str(raw.get("label") or "")[:120],
+                "url": url[:2048],
+                "enabled": bool(raw.get("enabled", True)),
+            }
+        )
+    async with request.app.state.sessionmaker() as s:
+        row = (
+            await s.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+        ).scalar_one_or_none()
+        if row is None:
+            row = SettingsRow(id=1)
+            s.add(row)
+        row.load_source_urls = cleaned
+        await s.commit()
+    # Re-use the GET projection so the client gets a consistent payload.
+    return await list_loadboard_creds(request)

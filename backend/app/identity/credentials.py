@@ -3,23 +3,30 @@
 AES-GCM per record. Payload layout on disk:
     secret_enc = nonce (12 bytes) || ciphertext || tag (16 bytes)
 
-Key material lives in `TENANT_CRED_KEY` env (32-byte base64). We never
-store the key in the DB, never log plaintext, and never return the raw
-secret through any other seam — adapters receive a decrypted bundle only
-when they ask the vault for it.
+Key material resolution (first match wins, same pattern as
+``effective_auth_jwt_secret``):
 
-v0 — scaffolding + unit test ready. Wiring to the ConnectorRegistry
-happens during the adapter rehome.
+    1. ``TENANT_CRED_KEY`` env — a 32-byte base64 blob; wins when set.
+    2. ``settings.cred_key`` DB column — backfilled by migration 0025.
+    3. First-use bootstrap — generate 32 random bytes, persist to the
+       settings row, return. Means a deploy with *no* env still has a
+       working vault; the key is durable from the moment anything writes
+       the first credential.
+
+We never log plaintext, never surface the raw key, and the key cache is
+per-process (reset hook exists for tests).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
 import secrets
+from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.tenant import TenantId
@@ -33,23 +40,93 @@ class VaultNotFound(KeyError):
     pass
 
 
-def _load_key() -> bytes:
-    raw = os.environ.get("TENANT_CRED_KEY")
-    if not raw:
-        raise VaultConfigError(
-            "TENANT_CRED_KEY env not set — needed to decrypt tenant_credentials."
-        )
+_key_cache: bytes | None = None
+_key_lock = asyncio.Lock()
+
+
+def _decode_key(raw: str) -> bytes:
     key = base64.b64decode(raw)
     if len(key) != 32:
-        raise VaultConfigError(f"TENANT_CRED_KEY must decode to 32 bytes, got {len(key)}.")
+        raise VaultConfigError(f"vault key must decode to 32 bytes, got {len(key)}.")
     return key
 
 
+def _env_key() -> bytes | None:
+    raw = os.environ.get("TENANT_CRED_KEY")
+    if not raw:
+        return None
+    return _decode_key(raw)
+
+
+async def effective_vault_key(session: AsyncSession) -> bytes:
+    """Env > DB > bootstrap. Cached per process.
+
+    Writes a new key into ``settings.cred_key`` on first use when both
+    env and DB are empty — matches the auth_jwt_secret bootstrap pattern
+    (hq rule: a missing durable secret is a cold-start concern, not a
+    permanent misconfiguration).
+    """
+    global _key_cache
+    if _key_cache is not None:
+        return _key_cache
+    async with _key_lock:
+        if _key_cache is not None:
+            return _key_cache
+        env = _env_key()
+        if env is not None:
+            _key_cache = env
+            return _key_cache
+        # Lazy import to avoid a circular dep at module load.
+        from app.identity.models import SettingsRow
+
+        row = (await session.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+        if row is not None and row.cred_key:
+            _key_cache = _decode_key(row.cred_key)
+            return _key_cache
+        # Bootstrap — generate + persist.
+        new = secrets.token_bytes(32)
+        encoded = base64.b64encode(new).decode("ascii")
+        if row is None:
+            row = SettingsRow(id=1)
+            session.add(row)
+        row.cred_key = encoded
+        await session.commit()
+        _key_cache = new
+        return _key_cache
+
+
+def reset_vault_key_cache() -> None:
+    """Test hook — reset the per-process vault-key cache."""
+    global _key_cache
+    _key_cache = None
+
+
 class CredentialVault:
-    """Read/write `tenant_credentials` with per-record AES-GCM."""
+    """Read/write `tenant_credentials` with per-record AES-GCM.
+
+    ``key`` is optional; the recommended path is ``await for_session(session)``
+    which resolves env → DB → bootstrap. Direct ``CredentialVault(key=...)``
+    construction stays supported for tests and sync code paths. A
+    zero-arg construction with no env falls back to the sync bootstrap:
+    callers get a clear error that steers them to the async path.
+    """
 
     def __init__(self, key: bytes | None = None) -> None:
-        self._aesgcm = AESGCM(key or _load_key())
+        if key is None:
+            env = _env_key()
+            if env is None:
+                raise VaultConfigError(
+                    "vault key not available via env; use `CredentialVault.for_session(session)` "
+                    "to resolve via DB."
+                )
+            key = env
+        self._aesgcm = AESGCM(key)
+
+    @classmethod
+    async def for_session(cls, session: AsyncSession) -> "CredentialVault":
+        """Resolve the key via env → DB → bootstrap; return a ready vault."""
+        key = await effective_vault_key(session)
+        return cls(key=key)
 
     async def put(
         self,

@@ -202,6 +202,31 @@ class SettingsRow(Base):
     brand_email: Mapped[str | None] = mapped_column(String(320))
     brand_logo_url: Mapped[str | None] = mapped_column(String(500))
     brand_accent_hex: Mapped[str | None] = mapped_column(String(7))
+    # Per-source driver choice (migration 0024). `off` | `api` | `agent`.
+    # Server default `off` so adding the env never trips the NOT NULL on an
+    # existing row (the bbunikoop boolean-default lesson).
+    loads_dat_driver: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="off", server_default=text("'off'")
+    )
+    loads_chr_driver: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="off", server_default=text("'off'")
+    )
+    loads_lb123_driver: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="off", server_default=text("'off'")
+    )
+    loads_truckstop_driver: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="off", server_default=text("'off'")
+    )
+    # Operator-managed public broker-page allowlist for the ``ai_page``
+    # source. List of ``{"label": str, "url": str, "enabled": bool}``.
+    load_source_urls: Mapped[list] = mapped_column(
+        JSONType, nullable=False, default=list, server_default=text("'[]'")
+    )
+    # Durable vault key (migration 0025). Env TENANT_CRED_KEY wins; otherwise
+    # this column backfills so the vault works with zero env configuration.
+    # Nullable so an older row that pre-dates the migration still reads clean;
+    # the key helper writes one on first use (mirror of auth_jwt_secret).
+    cred_key: Mapped[str | None] = mapped_column(String(64))
 
 
 class User(TenantMixin, Base):

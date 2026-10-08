@@ -15,7 +15,13 @@ from typing import Literal, Protocol
 import anyio
 
 from app.config import Settings
-from app.integrations.adapters.email.credentials import build_delegated_credentials, load_sa_info, test_refresh
+from app.integrations.adapters.email.credentials import (
+    build_delegated_credentials,
+    load_sa_info,
+    resolve_impersonate,
+    resolve_sa_info,
+    test_refresh,
+)
 
 log = logging.getLogger(__name__)
 
@@ -179,12 +185,16 @@ def get_mail_sender(settings: Settings, mode_override: str | None = None) -> Mai
     if not getattr(settings, "mail_owner_send_enabled", False):
         log.info("mail/factory: owner-send switch OFF; using simulated")
         return SimulatedSender()
-    sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
+    sa = resolve_sa_info(settings)
     if sa is None:
-        log.warning("mail/factory: GMAIL_SA_JSON missing/invalid; falling back to simulated")
+        log.warning(
+            "mail/factory: Gmail SA JSON missing — paste it in Settings → Connectors "
+            "or set GMAIL_SA_JSON env; falling back to simulated"
+        )
         return SimulatedSender()
     scopes = list(settings.gmail.scopes_send)
-    creds = build_delegated_credentials(sa, settings.gmail.impersonate, scopes)
+    impersonate = resolve_impersonate(settings) or settings.gmail.impersonate
+    creds = build_delegated_credentials(sa, impersonate, scopes)
     ok, reason = test_refresh(creds)
     if not ok:
         log.warning("mail/factory: token refresh failed (%s); falling back to simulated", reason)

@@ -61,6 +61,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from app.shared.http import build_shared_client
 
         app.state.http = build_shared_client()
+        # Prime the Gmail SA JSON cache from the vault — the sync mail factory
+        # functions consult this cache when ``GMAIL_SA_JSON`` env is unset, so
+        # pasting creds in Settings works with zero env configuration. No-op
+        # when nothing has been stored yet.
+        try:
+            from app.integrations.adapters.email.credentials import prime_from_vault
+
+            await prime_from_vault(app.state.sessionmaker)
+        except Exception:  # noqa: BLE001  pragma: no cover
+            pass
         try:
             yield
         finally:

@@ -27,7 +27,12 @@ from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, Protocol
 
 from app.config import Settings
-from app.integrations.adapters.email.credentials import build_delegated_credentials, load_sa_info
+from app.integrations.adapters.email.credentials import (
+    build_delegated_credentials,
+    load_sa_info,
+    resolve_impersonate,
+    resolve_sa_info,
+)
 from app.integrations.adapters.email.ratelimit import MailboxLimiter
 
 REBACKFILL_DAYS = 30
@@ -118,13 +123,15 @@ class GmailMailbox:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._limiter = MailboxLimiter(settings.gmail.per_mailbox_rps, settings.gmail.global_rps)
-        self._sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
+        # Env wins; else vault-primed cache (populated during app lifespan).
+        self._sa = resolve_sa_info(settings)
 
     async def list_mailboxes(self) -> list[str]:
-        if self._sa is None or not self._settings.gmail.admin_impersonate:
+        impersonate = resolve_impersonate(self._settings)
+        if self._sa is None or not impersonate:
             return []
         creds = build_delegated_credentials(
-            self._sa, self._settings.gmail.admin_impersonate, list(self._settings.gmail.scopes_admin)
+            self._sa, impersonate, list(self._settings.gmail.scopes_admin)
         )
         if creds is None:
             return []
@@ -385,7 +392,7 @@ def _parse_gmail_message(raw: dict, mailbox: str) -> RawMessage | None:
 def get_mailbox_source(settings: Settings) -> MailboxSource:
     if settings.mailbox_source != "gmail":
         return SimulatedMailbox()
-    sa = load_sa_info(settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None)
+    sa = resolve_sa_info(settings)
     if sa is None:
         return SimulatedMailbox()
     return GmailMailbox(settings)
