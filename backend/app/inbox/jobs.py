@@ -31,9 +31,13 @@ def _bind(tenant_id: str) -> None:
 @app.task(name="inbox.mail_backfill", queue="default", pass_context=False)
 async def mail_backfill(tenant_id: str, mailbox: str, months: int = 12) -> None:
     _bind(tenant_id)
+    from sqlalchemy import select
+
+    from app.analysis.models import PredictionRun
     from app.config import get_settings
     from app.db import create_engine, create_sessionmaker
     from app.integrations.mail_service import backfill as svc_backfill
+    from app.shared.queue import dispatch
 
     settings = get_settings()
     engine = create_engine(settings)
@@ -41,6 +45,24 @@ async def mail_backfill(tenant_id: str, mailbox: str, months: int = 12) -> None:
         sm = create_sessionmaker(engine)
         stats = await svc_backfill(sm, settings, mailbox=mailbox, months=months)
         log.info("mail_backfill: done", extra={"mailbox": mailbox, "upserted": stats.upserted})
+
+        # First-backfill → one-shot analysis trigger. Gate on PredictionRun so a
+        # second mailbox's backfill (or any subsequent run) never re-queues it.
+        # Belt + braces: nightly cron and `analysis.nightly` itself are already
+        # re-run-safe (DELETE-then-INSERT per snapshot) — this gate is the
+        # cleanest short-circuit and keeps the behavior obvious.
+        async with sm() as session:
+            existing = await session.execute(
+                select(PredictionRun.id)
+                .where(PredictionRun.tenant_id == tenant_id)
+                .where(PredictionRun.kind == "analysis_nightly")
+                .limit(1)
+            )
+            if existing.first() is None:
+                await dispatch("analysis.nightly", tenant_id=tenant_id)
+                log.info("mail_backfill: first-backfill analysis queued", extra={"tenant_id": tenant_id})
+            else:
+                log.info("mail_backfill: analysis already present, skip first-run trigger")
     finally:
         await engine.dispose()
 
