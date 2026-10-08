@@ -163,6 +163,7 @@ export function LoadsBoard() {
           }
           if (!flipped) toast.error("Sent, but status update failed")
           void refresh()
+          setCompose(null)
         }
         return res
       },
