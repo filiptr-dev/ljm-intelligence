@@ -17,6 +17,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2, Mail, Phone, Package, X } from "lucide-react"
+import type { ContactOption } from "@/components/app/email-composer"
+import { SingleEmailBuilder } from "@/components/app/single-email-builder"
+import { singleSendAdapter, type EmailSendAdapter } from "@/lib/api/email-send"
 import {
   listLoadSources,
   listLoads,
@@ -58,6 +61,13 @@ function statusPillClass(s: string): string {
   }
 }
 
+type ComposeState = {
+  hash: string
+  subject: string
+  body: string
+  recipient: ContactOption
+}
+
 export function LoadsBoard() {
   const [groups, setGroups] = React.useState<LoadGroupRow[]>([])
   const [sources, setSources] = React.useState<LoadSourceRow[]>([])
@@ -66,6 +76,7 @@ export function LoadsBoard() {
   const [busy, setBusy] = React.useState<string | null>(null)
   const [drawerGroup, setDrawerGroup] = React.useState<LoadGroupRow | null>(null)
   const [pasteText, setPasteText] = React.useState("")
+  const [compose, setCompose] = React.useState<ComposeState | null>(null)
 
   const refresh = React.useCallback(async () => {
     try {
@@ -106,14 +117,57 @@ export function LoadsBoard() {
         toast.error("Could not build inquiry")
         return
       }
-      // Prefer the single email builder path if we can — the backend returns
-      // a mailto: URL today; the dispatch allowed that as a cleanly-prefilled
-      // fallback. Opening the mailto URL is the one-click action for v1.
-      window.location.href = r.compose_url
+      if (!r.broker_email) {
+        toast.error("No broker email on file")
+        return
+      }
+      const broker = (group.broker ?? {}) as { name?: string }
+      const origin = (group.origin ?? {}) as { state?: string | null }
+      const name = broker.name ?? r.broker_email
+      setCompose({
+        hash: group.group_hash,
+        subject: r.subject,
+        body: r.body,
+        recipient: {
+          id: `load:${group.group_hash}`,
+          kind: "broker",
+          name,
+          contactName: name,
+          email: r.broker_email,
+          // Display-only, same as the broker page's synthesised recipient.
+          region: (origin.state ?? "") as ContactOption["region"],
+          sub: `Broker · ${origin.state ?? "load inquiry"}`,
+        },
+      })
+      setDrawerGroup(null)
     } finally {
       setBusy(null)
     }
   }
+
+  // Wrap the shared adapter so the group flips to "contacted" only after a
+  // successful send (the builder has no "sent" callback; we don't edit it).
+  const composeAdapter = React.useMemo<EmailSendAdapter | null>(() => {
+    if (!compose) return null
+    const hash = compose.hash
+    return {
+      kind: "single",
+      send: async (p) => {
+        const res = await singleSendAdapter.send(p)
+        if (res.ok) {
+          let flipped = false
+          try {
+            flipped = !!(await postLoadGroupStatus(hash, "contacted"))
+          } catch {
+            flipped = false
+          }
+          if (!flipped) toast.error("Sent, but status update failed")
+          void refresh()
+        }
+        return res
+      },
+    }
+  }, [compose, refresh])
 
   async function onPaste() {
     if (!pasteText.trim()) return
@@ -287,6 +341,28 @@ export function LoadsBoard() {
           </div>
         )}
       </Panel>
+
+      {compose && composeAdapter && (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/40 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-3xl rounded-md border bg-background p-4 shadow-xl">
+            <div className="mb-2 flex justify-end">
+              <Button size="sm" variant="ghost" onClick={() => setCompose(null)} aria-label="Close">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <SingleEmailBuilder
+              contacts={[]}
+              backHref="/loads"
+              backLabel="Back to loads"
+              initialRecipient={compose.recipient}
+              initialToId={compose.recipient.id}
+              initialSubject={compose.subject}
+              initialBody={compose.body}
+              onSend={composeAdapter}
+            />
+          </div>
+        </div>
+      )}
 
       {drawerGroup && (
         <TakeItDrawer
