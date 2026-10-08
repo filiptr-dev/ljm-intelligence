@@ -154,9 +154,11 @@ def test_registry_counts_six() -> None:
         "loadboard123",
         "truckstop",
     ]
-    # Only the two placeholder sources are enabled by default.
+    # By default only ``paste`` is enabled: ``ai_page`` needs the agent sidecar
+    # URL + at least one enabled source URL, and the vendor sources are behind
+    # the ``loads_<src>_driver`` switch which defaults to ``off``.
     kinds = [s.kind for s in enabled_sources(_s())]
-    assert set(kinds) == {"ai_page", "paste"}
+    assert set(kinds) == {"paste"}
 
 
 def test_registry_by_kind() -> None:

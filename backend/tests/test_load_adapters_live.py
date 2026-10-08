@@ -285,7 +285,10 @@ async def test_refresh_source_is_idempotent_on_source_ref(monkeypatch) -> None:
     _patch_client(monkeypatch, dat_mod, handler)
     sm = _fake_sessionmaker()
 
-    stats_a = await loads_service.refresh_source(sm, _dat_settings(), "dat")
-    stats_b = await loads_service.refresh_source(sm, _dat_settings(), "dat")
+    # Vendor sources sit behind a driver switch that defaults to "off";
+    # opt DAT into the API driver so refresh actually fetches.
+    settings = _dat_settings().model_copy(update={"loads_dat_driver": "api"})
+    stats_a = await loads_service.refresh_source(sm, settings, "dat")
+    stats_b = await loads_service.refresh_source(sm, settings, "dat")
     assert stats_a.inserted == 1 and stats_a.skipped == 0
     assert stats_b.inserted == 0 and stats_b.skipped == 1  # idempotent
