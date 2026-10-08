@@ -1496,6 +1496,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analysis/lead/{lead_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lead Ai Summary Endpoint
+         * @description AI summary of the relationship with one broker, from real emails only.
+         */
+        get: operations["lead_ai_summary_endpoint_analysis_lead__lead_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analysis/overview": {
         parameters: {
             query?: never;
@@ -3309,6 +3329,35 @@ export interface components {
             outcome: string;
             /** Logged At */
             logged_at: string | null;
+        };
+        /** LeadAiSummaryOut */
+        LeadAiSummaryOut: {
+            /** Summary */
+            summary?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "empty" | "unavailable";
+            /**
+             * Ai Used
+             * @default false
+             */
+            ai_used: boolean;
+            /** Ai Error */
+            ai_error?: string | null;
+            /** Generated At */
+            generated_at?: string | null;
+            /**
+             * Cached
+             * @default false
+             */
+            cached: boolean;
+            /**
+             * Email Count
+             * @default 0
+             */
+            email_count: number;
         };
         /** LeadDetail */
         LeadDetail: {
@@ -7670,6 +7719,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FirstTouchOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lead_ai_summary_endpoint_analysis_lead__lead_id__get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadAiSummaryOut"];
                 };
             };
             /** @description Validation Error */

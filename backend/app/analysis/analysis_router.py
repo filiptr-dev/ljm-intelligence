@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.analysis import kpi_service as kpi, service as svc
@@ -250,6 +250,39 @@ class OverviewKpiOut(BaseModel):
     period: dict
     tiles: list[KpiBlockOut]
     booked_vs_rejected: BookedVsRejectedOut
+
+
+class LeadAiSummaryOut(BaseModel):
+    summary: str | None = None
+    status: Literal["ok", "empty", "unavailable"]
+    ai_used: bool = False
+    ai_error: str | None = None
+    generated_at: datetime | None = None
+    cached: bool = False
+    email_count: int = 0
+
+
+@router.get("/lead/{lead_id}", response_model=LeadAiSummaryOut)
+async def lead_ai_summary_endpoint(
+    request: Request, session: Session, lead_id: str, refresh: bool = Query(default=False)
+) -> LeadAiSummaryOut:
+    """AI summary of the relationship with one broker, from real emails only."""
+    from app.analysis.lead_ai_summary_service import LeadNotFound, get_lead_summary
+    from app.integrations.adapters.ai import provider as ai_provider
+
+    provider = None
+    resolve_error: str | None = None
+    try:
+        provider = ai_provider.get_for("inbox_analysis", settings=request.app.state.settings)
+    except Exception as exc:  # noqa: BLE001
+        resolve_error = f"resolve_failed:{type(exc).__name__}"
+    try:
+        r = await get_lead_summary(
+            session, lead_id, provider=provider, resolve_error=resolve_error, refresh=refresh
+        )
+    except LeadNotFound:
+        raise HTTPException(status_code=404, detail="lead not found") from None
+    return LeadAiSummaryOut(**r.__dict__)
 
 
 @router.get("/overview", response_model=OverviewKpiOut)

@@ -679,7 +679,7 @@ export default function BrokerDetailPage() {
           {b.main_lane ? <MainLaneCard lane={b.main_lane} /> : null}
 
           {/* Restored (ba15198^): health gauge, 6-tile stats, 12-month chart. */}
-          <BrokerOverviewSections metrics={data.overview_metrics ?? null} />
+          <BrokerOverviewSections metrics={data.overview_metrics ?? null} brokerId={b.id} />
 
           <BrokerKpis brokerId={b.id} />
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     Integer,
     Numeric,
@@ -180,3 +181,24 @@ class ForgetContactAudit(TenantMixin, Base):
     __table_args__ = (
         Index("ix_forget_contact_audit_tenant", "tenant_id", "performed_at"),
     )
+
+
+class LeadAiSummary(TenantMixin, Base):
+    """Cached AI relationship summary per broker (migration 0030).
+
+    Only successful AI output is stored. ``input_hash`` = newest message id +
+    message count, so a new email invalidates the row.
+    """
+
+    __tablename__ = "lead_ai_summaries"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
+    )
+    lead_id: Mapped[str] = mapped_column(String(64), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default=text("''"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("tenant_id", "lead_id", name="uq_lead_ai_summaries_tenant_lead"),)

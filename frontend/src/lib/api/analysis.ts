@@ -65,6 +65,16 @@ export async function getCapacityKpi(opts: PeriodQuery = {}, signal?: AbortSigna
   return unwrap(res, "/analysis/capacity")
 }
 
+export type LeadAiSummary = components["schemas"]["LeadAiSummaryOut"]
+
+export async function getLeadAiSummary(leadId: string, refresh = false, signal?: AbortSignal): Promise<LeadAiSummary> {
+  const res = await api.GET("/analysis/lead/{lead_id}", {
+    params: { path: { lead_id: leadId }, query: { refresh } },
+    signal,
+  })
+  return unwrap(res, `/analysis/lead/${leadId}`)
+}
+
 export async function getBrokerKpi(brokerId: string, opts: PeriodQuery = {}, signal?: AbortSignal): Promise<BrokerKpi> {
   const res = await api.GET("/analysis/broker-kpis/{broker_id}", {
     params: { path: { broker_id: brokerId }, query: opts },

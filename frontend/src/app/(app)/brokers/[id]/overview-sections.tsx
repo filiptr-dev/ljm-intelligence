@@ -11,14 +11,16 @@
  *
  * All three read from the same ``overview_metrics`` block the list page uses
  * (one aggregate, two surfaces). Sections hide when their data is null/thin.
- * The AI summary card remains deferred until GET /analysis/lead/{id} exists.
+ * The AI summary card reads GET /analysis/lead/{id} (real emails only).
  */
 
 import * as React from "react"
 import { Panel } from "@/components/app/ui"
 import { cn } from "@/lib/utils"
 import { pct } from "@/lib/format"
+import Link from "next/link"
 import type { OverviewMetrics } from "@/lib/api/brokers"
+import * as analysis from "@/lib/api/analysis"
 
 const COMPONENT_LABEL: Record<string, string> = {
   recency: "Recency",
@@ -202,19 +204,115 @@ export function ActivityChart12m({ om }: { om: OverviewMetrics }) {
   )
 }
 
+export function AiSummaryCard({ brokerId }: { brokerId: string }) {
+  const [data, setData] = React.useState<analysis.LeadAiSummary | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [failed, setFailed] = React.useState(false)
+  const [tick, setTick] = React.useState(0)
+  const refreshRef = React.useRef(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    const refresh = refreshRef.current
+    refreshRef.current = false
+    analysis
+      .getLeadAiSummary(brokerId, refresh)
+      .then((d) => {
+        if (!cancelled) setData(d)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [brokerId, tick])
+
+  const reload = (refresh: boolean) => {
+    refreshRef.current = refresh
+    setLoading(true)
+    setFailed(false)
+    setTick((t) => t + 1)
+  }
+
+  return (
+    <Panel
+      title="AI summary"
+      description="Written from this broker's real emails only."
+      action={
+        <button
+          type="button"
+          onClick={() => reload(true)}
+          disabled={loading}
+          className="rounded-sm border border-border px-2 py-0.5 text-[0.68rem] font-medium hover:bg-muted disabled:opacity-50"
+        >
+          Refresh
+        </button>
+      }
+    >
+      {loading ? (
+        <div className="h-16 animate-pulse rounded-sm bg-muted/40" aria-hidden />
+      ) : failed || !data ? (
+        <p className="text-sm text-muted-foreground">
+          Couldn&apos;t load the summary.{" "}
+          <button type="button" onClick={() => reload(false)} className="underline">
+            Retry
+          </button>
+        </p>
+      ) : data.status === "empty" ? (
+        <p className="text-sm text-muted-foreground">No emails with this broker yet.</p>
+      ) : data.status === "unavailable" ? (
+        <p className="text-sm text-muted-foreground">
+          {data.ai_error === "provider_null" ? (
+            <>
+              AI provider not configured.{" "}
+              <Link href="/settings" className="underline">
+                Open Settings
+              </Link>
+            </>
+          ) : (
+            <>
+              Summary unavailable ({data.ai_error}).{" "}
+              <button type="button" onClick={() => reload(true)} className="underline">
+                Retry
+              </button>
+            </>
+          )}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-sm leading-relaxed">{data.summary}</p>
+          <div className="flex items-center gap-2 text-[0.68rem] text-muted-foreground">
+            <span className="rounded-[2px] bg-muted px-1 font-semibold">AI-generated</span>
+            <span>{data.email_count} emails</span>
+            {data.generated_at ? <span>{new Date(data.generated_at).toLocaleString()}</span> : null}
+          </div>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 export function BrokerOverviewSections({
   metrics,
+  brokerId,
 }: {
   metrics: OverviewMetrics | null | undefined
+  brokerId: string
 }) {
-  if (!metrics) return null
+  // The summary is independent of the metrics guard: it has its own empty state.
+  if (!metrics) return <AiSummaryCard brokerId={brokerId} />
   const hasAnyActivity =
     metrics.booked_12m + metrics.rejected_12m + metrics.sent_30d > 0 ||
     metrics.monthly_series.some((p) => p.sent + p.booked + p.rejected > 0)
   // Fully-thin + no activity → nothing meaningful to render.
-  if (metrics.health_thin && !hasAnyActivity) return null
+  if (metrics.health_thin && !hasAnyActivity) return <AiSummaryCard brokerId={brokerId} />
   return (
     <div className="space-y-4">
+      <AiSummaryCard brokerId={brokerId} />
       <HealthGaugeCard om={metrics} />
       <StatTilesRow om={metrics} />
       {hasAnyActivity ? <ActivityChart12m om={metrics} /> : null}
