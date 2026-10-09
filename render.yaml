@@ -1,5 +1,32 @@
 # Render Blueprint for the LJM Intelligence API. Frontend deploys on Vercel.
 services:
+  # ------------------------------------------------------------------
+  # LLM headless-browser sidecar — Playwright/Chromium behind the 5-verb
+  # HTTP contract (`navigate`, `read_page`, `scroll`, `wait`, `finish`).
+  # The api service's loads agent-loop calls it over `AGENT_BROWSER_URL`.
+  # Starter plan: Chromium is RAM-hungry; free would OOM-kill it.
+  # ------------------------------------------------------------------
+  - type: web
+    name: ljm-intelligence-agent-browser
+    runtime: docker
+    plan: starter
+    region: ohio
+    dockerfilePath: ./agent-browser/Dockerfile
+    dockerContext: ./agent-browser
+    buildFilter:
+      paths:
+        - agent-browser/**
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      # Shared secret with the api service. If unset here AND unset on the
+      # api service, the sidecar is open (handy for first-boot debugging).
+      # In prod: set the same value on both services.
+      - key: AGENT_BROWSER_TOKEN
+        sync: false
+      - key: AGENT_BROWSER_IDLE_SECONDS
+        value: "600"
+
   - type: web
     name: ljm-intelligence-api
     runtime: docker
@@ -181,4 +208,16 @@ services:
       - key: TRUCKSTOP_USERNAME
         sync: false
       - key: TRUCKSTOP_PASSWORD
+        sync: false
+      # ---- Headless-browser sidecar (agent-browser service above)
+      # Set to the public HTTPS URL of ljm-intelligence-agent-browser on
+      # first deploy (e.g. https://ljm-intelligence-agent-browser.onrender.com).
+      # Render doesn't expose a `fromService` URL property that includes the
+      # scheme, so this stays sync:false — one-time paste after the sidecar
+      # service comes up. Absent → agent sources short-circuit as disabled;
+      # never a boot error.
+      - key: AGENT_BROWSER_URL
+        sync: false
+      # Must match AGENT_BROWSER_TOKEN on the sidecar. Both empty = open.
+      - key: AGENT_BROWSER_TOKEN
         sync: false

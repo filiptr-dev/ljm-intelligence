@@ -146,6 +146,7 @@ class AgentSource:
             session_id=session_id,
             allowlist=self._allowlist or [start_url],
             caps=caps,
+            agent_browser_token=getattr(settings, "agent_browser_token", "") or "",
         )
         await self._log_run(settings, result)
         return result.loads

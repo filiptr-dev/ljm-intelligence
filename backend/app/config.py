@@ -173,6 +173,10 @@ class Settings(BaseSettings):
     # Agent sidecar URL (`navigate` / `read_page` / `scroll` / `wait` /
     # `finish`). Missing → agent sources short-circuit as disabled.
     agent_browser_url: str = ""
+    # Shared secret with the agent-browser sidecar. Empty = open (handy for
+    # local dev); in prod set the same value on both services. The driver
+    # reads env > settings-row like the other credential-shaped values.
+    agent_browser_token: str = ""
     agent_daily_runs_per_source: int = Field(default=48, ge=1, le=1000)
     agent_max_steps: int = Field(default=20, ge=1, le=200)
     agent_max_input_tokens: int = Field(default=120000, ge=1000, le=1_000_000)

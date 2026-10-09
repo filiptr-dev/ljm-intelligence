@@ -116,11 +116,19 @@ def _coerce_loads(payload: dict, source: str) -> list[RawLoad]:
 
 
 async def _call_tool(
-    client: httpx.AsyncClient, base_url: str, tool: str, args: dict
+    client: httpx.AsyncClient,
+    base_url: str,
+    tool: str,
+    args: dict,
+    *,
+    token: str = "",
 ) -> dict:
     if tool not in ALLOWED_TOOLS:
         raise ValueError(f"unknown_tool:{tool}")
-    resp = await client.post(f"{base_url.rstrip('/')}/{tool}", json=args, timeout=30.0)
+    headers = {"X-Agent-Token": token} if token else None
+    resp = await client.post(
+        f"{base_url.rstrip('/')}/{tool}", json=args, headers=headers, timeout=30.0
+    )
     resp.raise_for_status()
     return resp.json()
 
@@ -152,6 +160,7 @@ async def run(
     allowlist: list[str],
     caps: AgentCaps | None = None,
     http_client: httpx.AsyncClient | None = None,
+    agent_browser_token: str = "",
 ) -> AgentResult:
     """One tool-loop run.
 
@@ -166,21 +175,27 @@ async def run(
 
     try:
         # Seed the loop with a navigate to ``start_url``.
-        nav = await _call_tool(client, agent_browser_url, "navigate", {
-            "url": start_url, "session_id": session_id,
-        })
+        nav = await _call_tool(
+            client, agent_browser_url, "navigate",
+            {"url": start_url, "session_id": session_id},
+            token=agent_browser_token,
+        )
         steps += 1
 
         # First read — look for login challenge before spending a token.
-        rp = await _call_tool(client, agent_browser_url, "read_page", {
-            "session_id": session_id, "max_chars": 24000,
-        })
+        rp = await _call_tool(
+            client, agent_browser_url, "read_page",
+            {"session_id": session_id, "max_chars": 24000},
+            token=agent_browser_token,
+        )
         steps += 1
         page_text = ((rp.get("data") or {}).get("text")) or ""
         if _looks_like_login(page_text):
-            await _call_tool(client, agent_browser_url, "finish", {
-                "session_id": session_id, "payload": {"status": "login_challenge"},
-            })
+            await _call_tool(
+                client, agent_browser_url, "finish",
+                {"session_id": session_id, "payload": {"status": "login_challenge"}},
+                token=agent_browser_token,
+            )
             return AgentResult(status="login_challenge", steps=steps)
 
         transcript = [
@@ -228,7 +243,10 @@ async def run(
                                        tokens_out=tokens_out, error="url_not_in_allowlist")
 
             args.setdefault("session_id", session_id)
-            result = await _call_tool(client, agent_browser_url, tool, args)
+            result = await _call_tool(
+                client, agent_browser_url, tool, args,
+                token=agent_browser_token,
+            )
             steps += 1
 
             if tool == "finish":
@@ -244,9 +262,11 @@ async def run(
             if tool == "read_page":
                 new_text = ((result.get("data") or {}).get("text")) or ""
                 if _looks_like_login(new_text):
-                    await _call_tool(client, agent_browser_url, "finish", {
-                        "session_id": session_id, "payload": {"status": "login_challenge"},
-                    })
+                    await _call_tool(
+                        client, agent_browser_url, "finish",
+                        {"session_id": session_id, "payload": {"status": "login_challenge"}},
+                        token=agent_browser_token,
+                    )
                     return AgentResult(status="login_challenge", steps=steps,
                                        tokens_in=tokens_in, tokens_out=tokens_out)
                 transcript.append({"role": "user", "content": f"page_text:\n{new_text}"})

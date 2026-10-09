@@ -1,0 +1,147 @@
+"""Scoped contract test — the 5 tool verbs the backend agent calls.
+
+The point: lock the request/response shape to what
+``backend/app/integrations/adapters/loadboard/agent_browser/agent.py``
+expects. Playwright is stubbed out so this stays fast and offline.
+"""
+
+from __future__ import annotations
+
+import importlib
+import sys
+import types
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+class _FakePage:
+    def __init__(self) -> None:
+        self.last_url = ""
+        self.context = types.SimpleNamespace(close=self._close)
+        self._html = "<html><body><h1>Hello</h1><p>world</p></body></html>"
+
+    async def goto(self, url: str, **_: Any) -> None:
+        self.last_url = url
+
+    async def content(self) -> str:
+        return self._html
+
+    async def evaluate(self, _script: str) -> None:
+        return None
+
+    async def wait_for_timeout(self, _ms: int) -> None:
+        return None
+
+    async def _close(self) -> None:
+        return None
+
+
+class _FakeContext:
+    async def new_page(self) -> _FakePage:
+        return _FakePage()
+
+    async def close(self) -> None:
+        return None
+
+
+class _FakeBrowser:
+    async def new_context(self, **_: Any) -> _FakeContext:
+        return _FakeContext()
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    # Reload the module clean each test so the module-level `_sessions`
+    # dict doesn't leak across cases.
+    for mod in [m for m in list(sys.modules) if m == "app.service"]:
+        del sys.modules[mod]
+    monkeypatch.delenv("AGENT_BROWSER_TOKEN", raising=False)
+    service = importlib.import_module("app.service")
+
+    async def _fake_ensure_browser() -> _FakeBrowser:
+        return _FakeBrowser()
+
+    monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+    return TestClient(service.app)
+
+
+def test_health_lists_allowed_tools(client: TestClient) -> None:
+    r = client.get("/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert sorted(body["tools"]) == ["finish", "navigate", "read_page", "scroll", "wait"]
+
+
+def test_full_tool_loop_contract(client: TestClient) -> None:
+    sid = "s-test-1"
+
+    # navigate — the first call the agent always makes
+    r = client.post("/navigate", json={"url": "https://example.com/", "session_id": sid})
+    assert r.status_code == 200
+    nav = r.json()
+    assert nav["ok"] is True and nav["data"]["url"] == "https://example.com/"
+
+    # read_page — must come back as {"ok": True, "data": {"text": "...", "len": N}}
+    r = client.post("/read_page", json={"session_id": sid, "max_chars": 100})
+    assert r.status_code == 200
+    rp = r.json()
+    assert rp["ok"] is True
+    assert "text" in rp["data"] and "len" in rp["data"]
+    assert "Hello" in rp["data"]["text"]
+
+    # scroll
+    r = client.post("/scroll", json={"session_id": sid, "pages": 2})
+    assert r.status_code == 200
+    assert r.json()["data"]["scrolled"] == 2
+
+    # wait
+    r = client.post("/wait", json={"session_id": sid, "ms": 10})
+    assert r.status_code == 200
+    assert r.json()["data"]["waited_ms"] == 10
+
+    # finish — echoes the payload the agent needs for load extraction
+    r = client.post("/finish", json={"session_id": sid, "payload": {"loads": []}})
+    assert r.status_code == 200
+    fin = r.json()
+    assert fin["ok"] is True and fin["data"]["payload"] == {"loads": []}
+
+
+def test_read_without_session_is_400(client: TestClient) -> None:
+    r = client.post("/read_page", json={"session_id": "nope"})
+    assert r.status_code == 400
+
+
+def test_token_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    for mod in [m for m in list(sys.modules) if m == "app.service"]:
+        del sys.modules[mod]
+    monkeypatch.setenv("AGENT_BROWSER_TOKEN", "s3cret")
+    service = importlib.import_module("app.service")
+
+    async def _fake_ensure_browser() -> _FakeBrowser:
+        return _FakeBrowser()
+
+    monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+    c = TestClient(service.app)
+
+    # No token → 401
+    r = c.post("/navigate", json={"url": "https://example.com/", "session_id": "x"})
+    assert r.status_code == 401
+
+    # Right token → 200
+    r = c.post(
+        "/navigate",
+        json={"url": "https://example.com/", "session_id": "x"},
+        headers={"X-Agent-Token": "s3cret"},
+    )
+    assert r.status_code == 200
+
+    # /health stays open even with a token set
+    r = c.get("/health")
+    assert r.status_code == 200
+    assert r.json()["auth"] == "token"

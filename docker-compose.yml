@@ -46,6 +46,27 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
 
+  agent-browser:
+    # LLM headless-browser sidecar (Playwright/Chromium). The `api` service
+    # talks to it over `AGENT_BROWSER_URL`; absent URL = feature disabled,
+    # never a boot error. Shared secret via `AGENT_BROWSER_TOKEN` on both
+    # sides (optional — unset = open).
+    build:
+      context: ./agent-browser
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      PORT: "8080"
+      AGENT_BROWSER_TOKEN: ${AGENT_BROWSER_TOKEN:-}
+      AGENT_BROWSER_IDLE_SECONDS: ${AGENT_BROWSER_IDLE_SECONDS:-600}
+    ports:
+      - "${AGENT_BROWSER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   worker:
     build:
       context: ./backend
