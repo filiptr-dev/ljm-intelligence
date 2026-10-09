@@ -18,6 +18,7 @@ from app.analysis.models import (
     ObjectionCluster,
     PredictionRun,
 )
+from app.followups.models import FollowupNote
 from app.identity.models import (
     Organization,
     OrganizationMember,
@@ -61,6 +62,7 @@ __all__ = [
     "EmailTemplate",
     "EnrichmentCandidate",
     "FitScoreHistory",
+    "FollowupNote",
     "ForgetContactAudit",
     "LanePrediction",
     "Lead",

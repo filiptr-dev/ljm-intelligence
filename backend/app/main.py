@@ -255,6 +255,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.prospecting.enrichment_router import router as enrichment_router
     from app.prospecting.leads_router import router as leads_router
     from app.prospecting.shipper_finder_router import router as shipper_finder_router
+    from app.vetting.router import router as vetting_router
+    from app.followups.router import router as followups_router
 
     user_or_cron = [Depends(require_user_or_cron)]
     user_only = [Depends(current_user), Depends(current_tenant)]
@@ -293,4 +295,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(jobs_router, dependencies=user_or_cron)
     app.include_router(jobs_admin_router, dependencies=user_only)
+    # Track B tools — Broker Check (vetting) + Follow-ups kanban. Owner-only
+    # reads over data we already compute; see
+    # projects/ljm-intelligence/plan/2026-10-09-tools-vetting-followups.md.
+    app.include_router(vetting_router, dependencies=user_only)
+    app.include_router(followups_router, dependencies=user_only)
     return app
