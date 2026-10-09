@@ -293,4 +293,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(jobs_router, dependencies=user_or_cron)
     app.include_router(jobs_admin_router, dependencies=user_only)
+
+    # Rates — Lane Rate / Load Profit / Backhaul Finder (plan
+    # 2026-10-09-tools-rates-profit-backhaul). All three POSTs read; the
+    # EIA weekly refresh runs out of band via `rates.refresh_diesel`.
+    from app.rates.router import router as rates_router
+
+    app.include_router(rates_router, dependencies=user_only)
     return app

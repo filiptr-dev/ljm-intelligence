@@ -616,3 +616,79 @@ async def put_loadboard_drivers(payload: LoadboardDriverIn, request: Request) ->
         kill=row.loads_agent_kill,
     )
     return _project_drivers(row, _env_overrides_active(settings))
+
+
+# ---- EIA diesel API key (plan 2026-10-09-tools-rates-profit-backhaul) ---
+# Stored in the vault; absent key is a graceful "diesel not configured" in
+# the rate tools — never a boot-time error. No new env var.
+
+
+class EiaKeyIn(BaseModel):
+    api_key: str = Field(min_length=4, max_length=200)
+
+
+class EiaKeyOut(BaseModel):
+    configured: bool
+    key_masked: str | None = None
+    reason: str | None = None
+
+
+def _mask_key(k: str) -> str:
+    if not k:
+        return ""
+    if len(k) <= 6:
+        return "•" * len(k)
+    return f"{k[:3]}…{k[-3:]}"
+
+
+@router.get("/connectors/eia", response_model=EiaKeyOut)
+async def get_eia_key(request: Request) -> EiaKeyOut:
+    """Status-only read: configured + masked key, never plaintext."""
+    from app.identity.credentials import CredentialVault, VaultConfigError, VaultNotFound
+
+    async with request.app.state.sessionmaker() as s:
+        try:
+            vault = await CredentialVault.for_session(s)
+        except VaultConfigError as exc:
+            return EiaKeyOut(configured=False, reason=f"vault_unavailable:{exc}")
+        try:
+            bundle = await vault.get(s, TenantId(LJM_TENANT_ID), "eia", "api_key")
+        except VaultNotFound:
+            return EiaKeyOut(configured=False)
+        except Exception as exc:  # noqa: BLE001
+            return EiaKeyOut(configured=False, reason=f"decrypt_failed:{exc}")
+    key = str((bundle or {}).get("api_key") or "")
+    return EiaKeyOut(configured=bool(key), key_masked=_mask_key(key) if key else None)
+
+
+@router.post("/connectors/eia", response_model=EiaKeyOut)
+async def set_eia_key(payload: EiaKeyIn, request: Request) -> EiaKeyOut:
+    from app.identity.credentials import CredentialVault, VaultConfigError
+
+    async with request.app.state.sessionmaker() as s:
+        try:
+            vault = await CredentialVault.for_session(s)
+        except VaultConfigError as exc:
+            return EiaKeyOut(configured=False, reason=f"vault_unavailable:{exc}")
+        await vault.put(
+            s, TenantId(LJM_TENANT_ID), "eia", "api_key",
+            {"api_key": payload.api_key},
+        )
+        await s.commit()
+    return EiaKeyOut(configured=True, key_masked=_mask_key(payload.api_key))
+
+
+@router.delete("/connectors/eia", response_model=EiaKeyOut)
+async def clear_eia_key(request: Request) -> EiaKeyOut:
+    from app.identity.models import TenantCredential
+
+    async with request.app.state.sessionmaker() as s:
+        await s.execute(
+            _sa_delete(TenantCredential).where(
+                TenantCredential.tenant_id == LJM_TENANT_ID,
+                TenantCredential.connector == "eia",
+                TenantCredential.kind == "api_key",
+            )
+        )
+        await s.commit()
+    return EiaKeyOut(configured=False)

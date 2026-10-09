@@ -36,6 +36,7 @@ from app.outreach.models import (
     SentLog,
     Suppression,
 )
+from app.rates.models import DieselPrice
 from app.prospecting.models import (
     AgentRun,
     CrawlRun,
@@ -58,6 +59,7 @@ __all__ = [
     "CallOutcome",
     "CapacityPost",
     "CrawlRun",
+    "DieselPrice",
     "EmailTemplate",
     "EnrichmentCandidate",
     "FitScoreHistory",
