@@ -25,6 +25,7 @@ proxy. So:
 from __future__ import annotations
 
 import asyncio
+import hmac
 import ipaddress
 import logging
 import os
@@ -111,7 +112,7 @@ def _check_token(x_agent_token: str | None) -> None:
         if ALLOW_OPEN:
             return
         raise HTTPException(401, "token_not_configured")
-    if (x_agent_token or "") != REQUIRED_TOKEN:
+    if not hmac.compare_digest(x_agent_token or "", REQUIRED_TOKEN):
         raise HTTPException(401, "bad_token")
 
 
@@ -170,6 +171,34 @@ async def _ensure_browser() -> Any:
     return _browser_handle
 
 
+async def _request_guard(route: Any) -> None:  # pragma: no cover - exercised live
+    """Per-request SSRF guard installed on each session's BrowserContext.
+
+    Playwright calls this for **every** request the page triggers —
+    redirects, iframes, subresources, JS-initiated fetches, favicon.ico.
+    We re-run the same scheme + resolver check as /navigate so a public
+    first hop can't 302 or `window.location =` into 127.0.0.1 / the
+    cloud-metadata service / a VPC address, and a DNS rebind that flips
+    an A record between the goto and a subresource is still blocked.
+    """
+    try:
+        request = route.request
+        parsed = urlparse(request.url)
+        if parsed.scheme not in {"http", "https"}:
+            await route.abort("blockedbyclient")
+            return
+        if _is_private_or_internal(parsed.hostname or ""):
+            log.warning("agent_browser: blocked SSRF %s", request.url)
+            await route.abort("blockedbyclient")
+            return
+        await route.continue_()
+    except Exception:  # pragma: no cover
+        try:
+            await route.abort("failed")
+        except Exception:
+            pass
+
+
 async def _get_page(session_id: str) -> Any:
     entry = _sessions.get(session_id)
     if entry is not None:
@@ -177,6 +206,13 @@ async def _get_page(session_id: str) -> Any:
         return entry["page"]
     browser = await _ensure_browser()
     context = await browser.new_context()
+    # Guard every outgoing request from this context — redirects, nested
+    # iframes, JS fetches. Installing it on the context (not the page)
+    # means pop-ups and new-tab navigations inherit it automatically.
+    try:
+        await context.route("**/*", _request_guard)
+    except Exception:  # pragma: no cover - tests may stub context
+        log.warning("agent_browser: route guard not installed", exc_info=True)
     page = await context.new_page()
     _sessions[session_id] = {"page": page, "touched": time.time()}
     return page
@@ -273,7 +309,21 @@ async def navigate(
         await page.goto(body.url, wait_until="domcontentloaded", timeout=20000)
     except Exception as exc:  # noqa: BLE001
         return ToolOut(ok=False, error=f"navigate_failed:{type(exc).__name__}:{exc}")
-    return ToolOut(ok=True, data={"url": body.url})
+    # Belt-and-braces: even with context.route in place, re-check the final
+    # URL after goto in case a redirect chain landed on a private host that
+    # slipped past (or we're mocked in a test env without route).
+    final_url = ""
+    try:
+        final_url = str(getattr(page, "url", "") or body.url)
+    except Exception:  # pragma: no cover
+        final_url = body.url
+    try:
+        final_parsed = urlparse(final_url)
+    except Exception:  # noqa: BLE001  pragma: no cover
+        final_parsed = None
+    if final_parsed and _is_private_or_internal(final_parsed.hostname or ""):
+        raise HTTPException(400, "redirected_to_private_host")
+    return ToolOut(ok=True, data={"url": final_url or body.url})
 
 
 @app.post("/read_page", response_model=ToolOut)

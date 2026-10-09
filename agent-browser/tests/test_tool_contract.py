@@ -207,3 +207,96 @@ def test_ssrf_blocks_private_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert r.status_code == 400
     assert r.json()["detail"] == "scheme_not_http_or_https"
+
+
+def test_wrong_token_401(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mismatched X-Agent-Token → 401 bad_token (constant-time compare)."""
+    for mod in [m for m in list(sys.modules) if m == "app.service"]:
+        del sys.modules[mod]
+    monkeypatch.setenv("AGENT_BROWSER_TOKEN", "s3cret")
+    monkeypatch.delenv("AGENT_BROWSER_ALLOW_OPEN", raising=False)
+    service = importlib.import_module("app.service")
+
+    async def _fake_ensure_browser() -> _FakeBrowser:
+        return _FakeBrowser()
+
+    monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+    monkeypatch.setattr(service, "_is_private_or_internal", lambda host: False)
+    c = TestClient(service.app)
+
+    r = c.post(
+        "/navigate",
+        json={"url": "https://example.com/", "session_id": "x"},
+        headers={"X-Agent-Token": "wrong"},
+    )
+    assert r.status_code == 401
+    assert r.json()["detail"] == "bad_token"
+
+
+def test_redirect_to_private_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 302 (or JS nav) that lands on 127.0.0.1 / 169.254.169.254 fails.
+
+    The ``_request_guard`` installed on the context would normally abort
+    the request mid-flight — we can't run real Playwright here, so this
+    test proves the second line of defence: the post-goto URL re-check.
+    """
+    for mod in [m for m in list(sys.modules) if m == "app.service"]:
+        del sys.modules[mod]
+    monkeypatch.setenv("AGENT_BROWSER_TOKEN", "s3cret")
+    monkeypatch.delenv("AGENT_BROWSER_ALLOW_OPEN", raising=False)
+    service = importlib.import_module("app.service")
+
+    for redirected_to in ("http://127.0.0.1/admin", "http://169.254.169.254/meta"):
+        class _RedirectingPage(_FakePage):
+            def __init__(self, final: str) -> None:
+                super().__init__()
+                self.url = final
+
+            async def goto(self, url: str, **_: Any) -> None:
+                # Simulates a 302 chain → final URL is self.url, not url.
+                self.last_url = url
+
+        page_instance = _RedirectingPage(redirected_to)
+
+        class _FixedCtx:
+            async def new_page(self) -> _RedirectingPage:
+                return page_instance
+
+            async def route(self, *_a, **_kw) -> None:
+                return None
+
+            async def close(self) -> None:
+                return None
+
+        class _FixedBrowser:
+            async def new_context(self, **_: Any) -> _FixedCtx:
+                return _FixedCtx()
+
+            async def close(self) -> None:
+                return None
+
+        async def _fake_ensure_browser() -> _FixedBrowser:
+            return _FixedBrowser()
+
+        monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+        # First hop public (example.com → public), post-check sees private.
+        call_count = {"n": 0}
+
+        def _guard(host: str) -> bool:
+            call_count["n"] += 1
+            # Only treat the actual redirect target as private.
+            return host in {"127.0.0.1", "169.254.169.254"}
+
+        monkeypatch.setattr(service, "_is_private_or_internal", _guard)
+
+        service._sessions.clear()
+        c = TestClient(service.app)
+        r = c.post(
+            "/navigate",
+            json={"url": "https://example.com/", "session_id": "r"},
+            headers={"X-Agent-Token": "s3cret"},
+        )
+        assert r.status_code == 400, (
+            f"expected 400 redirected_to_private_host, got {r.status_code} / {r.text}"
+        )
+        assert r.json()["detail"] == "redirected_to_private_host"
