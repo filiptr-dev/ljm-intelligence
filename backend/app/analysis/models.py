@@ -205,3 +205,75 @@ class LeadAiSummary(TenantMixin, Base):
     next_step: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
     __table_args__ = (UniqueConstraint("tenant_id", "lead_id", name="uq_lead_ai_summaries_tenant_lead"),)
+
+
+# ---- Lanes history (migrations 0034 / 0035) ---------------------------------
+
+
+class FreightRun(TenantMixin, Base):
+    """One completed trip. Separate from the live ``loads`` board (0034).
+
+    ``source='demo'`` rows are seeded by migration 0036 and purged by its
+    downgrade. Margin / $-per-mile are derived in SQL, never stored.
+    """
+
+    __tablename__ = "freight_runs"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
+    )
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    broker_name: Mapped[str | None] = mapped_column(String(255))
+    broker_lead_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("leads.id", ondelete="SET NULL"))
+    origin_city: Mapped[str] = mapped_column(String(128), nullable=False)
+    origin_state: Mapped[str] = mapped_column(String(8), nullable=False)
+    dest_city: Mapped[str] = mapped_column(String(128), nullable=False)
+    dest_state: Mapped[str] = mapped_column(String(8), nullable=False)
+    origin_lat: Mapped[float] = mapped_column(Numeric(8, 5), nullable=False)
+    origin_lng: Mapped[float] = mapped_column(Numeric(9, 5), nullable=False)
+    dest_lat: Mapped[float] = mapped_column(Numeric(8, 5), nullable=False)
+    dest_lng: Mapped[float] = mapped_column(Numeric(9, 5), nullable=False)
+    miles: Mapped[int] = mapped_column(Integer, nullable=False)
+    deadhead_miles: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    equipment: Mapped[str | None] = mapped_column(String(32))
+    pickup_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    delivery_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revenue_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    cost_fuel_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    cost_driver_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    cost_load_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    cost_dispatch_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    raw: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_freight_runs_tenant_pickup", "tenant_id", "pickup_at"),
+        Index("ix_freight_runs_tenant_states", "tenant_id", "origin_state", "dest_state"),
+        Index("ix_freight_runs_tenant_source", "tenant_id", "source"),
+    )
+
+
+class LaneInsightsCache(TenantMixin, Base):
+    """Cached AI lane insights, one row per (tenant, period_key) (0035).
+
+    Only successful AI output is stored. ``entity_insights`` maps an entity
+    key (``state:TX`` / ``lane:Dallas,TX>Memphis,TN``) to its suggestions so the
+    map popover never has to call the model on hover.
+    """
+
+    __tablename__ = "lane_insights_cache"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
+    )
+    period_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    focus_lanes: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    declining_lanes: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    market_shifts: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    cost_levers: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    entity_insights: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default=text("''"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("tenant_id", "period_key", name="uq_lane_insights_tenant_period"),)

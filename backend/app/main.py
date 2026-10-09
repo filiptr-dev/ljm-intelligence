@@ -216,6 +216,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # per route group (user_only vs user_or_cron vs open unsubscribe).
     from app.analysis.ai_router import router as ai_router
     from app.analysis.analysis_router import router as analysis_router
+    from app.analysis.lanes_router import router as lanes_router
     from app.analysis.overview_router import router as overview_router
     from app.followups.router import router as followups_router
     from app.identity.auth.deps import current_user, require_user_or_cron
@@ -284,6 +285,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(mail_router, dependencies=user_only)
     app.include_router(inbox_router, dependencies=user_only)
     app.include_router(analysis_router, dependencies=user_only)
+    app.include_router(lanes_router, dependencies=user_only)
     app.include_router(mail_cron_router, dependencies=user_or_cron)
     app.include_router(loads_router, dependencies=user_or_cron)
     app.include_router(unsubscribe_router)
