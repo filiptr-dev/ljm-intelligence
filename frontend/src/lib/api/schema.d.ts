@@ -2289,6 +2289,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/fleet/trucks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Trucks */
+        get: operations["fleet_trucks_fleet_trucks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/fleet/trucks/{unit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Truck Detail */
+        get: operations["fleet_truck_detail_fleet_trucks__unit_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/fleet/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Alerts */
+        get: operations["fleet_alerts_fleet_alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2384,6 +2435,26 @@ export interface components {
             ai_used: boolean;
             /** Ai Error */
             ai_error?: string | null;
+        };
+        /** AlertStatement */
+        AlertStatement: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** Text */
+            text: string;
+        };
+        /** AlertStrip */
+        AlertStrip: {
+            /** Expiring Docs */
+            expiring_docs: components["schemas"]["DocRef"][];
+            /** Critical Defects */
+            critical_defects: components["schemas"]["DefectRef"][];
+            /** Maintenance Due */
+            maintenance_due: components["schemas"]["MaintRef"][];
+            /** Statements */
+            statements: components["schemas"]["AlertStatement"][];
         };
         /** AskCitationModel */
         AskCitationModel: {
@@ -3145,6 +3216,46 @@ export interface components {
             /** Pipeline Status */
             pipeline_status: string;
         };
+        /** DefectOut */
+        DefectOut: {
+            /** Id */
+            id: number;
+            /** Inspection Id */
+            inspection_id: number | null;
+            /** Severity */
+            severity: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+        };
+        /** DefectRef */
+        DefectRef: {
+            /** Id */
+            id: number;
+            /** Truck Id */
+            truck_id: number;
+            /** Unit Number */
+            unit_number: string;
+            /** Severity */
+            severity: string;
+            /** Title */
+            title: string;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+        };
         /** DieselRowOut */
         DieselRowOut: {
             /** Padd */
@@ -3243,6 +3354,42 @@ export interface components {
              * @default /leads
              */
             href: string;
+        };
+        /** DocRef */
+        DocRef: {
+            /** Id */
+            id: number;
+            /** Truck Id */
+            truck_id: number;
+            /** Unit Number */
+            unit_number: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Expires On
+             * Format: date
+             */
+            expires_on: string;
+            /** Days Left */
+            days_left: number;
+        };
+        /** DocumentOut */
+        DocumentOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Number */
+            number: string | null;
+            /** Issued On */
+            issued_on: string | null;
+            /**
+             * Expires On
+             * Format: date
+             */
+            expires_on: string;
+            /** Days Left */
+            days_left: number;
         };
         /** DraftIn */
         DraftIn: {
@@ -3503,6 +3650,15 @@ export interface components {
             /** Latency Days */
             latency_days: number | null;
         };
+        /** FleetList */
+        FleetList: {
+            /** Source */
+            source: string;
+            /** Trucks */
+            trucks: components["schemas"]["TruckRow"][];
+            /** Trailers */
+            trailers: components["schemas"]["TruckRow"][];
+        };
         /** ForgetContactIn */
         ForgetContactIn: {
             /**
@@ -3694,6 +3850,24 @@ export interface components {
             broker_email: string | null;
             /** Broker Phone */
             broker_phone: string | null;
+        };
+        /** InspectionOut */
+        InspectionOut: {
+            /** Id */
+            id: number;
+            /**
+             * Inspected At
+             * Format: date-time
+             */
+            inspected_at: string;
+            /** Inspector Name */
+            inspector_name: string | null;
+            /** Result */
+            result: string;
+            /** Odometer At Inspection */
+            odometer_at_inspection: number | null;
+            /** Notes */
+            notes: string | null;
         };
         /** IntentCountOut */
         IntentCountOut: {
@@ -4516,6 +4690,45 @@ export interface components {
             /** Last Seen At */
             last_seen_at?: string | null;
         };
+        /** MaintRef */
+        MaintRef: {
+            /** Id */
+            id: number;
+            /** Truck Id */
+            truck_id: number;
+            /** Unit Number */
+            unit_number: string;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string | null;
+            /**
+             * Scheduled For
+             * Format: date
+             */
+            scheduled_for: string;
+            /** Days Until */
+            days_until: number;
+        };
+        /** MaintenanceOut */
+        MaintenanceOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string | null;
+            /** Scheduled For */
+            scheduled_for: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Odometer At */
+            odometer_at: number | null;
+            /** Cost Usd */
+            cost_usd: number | null;
+            /** Notes */
+            notes: string | null;
+        };
         /** MetricPointOut */
         MetricPointOut: {
             /** Bucket */
@@ -4595,6 +4808,18 @@ export interface components {
             reason: string;
             /** Due At */
             due_at?: string | null;
+        };
+        /** NextDocExpiry */
+        NextDocExpiry: {
+            /** Kind */
+            kind: string;
+            /**
+             * Expires On
+             * Format: date
+             */
+            expires_on: string;
+            /** Days Left */
+            days_left: number;
         };
         /** NoReplyOut */
         NoReplyOut: {
@@ -5050,6 +5275,34 @@ export interface components {
             comps_count: number;
             /** Evidence */
             evidence: string[];
+        };
+        /** RecentRun */
+        RecentRun: {
+            /** Id */
+            id: number;
+            /**
+             * Pickup At
+             * Format: date-time
+             */
+            pickup_at: string;
+            /** Origin */
+            origin: string;
+            /** Dest */
+            dest: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Miles */
+            miles: number;
+            /** Revenue Usd */
+            revenue_usd: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Margin Usd */
+            margin_usd: number;
+            /** Dollar Per Mile */
+            dollar_per_mile: number | null;
+            /** Margin Pct */
+            margin_pct: number | null;
         };
         /** ReconnectOut */
         ReconnectOut: {
@@ -5807,6 +6060,159 @@ export interface components {
             waiting_minutes: number;
             /** Snippet */
             snippet: string;
+        };
+        /** TruckDetail */
+        TruckDetail: {
+            /** Source */
+            source: string;
+            truck: components["schemas"]["TruckOut"];
+            /** Summary */
+            summary: string;
+            kpis: components["schemas"]["TruckKpi"];
+            /** Inspections */
+            inspections: components["schemas"]["InspectionOut"][];
+            /** Defects */
+            defects: components["schemas"]["DefectOut"][];
+            /** Maintenance */
+            maintenance: components["schemas"]["MaintenanceOut"][];
+            /** Documents */
+            documents: components["schemas"]["DocumentOut"][];
+            /** Recent Runs */
+            recent_runs: components["schemas"]["RecentRun"][];
+        };
+        /** TruckKpi */
+        TruckKpi: {
+            /** Window Days */
+            window_days: number;
+            /**
+             * Runs Count
+             * @default 0
+             */
+            runs_count: number;
+            /**
+             * Miles
+             * @default 0
+             */
+            miles: number;
+            /**
+             * Revenue Usd
+             * @default 0
+             */
+            revenue_usd: number;
+            /**
+             * Cost Fuel Usd
+             * @default 0
+             */
+            cost_fuel_usd: number;
+            /**
+             * Cost Driver Usd
+             * @default 0
+             */
+            cost_driver_usd: number;
+            /**
+             * Cost Other Usd
+             * @default 0
+             */
+            cost_other_usd: number;
+            /**
+             * Margin Usd
+             * @default 0
+             */
+            margin_usd: number;
+            /** Dollar Per Mile */
+            dollar_per_mile: number | null;
+            /** Cost Per Mile */
+            cost_per_mile: number | null;
+        };
+        /** TruckOut */
+        TruckOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Unit Number */
+            unit_number: string;
+            /** Vin */
+            vin: string | null;
+            /** Make */
+            make: string | null;
+            /** Model */
+            model: string | null;
+            /** Year */
+            year: number | null;
+            /** Plate */
+            plate: string | null;
+            /** Equipment */
+            equipment: string | null;
+            /** Status */
+            status: string;
+            /** Odometer Miles */
+            odometer_miles: number | null;
+            /** Home Base City */
+            home_base_city: string | null;
+            /** Home Base State */
+            home_base_state: string | null;
+            /** Driver Name */
+            driver_name: string | null;
+            /** Last Lat */
+            last_lat: number | null;
+            /** Last Lng */
+            last_lng: number | null;
+            /** Last Seen At */
+            last_seen_at: string | null;
+        };
+        /** TruckRow */
+        TruckRow: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Unit Number */
+            unit_number: string;
+            /** Make */
+            make: string | null;
+            /** Model */
+            model: string | null;
+            /** Year */
+            year: number | null;
+            /** Equipment */
+            equipment: string | null;
+            /** Status */
+            status: string;
+            /** Driver Name */
+            driver_name: string | null;
+            /** Odometer Miles */
+            odometer_miles: number | null;
+            /** Home Base */
+            home_base: string | null;
+            /**
+             * Runs 30D
+             * @default 0
+             */
+            runs_30d: number;
+            /**
+             * Miles 30D
+             * @default 0
+             */
+            miles_30d: number;
+            /**
+             * Revenue 30D Usd
+             * @default 0
+             */
+            revenue_30d_usd: number;
+            /** Cost Per Mile 30D Usd */
+            cost_per_mile_30d_usd: number | null;
+            next_doc_expiry: components["schemas"]["NextDocExpiry"] | null;
+            /**
+             * Open Defects
+             * @default 0
+             */
+            open_defects: number;
+            /**
+             * Open Critical Defects
+             * @default 0
+             */
+            open_critical_defects: number;
         };
         /** UnsubscribeOut */
         UnsubscribeOut: {
@@ -10409,6 +10815,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveNoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fleet_trucks_fleet_trucks_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fleet_truck_detail_fleet_trucks__unit_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                unit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TruckDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fleet_alerts_fleet_alerts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertStrip"];
                 };
             };
             /** @description Validation Error */
