@@ -66,7 +66,12 @@ async def test_ok_parses_strict_schema_and_caches(sm):
     async with sm() as s:
         r = await ai.get_lane_insights(s, SCOPE, "year", provider=p, now=NOW)
     assert r.status == "ok" and not r.cached
-    assert r.focus_lanes[0].delta_pct == 8.1 and r.declining_lanes[0].delta_pct == -11
+    # the model's 8.1 / -11 are NOT trusted: they are replaced by the aggregates' true rate trend
+    async with sm() as s:
+        agg = await ai.build_aggregates(s, SCOPE, "year", NOW)
+    true = {x["lane"].split(",")[0]: x["rate_trend_pct"] for x in agg["lanes"]}
+    assert r.focus_lanes[0].metric == "rate" and r.focus_lanes[0].delta_pct == true["Chicago"]
+    assert r.declining_lanes[0].metric == "rate" and r.declining_lanes[0].delta_pct == true["Dallas"]
     assert r.entity_insights["state:TX"] == ["Add Laredo backhauls out of Texas."]
     assert r.entity_insights["lane:Chicago,IL>Atlanta,GA"] == ["Raise the quote another 3%."]
     assert "state:ZZ" not in r.entity_insights
@@ -139,3 +144,54 @@ async def test_filtered_scope_gets_its_own_cache_row(sm):
         await ai.get_lane_insights(s, SCOPE, "year", provider=p, now=NOW)
         await ai.get_lane_insights(s, H.Scope(TENANT, state="TX"), "year", provider=p, now=NOW)
     assert await _count(sm) == 2
+
+
+# ---- grounding: the AI can never show a number the data does not contain ----
+
+AGG = {
+    "lanes": [
+        {"key": "lane:Houston,TX>Memphis,TN", "lane": "Houston, TX -> Memphis, TN", "rate_trend_pct": -0.9,
+         "volume_trend_pct": 92.3, "small_sample": True},
+        {"key": "lane:Chicago,IL>Atlanta,GA", "lane": "Chicago, IL -> Atlanta, GA", "rate_trend_pct": 8.1,
+         "volume_trend_pct": None, "small_sample": False},
+    ],
+    "states": [{"key": "state:TX", "state": "TX", "rate_trend_pct": -4.2, "volume_trend_pct": 5.0, "small_sample": False}],
+}
+ALLOWED = ai.allowed_entity_keys(AGG)
+
+
+def _parse(item):
+    payload = {"focus_lanes": [item], "declining_lanes": [], "market_shifts": [], "cost_levers": []}
+    return ai.parse_output(json.dumps(payload), ALLOWED, AGG)["focus_lanes"][0]
+
+
+def test_wrong_delta_is_overwritten_with_the_true_value_for_that_metric():
+    it = _parse({"lane": "Houston->Memphis", "why": "w", "metric": "rate", "delta_pct": 92})
+    assert (it.metric, it.delta_pct) == ("rate", -0.9)
+    it = _parse({"lane": "Houston, TX -> Memphis, TN", "why": "w", "metric": "volume", "delta_pct": -3})
+    assert (it.metric, it.delta_pct) == ("volume", 92.3)
+
+
+def test_metric_must_be_rate_or_volume_else_the_number_is_dropped():
+    for bad in ("", "margin", "pct", None):
+        it = _parse({"lane": "Houston -> Memphis", "why": "w", "metric": bad, "delta_pct": 92})
+        assert (it.metric, it.delta_pct) == ("", None)
+    assert _parse({"lane": "Houston -> Memphis", "why": "w", "metric": "$/mi", "delta_pct": 1}).metric == "rate"
+
+
+def test_no_true_value_or_unknown_lane_drops_the_number():
+    assert _parse({"lane": "Chicago -> Atlanta", "why": "w", "metric": "volume", "delta_pct": 25}).delta_pct is None
+    assert _parse({"lane": "Reno -> Boise", "why": "w", "metric": "rate", "delta_pct": 25}).delta_pct is None
+    assert _parse({"lane": "TX", "why": "w", "metric": "rate", "delta_pct": 25}).delta_pct == -4.2
+
+
+def test_low_sample_comes_from_the_aggregates_not_the_model():
+    assert _parse({"lane": "Houston -> Memphis", "why": "w", "metric": "rate", "low_sample": False}).low_sample is True
+    assert _parse({"lane": "Chicago -> Atlanta", "why": "w", "metric": "rate", "low_sample": True}).low_sample is False
+
+
+async def test_prompt_states_the_metric_rule_and_the_thin_sample_flag(sm):
+    p = Stub()
+    async with sm() as s:
+        await ai.get_lane_insights(s, SCOPE, "year", provider=p, now=NOW)
+    assert '"rate"' in p.calls[0] and '"volume"' in p.calls[0] and "small_sample" in p.calls[0]

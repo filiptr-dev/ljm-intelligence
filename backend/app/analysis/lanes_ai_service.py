@@ -17,12 +17,14 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis import lanes_history_service as H, lanes_repository as repo
+from app.analysis.lanes_text import LOW_SAMPLE_RUNS
 from app.analysis.models import LaneInsightsCache
 from app.analysis.schemas import (
     LaneAiInsights,
@@ -62,13 +64,16 @@ async def build_aggregates(session: AsyncSession, scope: H.Scope, period: LanesP
         "lanes": [
             {"key": f"lane:{ln.key}", "lane": san(f"{ln.origin} -> {ln.dest}"), "runs": ln.runs,
              "avg_rate_per_mile": ln.avg_rate_per_mi, "margin_pct": ln.margin_pct,
-             "rate_trend_pct": ln.trend_pct, "volume_trend_pct": ln.runs_trend_pct}
+             "rate_trend_pct": ln.trend_pct, "volume_trend_pct": ln.runs_trend_pct,
+             "runs_recent_half": ln.runs_recent, "runs_previous_half": ln.runs_base, "small_sample": ln.low_sample}
             for ln in lanes.lanes
         ],
         "states": [
             {"key": e.key, "state": e.label, "runs": e.metrics.runs, "revenue": e.metrics.revenue,
              "avg_rate_per_mile": e.metrics.rate_per_mile, "margin_pct": e.metrics.margin_pct,
-             "rate_trend_pct": e.trend.rate_pct, "volume_trend_pct": e.trend.runs_pct}
+             "rate_trend_pct": e.trend.rate_pct, "volume_trend_pct": e.trend.runs_pct,
+             "runs_recent_half": e.trend.runs_recent, "runs_previous_half": e.trend.runs_base,
+             "small_sample": e.trend.low_sample}
             for e in heat.states[:TOP_STATES]
         ],
         "market_shift_notes": [x.text for x in s.statements if x.key == "shift"],
@@ -83,11 +88,15 @@ def _build_prompt(agg: dict[str, Any]) -> str:
     return (
         "You advise a small US trucking carrier on which freight lanes to run. Using ONLY the aggregated numbers "
         "below, reply with a single JSON object and nothing else, exactly this shape: "
-        '{"focus_lanes":[{"lane":"A -> B","why":"one sentence with the numbers","metric":"$/mi","delta_pct":8.2}],'
+        '{"focus_lanes":[{"lane":"A -> B","why":"one sentence with the numbers","metric":"rate","delta_pct":8.2}],'
         '"declining_lanes":[same shape],'
         '"market_shifts":[{"headline":"short statement","evidence":"the numbers that show it"}],'
         '"cost_levers":[{"lever":"short imperative","impact_hint":"expected effect, grounded in the numbers"}],'
         '"entity_insights":{"<key from the data>":["one specific, actionable suggestion for that state or lane"]}}. '
+        '"metric" MUST be exactly "rate" (rate per mile) or "volume" (run count), and "delta_pct" MUST be that lane\'s '
+        'rate_trend_pct or volume_trend_pct copied from the data. Lanes and states with "small_sample": true '
+        f"(under {LOW_SAMPLE_RUNS} runs in a half) are noisy: prefer lanes with enough runs for focus_lanes and "
+        "declining_lanes, and never present a small-sample jump as a market shift. "
         f"Each of the four lists has 0-{MAX_ITEMS} items. Name concrete lanes and numbers; no generic advice and no "
         f"paragraphs. entity_insights keys MUST be copied from the `key` fields in the data; give at most "
         f"{MAX_PER_ENTITY} suggestions per key and skip keys you have nothing useful to say about. Say nothing "
@@ -113,8 +122,47 @@ def _num(v: Any) -> float | None:
         return None
 
 
-def parse_output(text: str, allowed: set[str]) -> dict[str, Any] | None:
-    """Strict-schema parse. ``None`` means unparseable (never invent)."""
+_METRICS = {"rate": "rate_trend_pct", "volume": "volume_trend_pct"}
+
+
+def _metric(v: Any) -> str | None:
+    """Canonical ``rate`` / ``volume``, or ``None`` when the model said something else."""
+    t = str(v or "").strip().lower()
+    if t in ("rate", "rate/mile", "rate/mi", "rate per mile", "$/mi", "$/mile"):
+        return "rate"
+    if t in ("volume", "runs", "run count", "volume (runs)"):
+        return "volume"
+    return None
+
+
+def _lane_norm(label: Any) -> tuple[str, ...]:
+    """'Chicago, IL -> Atlanta, GA' / 'Chicago->Atlanta' -> ('chicago', 'atlanta'); 'TX' -> ('tx',)."""
+    parts = re.split(r"\s*(?:->|-->|=>|\u2192|>)\s*", str(label or "").strip(), maxsplit=1)
+    out = []
+    for p in parts:
+        p = re.sub(r",\s*[A-Za-z]{2}\s*$", "", p.strip()) if "," in p else p.strip()
+        out.append(re.sub(r"[^a-z0-9]", "", p.lower()))
+    return tuple(out)
+
+
+def _truth_index(agg: dict[str, Any]) -> dict[tuple[str, ...], dict[str, Any]]:
+    idx: dict[tuple[str, ...], dict[str, Any]] = {}
+    for x in agg.get("lanes", []):
+        idx.setdefault(_lane_norm(x["lane"]), x)
+    for x in agg.get("states", []):
+        idx.setdefault(_lane_norm(x["state"]), x)
+    return idx
+
+
+def parse_output(text: str, allowed: set[str], agg: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Strict-schema parse. ``None`` means unparseable (never invent).
+
+    Schema-valid is not grounded: with ``agg`` every lane item's ``delta_pct`` is
+    *overwritten* by the true value from the aggregates for that lane/state and
+    metric (rate or volume), and dropped when there is none or the metric is not
+    one of those two. ``low_sample`` is also set from the aggregates, never the model.
+    """
+    truth = _truth_index(agg) if agg is not None else {}
     raw = text.strip()
     if raw.startswith("```"):
         raw = raw.strip("`").removeprefix("json").strip()
@@ -133,10 +181,14 @@ def parse_output(text: str, allowed: set[str]) -> dict[str, Any] | None:
         for it in obj[key]:
             if isinstance(it, dict) and _s(it.get("lane"), 1) and _s(it.get("why"), 1):
                 ev = it.get("evidence") if isinstance(it.get("evidence"), dict) else {}
+                metric = _metric(it.get("metric") or ev.get("metric"))
+                src = truth.get(_lane_norm(it["lane"]))
+                real = _num(src.get(_METRICS[metric])) if src is not None and metric else None
                 out.append(LaneInsightItem(
                     lane=_s(it["lane"], 120), why=_s(it["why"], 300),
-                    metric=_s(it.get("metric") or ev.get("metric"), 40),
-                    delta_pct=_num(it.get("delta_pct", ev.get("delta_pct"))),
+                    metric=metric if real is not None and metric else "",
+                    delta_pct=real,
+                    low_sample=bool(src and src.get("small_sample")),
                 ))
         return out[:MAX_ITEMS]
 
@@ -223,7 +275,7 @@ async def get_lane_insights(
     text = (getattr(call, "text", None) or "").strip()
     if getattr(call, "status", None) != "ok" or not text:
         return unavailable(f"empty_response:{getattr(call, 'status', None)}")
-    parsed = parse_output(text, allowed_entity_keys(agg))
+    parsed = parse_output(text, allowed_entity_keys(agg), agg)
     if parsed is None:
         return unavailable("unparseable_response")
 

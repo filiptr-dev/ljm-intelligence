@@ -17,7 +17,7 @@ def _rpm(rows):
 
 
 def test_count_deterministic_and_all_demo_ljm():
-    a, b = demo_rows(), demo_rows()
+    a, b = demo_rows(rev="0036"), demo_rows(rev="0036")
     assert len(a) == 2000 and a == b
     assert {r["source"] for r in a} == {"demo"} and {r["tenant_id"] for r in a} == {TENANT}
     assert all(r["raw"]["demo"] is True for r in a)
@@ -26,12 +26,12 @@ def test_count_deterministic_and_all_demo_ljm():
 
 
 def test_dominant_lanes_carry_about_60_percent():
-    g = Counter(r["raw"]["lane_group"] for r in demo_rows())
+    g = Counter(r["raw"]["lane_group"] for r in demo_rows(rev="0036"))
     assert 0.55 <= sum(g[k] for k in DOMINANT) / 2000 <= 0.65
 
 
 def test_market_shift_is_baked_in():
-    rows = demo_rows()
+    rows = demo_rows(rev="0036")
 
     def grp(name, arc):
         return [r for r in rows if r["raw"]["lane_group"] == name and r["raw"]["shift_arc"] == arc]
@@ -46,7 +46,7 @@ def test_market_shift_is_baked_in():
 
 
 def test_seasonality_and_costs_are_sane():
-    rows = demo_rows()
+    rows = demo_rows(rev="0036")
     reefer = Counter(r["pickup_at"].month for r in rows if r["equipment"] == "reefer")
     summer = sum(reefer[m] for m in (5, 6, 7, 8)) / 4
     rest = sum(v for m, v in reefer.items() if m not in (5, 6, 7, 8)) / 8
@@ -59,7 +59,7 @@ def test_seasonality_and_costs_are_sane():
 
 
 def test_length_band_mix_roughly_45_40_15():
-    miles = [r["miles"] for r in demo_rows()]
+    miles = [r["miles"] for r in demo_rows(rev="0036")]
     short = sum(1 for m in miles if m < 500) / 2000
     long_ = sum(1 for m in miles if m > 900) / 2000
     assert 0.35 <= short <= 0.5 and 0.10 <= long_ <= 0.2
@@ -72,7 +72,7 @@ pg = pytest.mark.skipif(
 
 
 @pg
-def test_pg_upgrade_idempotent_and_downgrade_removes_only_demo_rows():
+def test_pg_upgrade_idempotent_and_downgrade_removes_only_demo_rows(rev="0036"):
     import psycopg
     from alembic import command
     from alembic.config import Config

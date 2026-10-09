@@ -70,7 +70,10 @@ export function EntityCard({
         <Trend label="Rate per mile" value={entity.trend.rate_pct} />
         <Trend label="Volume (runs)" value={entity.trend.runs_pct} />
         <Trend label="Revenue" value={entity.trend.revenue_pct} />
-        <p className="pt-0.5 text-[0.66rem] text-muted-foreground">{entity.trend.label}</p>
+        <p className="pt-0.5 text-[0.66rem] text-muted-foreground">
+          {entity.trend.label}
+          {entity.trend.low_sample ? ` (small sample: ${int(entity.trend.runs_recent)} vs ${int(entity.trend.runs_base)} runs)` : ""}
+        </p>
       </div>
       <p className="mt-2 border-t border-border pt-2 text-[0.78rem] leading-relaxed">{entity.text}</p>
       <div className="mt-2 rounded-sm bg-accent px-2.5 py-2">

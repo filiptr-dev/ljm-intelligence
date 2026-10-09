@@ -3856,6 +3856,11 @@ export interface components {
             metric: string;
             /** Delta Pct */
             delta_pct: number | null;
+            /**
+             * Low Sample
+             * @default false
+             */
+            low_sample: boolean;
         };
         /** LaneKpiOut */
         LaneKpiOut: {
@@ -4005,6 +4010,21 @@ export interface components {
             rate_pct: number | null;
             /** Margin Pp */
             margin_pp: number | null;
+            /**
+             * Runs Recent
+             * @default 0
+             */
+            runs_recent: number;
+            /**
+             * Runs Base
+             * @default 0
+             */
+            runs_base: number;
+            /**
+             * Low Sample
+             * @default false
+             */
+            low_sample: boolean;
         };
         /** LanesSummary */
         LanesSummary: {
@@ -5710,6 +5730,21 @@ export interface components {
             trend_pct: number | null;
             /** Runs Trend Pct */
             runs_trend_pct: number | null;
+            /**
+             * Runs Recent
+             * @default 0
+             */
+            runs_recent: number;
+            /**
+             * Runs Base
+             * @default 0
+             */
+            runs_base: number;
+            /**
+             * Low Sample
+             * @default false
+             */
+            low_sample: boolean;
         };
         /** TopLanes */
         TopLanes: {

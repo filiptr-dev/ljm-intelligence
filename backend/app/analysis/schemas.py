@@ -67,6 +67,9 @@ class LaneTrend(_Out):
     revenue_pct: float | None = None
     rate_pct: float | None = None
     margin_pp: float | None = None
+    runs_recent: int = 0
+    runs_base: int = 0
+    low_sample: bool = False  # fewer than LOW_SAMPLE_RUNS runs in either half
 
 
 class LaneStatement(_Out):
@@ -116,6 +119,9 @@ class TopLane(_Out):
     margin_pct: float | None = None
     trend_pct: float | None = None  # $/mi, recent half vs half before
     runs_trend_pct: float | None = None
+    runs_recent: int = 0
+    runs_base: int = 0
+    low_sample: bool = False
 
 
 class TopLanes(_Out):
@@ -200,8 +206,9 @@ class RunsPage(_Out):
 class LaneInsightItem(_Out):
     lane: str
     why: str
-    metric: str = ""
+    metric: str = ""  # "rate" | "volume" (empty when no grounded number)
     delta_pct: float | None = None
+    low_sample: bool = False
 
 
 class ShiftItem(_Out):

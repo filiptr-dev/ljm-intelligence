@@ -16,6 +16,7 @@ from app.analysis.schemas import (
 )
 
 MIN_RUNS_FOR_TREND = 3
+LOW_SAMPLE_RUNS = 20  # below this in either half a trend is flagged "small sample"
 
 
 def money(v: float) -> str:
@@ -62,8 +63,12 @@ def make_metrics(runs: int, miles: float, revenue: float, fuel: float, driver: f
 
 def make_trend(label: str, recent: LaneMetrics, base: LaneMetrics) -> LaneTrend:
     """Recent half vs the half before it. None when either side is too thin."""
+    counts = {
+        "runs_recent": recent.runs, "runs_base": base.runs,
+        "low_sample": recent.runs < LOW_SAMPLE_RUNS or base.runs < LOW_SAMPLE_RUNS,
+    }
     if recent.runs < MIN_RUNS_FOR_TREND or base.runs < MIN_RUNS_FOR_TREND:
-        return LaneTrend(label=label)
+        return LaneTrend(label=label, **counts)
     rate = pct_change(recent.rate_per_mile or 0.0, base.rate_per_mile or 0.0)
     runs = pct_change(recent.runs, base.runs)
     rev = pct_change(recent.revenue, base.revenue)
@@ -78,6 +83,7 @@ def make_trend(label: str, recent: LaneMetrics, base: LaneMetrics) -> LaneTrend:
         revenue_pct=None if rev is None else round(rev, 1),
         rate_pct=None if rate is None else round(rate, 1),
         margin_pp=mpp,
+        **counts,
     )
 
 

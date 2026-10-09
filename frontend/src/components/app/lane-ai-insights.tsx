@@ -24,9 +24,20 @@ function Block({ title, tone, children, empty }: { title: string; tone?: "good" 
   )
 }
 
-function Delta({ v }: { v: number | null | undefined }) {
-  if (v == null) return null
-  return <span className={cn("num ml-1.5 rounded-[3px] px-1 text-[0.7rem] font-semibold", v >= 0 ? "bg-good/10 text-good" : "bg-bad/10 text-bad")}>{signedPct(v)}</span>
+const METRIC_LABEL: Record<string, string> = { rate: "rate/mile", volume: "volume" }
+
+/** The delta always names what moved ("+92% volume" vs "-6% rate/mile") — never a bare percentage. */
+function Delta({ v, metric, lowSample }: { v: number | null | undefined; metric?: string; lowSample?: boolean }) {
+  if (v == null) return lowSample ? <span className="ml-1.5 text-[0.7rem] text-muted-foreground">(small sample)</span> : null
+  const label = metric ? METRIC_LABEL[metric] : undefined
+  return (
+    <>
+      <span className={cn("num ml-1.5 rounded-[3px] px-1 text-[0.7rem] font-semibold", v >= 0 ? "bg-good/10 text-good" : "bg-bad/10 text-bad")}>
+        {signedPct(v, 0)}{label ? ` ${label}` : ""}
+      </span>
+      {lowSample ? <span className="ml-1 text-[0.7rem] text-muted-foreground">(small sample)</span> : null}
+    </>
+  )
 }
 
 /**
@@ -67,7 +78,7 @@ export function LaneAiInsightsPanel({ state, onRefresh }: { state: AiState; onRe
         <Block title="Focus lanes" tone="good" empty={!d.focus_lanes.length}>
           {d.focus_lanes.map((l) => (
             <li key={l.lane} className="text-[0.85rem] leading-snug">
-              <span className="font-semibold">{l.lane}</span><Delta v={l.delta_pct} />
+              <span className="font-semibold">{l.lane}</span><Delta v={l.delta_pct} metric={l.metric} lowSample={l.low_sample} />
               <div className="text-muted-foreground">{l.why}</div>
             </li>
           ))}
@@ -75,7 +86,7 @@ export function LaneAiInsightsPanel({ state, onRefresh }: { state: AiState; onRe
         <Block title="Declining lanes" tone="bad" empty={!d.declining_lanes.length}>
           {d.declining_lanes.map((l) => (
             <li key={l.lane} className="text-[0.85rem] leading-snug">
-              <span className="font-semibold">{l.lane}</span><Delta v={l.delta_pct} />
+              <span className="font-semibold">{l.lane}</span><Delta v={l.delta_pct} metric={l.metric} lowSample={l.low_sample} />
               <div className="text-muted-foreground">{l.why}</div>
             </li>
           ))}

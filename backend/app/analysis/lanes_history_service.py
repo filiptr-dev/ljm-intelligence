@@ -242,7 +242,8 @@ async def top_lanes(
             key, o, de = f"{k[0]}>{k[1]}", k[0], k[1]
         out.append(TopLane(key=key, origin=o, dest=de, runs=m.runs, miles=m.miles, revenue=m.revenue,
                            avg_rate_per_mi=m.rate_per_mile, margin_pct=m.margin_pct, trend_pct=tr.rate_pct,
-                           runs_trend_pct=tr.runs_pct))
+                           runs_trend_pct=tr.runs_pct, runs_recent=tr.runs_recent, runs_base=tr.runs_base,
+                           low_sample=tr.low_sample))
     return TopLanes(level="city" if level == "city" else "state", window_label=WINDOW_LABEL[period], lanes=out)
 
 
