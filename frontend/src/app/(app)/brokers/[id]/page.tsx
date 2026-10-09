@@ -327,7 +327,21 @@ function buildInitialRecipient(
 ): ContactOption | undefined {
   const email = emailOverride || b.primary_email.value
   if (!email) return undefined
-  const contactName = b.contacts[0]?.name.value ?? b.name
+  // BUG 4 — if the operator opened the builder by clicking a specific
+  // contact's address, match that contact so `{{first_name}}` renders
+  // their real first name rather than the first word of the company.
+  // Falls back to the first named contact, then to the company name.
+  const matched = b.contacts.find((c) => (c.email.value ?? "").toLowerCase() === email.toLowerCase())
+  const contactName = matched?.name.value ?? b.contacts[0]?.name.value ?? b.name
+  // Build a human lane label from the broker's main lane when both ends
+  // are known, so `{{lane}}` substitutes a real "Dallas → Chicago" instead
+  // of the generic "your lanes" fallback. Equipment stays unset — the
+  // broker payload doesn't carry one and the builder's "dry van" default
+  // is the honest fallback.
+  const laneLabel =
+    b.main_lane && b.main_lane.origin && b.main_lane.destination
+      ? `${b.main_lane.origin} → ${b.main_lane.destination}`
+      : undefined
   return {
     id: `broker:${b.id}`,
     kind: "broker",
@@ -338,6 +352,7 @@ function buildInitialRecipient(
     // a US state so we pass it through — the builder only displays this
     // string, never routes on it.
     region: b.state as ContactOption["region"],
+    lane: laneLabel,
     sub: `Broker · ${b.city ? `${b.city}, ` : ""}${b.state}`,
   }
 }

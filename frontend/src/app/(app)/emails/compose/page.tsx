@@ -31,6 +31,13 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
       const email = b.primary_email?.value ?? ""
       // Contact names come back as ContactFieldOut; unwrap to a plain string.
       const contactName = b.contacts?.[0]?.name?.value ?? b.name
+      // BUG 4 — populate lane from the broker's main lane so the builder's
+      // `{{lane}}` tag renders real cities (e.g. "Dallas → Chicago") instead
+      // of the "your lanes" fallback whenever we have real data.
+      const laneLabel =
+        b.main_lane && b.main_lane.origin && b.main_lane.destination
+          ? `${b.main_lane.origin} → ${b.main_lane.destination}`
+          : undefined
       brokerRecipient = {
         id: b.id,
         name: b.name,
@@ -38,7 +45,7 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
         email,
         region: "US",
         kind: "broker",
-        lane: undefined,
+        lane: laneLabel,
         equipment: undefined,
         sub: email || b.state || "Broker",
       }
