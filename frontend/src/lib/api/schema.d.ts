@@ -471,6 +471,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/connectors/eia": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eia Key
+         * @description Status-only read: configured + masked key, never plaintext.
+         */
+        get: operations["get_eia_key_settings_connectors_eia_get"];
+        put?: never;
+        /** Set Eia Key */
+        post: operations["set_eia_key_settings_connectors_eia_post"];
+        /** Clear Eia Key */
+        delete: operations["clear_eia_key_settings_connectors_eia_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capacity/posts": {
         parameters: {
             query?: never;
@@ -2075,6 +2097,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rates/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rates Quote */
+        post: operations["rates_quote_rates_quote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rates/profit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rates Profit */
+        post: operations["rates_profit_rates_profit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rates/backhaul": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rates Backhaul */
+        post: operations["rates_backhaul_rates_backhaul_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2233,6 +2306,71 @@ export interface components {
              * @default 12
              */
             months: number;
+        };
+        /** BackhaulCandidateOut */
+        BackhaulCandidateOut: {
+            /** Lead Id */
+            lead_id: string;
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+            /** Distance Miles */
+            distance_miles: number;
+            /** Toward Home */
+            toward_home: boolean;
+            /** Headed Home Score */
+            headed_home_score: number;
+            /** Expected Rate Per Mile */
+            expected_rate_per_mile: number | null;
+            /** Has Phone */
+            has_phone: boolean;
+            /** Has Email */
+            has_email: boolean;
+            /** Last Contacted At */
+            last_contacted_at: string | null;
+            /** Phone */
+            phone: string | null;
+            /** Email */
+            email: string | null;
+        };
+        /** BackhaulIn */
+        BackhaulIn: {
+            drop: components["schemas"]["CityStateIn"];
+            /** Home State */
+            home_state: string;
+            /**
+             * Equipment
+             * @default ANY
+             * @enum {string}
+             */
+            equipment: "V" | "R" | "F" | "ANY";
+            /**
+             * Radius Miles
+             * @default 150
+             */
+            radius_miles: number;
+        };
+        /** BackhaulOut */
+        BackhaulOut: {
+            drop: components["schemas"]["CityStateIn"];
+            /** Home State */
+            home_state: string;
+            /**
+             * Equipment
+             * @enum {string}
+             */
+            equipment: "V" | "R" | "F" | "ANY";
+            /** Radius Miles */
+            radius_miles: number;
+            /** Candidates */
+            candidates: components["schemas"]["BackhaulCandidateOut"][];
+            /** Evidence */
+            evidence: string[];
         };
         /** BookedVsRejected */
         BookedVsRejected: {
@@ -2521,6 +2659,30 @@ export interface components {
             tiles: components["schemas"]["KpiBlockOut"][];
             funnel: components["schemas"]["FunnelOut"];
         };
+        /** CityStateIn */
+        CityStateIn: {
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+        };
+        /** CompRowOut */
+        CompRowOut: {
+            /** Rate Usd */
+            rate_usd: number;
+            /** Miles */
+            miles: number;
+            /** Rate Per Mile */
+            rate_per_mile: number;
+            /** Origin */
+            origin: string;
+            /** Dest */
+            dest: string;
+            /** Equipment */
+            equipment: string | null;
+            /** Pickup Date */
+            pickup_date: string | null;
+        };
         /** ComposeIn */
         ComposeIn: {
             /**
@@ -2706,6 +2868,19 @@ export interface components {
             /** Pipeline Status */
             pipeline_status: string;
         };
+        /** DieselRowOut */
+        DieselRowOut: {
+            /** Padd */
+            padd: string;
+            /** Week Of */
+            week_of: string;
+            /** Price Usd */
+            price_usd: number;
+            /** Stale */
+            stale: boolean;
+            /** Fallback Padd */
+            fallback_padd: boolean;
+        };
         /** DisconnectOut */
         DisconnectOut: {
             /** Ok */
@@ -2849,6 +3024,20 @@ export interface components {
              * @default false
              */
             skipped_overlap: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** EiaKeyIn */
+        EiaKeyIn: {
+            /** Api Key */
+            api_key: string;
+        };
+        /** EiaKeyOut */
+        EiaKeyOut: {
+            /** Configured */
+            configured: boolean;
+            /** Key Masked */
+            key_masked?: string | null;
             /** Reason */
             reason?: string | null;
         };
@@ -4089,6 +4278,75 @@ export interface components {
             /** First Touch */
             first_touch: components["schemas"]["FirstTouchOut"][];
         };
+        /** ProfitIn */
+        ProfitIn: {
+            /** Rate Usd */
+            rate_usd: number;
+            /** Loaded Miles */
+            loaded_miles: number;
+            /**
+             * Deadhead Miles
+             * @default 0
+             */
+            deadhead_miles: number;
+            /**
+             * Mpg
+             * @default 6.5
+             */
+            mpg: number;
+            /**
+             * Equipment
+             * @default V
+             * @enum {string}
+             */
+            equipment: "V" | "R" | "F" | "ANY";
+            /** Origin State */
+            origin_state: string;
+            /** Dest State */
+            dest_state: string;
+        };
+        /** ProfitOut */
+        ProfitOut: {
+            /** Rate Usd */
+            rate_usd: number;
+            /** Loaded Miles */
+            loaded_miles: number;
+            /** Deadhead Miles */
+            deadhead_miles: number;
+            /** Mpg */
+            mpg: number;
+            /** Diesel Per Gal */
+            diesel_per_gal: number;
+            /** Diesel Stale */
+            diesel_stale: boolean;
+            /** Fuel Cost */
+            fuel_cost: number;
+            /** Driver Cost */
+            driver_cost: number;
+            /** Toll Cost */
+            toll_cost: number;
+            /** Toll Corridor */
+            toll_corridor: string | null;
+            /** Deadhead Cost */
+            deadhead_cost: number;
+            /** Total Cost */
+            total_cost: number;
+            /** Net */
+            net: number;
+            /** Margin Pct */
+            margin_pct: number;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "green" | "tight" | "red";
+            /** Verdict Thresholds */
+            verdict_thresholds: {
+                [key: string]: unknown;
+            };
+            /** Evidence */
+            evidence: string[];
+        };
         /** PromoteIn */
         PromoteIn: {
             /** Candidate Id */
@@ -4123,6 +4381,48 @@ export interface components {
             phone: string | null;
             /** Primary Email */
             primary_email: string | null;
+        };
+        /** RateQuoteIn */
+        RateQuoteIn: {
+            origin: components["schemas"]["CityStateIn"];
+            dest: components["schemas"]["CityStateIn"];
+            /**
+             * Equipment
+             * @default V
+             * @enum {string}
+             */
+            equipment: "V" | "R" | "F" | "ANY";
+        };
+        /** RateQuoteOut */
+        RateQuoteOut: {
+            origin: components["schemas"]["CityStateIn"];
+            dest: components["schemas"]["CityStateIn"];
+            /**
+             * Equipment
+             * @enum {string}
+             */
+            equipment: "V" | "R" | "F" | "ANY";
+            /** Great Circle Miles */
+            great_circle_miles: number;
+            /** Highway Miles */
+            highway_miles: number;
+            /** Highway Factor */
+            highway_factor: number;
+            diesel: components["schemas"]["DieselRowOut"] | null;
+            /** Rate Band */
+            rate_band: {
+                [key: string]: unknown;
+            };
+            /** Rate Band Dollars */
+            rate_band_dollars: {
+                [key: string]: unknown;
+            };
+            /** Comps */
+            comps: components["schemas"]["CompRowOut"][];
+            /** Comps Count */
+            comps_count: number;
+            /** Evidence */
+            evidence: string[];
         };
         /** ReconnectOut */
         ReconnectOut: {
@@ -5738,6 +6038,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoadboardDriverOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_eia_key_settings_connectors_eia_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EiaKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_eia_key_settings_connectors_eia_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EiaKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EiaKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_eia_key_settings_connectors_eia_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EiaKeyOut"];
                 };
             };
             /** @description Validation Error */
@@ -8782,6 +9179,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rates_quote_rates_quote_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RateQuoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateQuoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rates_profit_rates_profit_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfitIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rates_backhaul_rates_backhaul_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackhaulIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackhaulOut"];
                 };
             };
             /** @description Validation Error */

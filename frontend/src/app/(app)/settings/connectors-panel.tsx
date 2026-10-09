@@ -29,6 +29,7 @@ import {
   type LoadSourceRow,
   type MailStatus,
 } from "@/lib/api/connectors"
+import { clearEiaKey, getEiaKey, setEiaKey, type EiaKeyOut } from "@/lib/api/rates"
 
 const SOURCE_LABELS: Record<string, string> = {
   ai_page: "AI pages",
@@ -61,21 +62,25 @@ export function ConnectorsPanel() {
   const [sources, setSources] = React.useState<LoadSourceRow[]>([])
   const [testTo, setTestTo] = React.useState("")
   const [busy, setBusy] = React.useState<string | null>(null)
+  const [eia, setEia] = React.useState<EiaKeyOut | null>(null)
+  const [eiaInput, setEiaInput] = React.useState("")
 
   const refresh = React.useCallback(async () => {
-    const [m, s] = await Promise.all([getMailStatus(), listLoadSources()])
+    const [m, s, e] = await Promise.all([getMailStatus(), listLoadSources(), getEiaKey()])
     setMail(m)
     setSources(s)
+    setEia(e)
   }, [])
 
   React.useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const [m, s] = await Promise.all([getMailStatus(), listLoadSources()])
+        const [m, s, e] = await Promise.all([getMailStatus(), listLoadSources(), getEiaKey()])
         if (cancelled) return
         setMail(m)
         setSources(s)
+        setEia(e)
       } catch {
         // swallow — the panel just stays empty on fetch failure
       }
@@ -84,6 +89,34 @@ export function ConnectorsPanel() {
       cancelled = true
     }
   }, [])
+
+  async function onSaveEia() {
+    if (!eiaInput.trim()) return
+    setBusy("eia-save")
+    try {
+      const r = await setEiaKey({ api_key: eiaInput.trim() })
+      if (r?.configured) {
+        toast.success("EIA key saved — diesel refresh enabled.")
+        setEiaInput("")
+      } else {
+        toast.error(r?.reason ?? "Could not save key.")
+      }
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function onClearEia() {
+    setBusy("eia-clear")
+    try {
+      await clearEiaKey()
+      toast.success("EIA key cleared.")
+      await refresh()
+    } finally {
+      setBusy(null)
+    }
+  }
 
   async function onTestMail() {
     if (!testTo) return
@@ -345,6 +378,47 @@ export function ConnectorsPanel() {
               ))}
             </tbody>
           </table>
+        </div>
+      </Panel>
+
+      <Panel
+        title="EIA diesel API key"
+        description="Optional. Lets the Lane Rate / Load Profit tools fetch live weekly diesel per PADD district. No key → the tools still work with a stale fallback and badge it. Grab one from eia.gov/opendata (free). Stored encrypted in the DB vault, never in env."
+      >
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span
+            className={
+              "rounded px-2 py-0.5 " +
+              (eia?.configured
+                ? "bg-green-500/10 text-green-700"
+                : "bg-muted text-muted-foreground")
+            }
+          >
+            {eia?.configured ? `Configured · ${eia.key_masked ?? ""}` : "Not configured"}
+          </span>
+          {eia?.reason && <span className="text-xs text-red-600">{eia.reason}</span>}
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <Label htmlFor="eia-key">New API key</Label>
+            <Input
+              id="eia-key"
+              type="password"
+              value={eiaInput}
+              onChange={(e) => setEiaInput(e.target.value)}
+              placeholder="paste EIA v2 key"
+              className="min-w-[260px]"
+            />
+          </div>
+          <Button onClick={onSaveEia} disabled={busy === "eia-save" || !eiaInput.trim()}>
+            {busy === "eia-save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
+            Save key
+          </Button>
+          {eia?.configured ? (
+            <Button variant="outline" onClick={onClearEia} disabled={busy === "eia-clear"}>
+              Clear
+            </Button>
+          ) : null}
         </div>
       </Panel>
     </>
