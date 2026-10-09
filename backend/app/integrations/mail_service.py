@@ -197,11 +197,14 @@ async def test_send(sessionmaker: Any, settings: Any, *, to: str) -> TestSendRow
 
 
 async def backfill(
-    sessionmaker: Any, settings: Any, *, mailbox: str, months: int, days: int | None = None,
+    sessionmaker: Any, settings: Any, *, mailbox: str, months: int,
+    days: int | None = None, hours: int | None = None,
 ) -> IngestStatsRow:
     source = get_mailbox_source(settings)
     async with sessionmaker() as s:
-        stats = await ingest_backfill(s, source, mailbox, months=months, days=days)
+        stats = await ingest_backfill(
+            s, source, mailbox, months=months, days=days, hours=hours,
+        )
     return IngestStatsRow(**stats.__dict__)
 
 

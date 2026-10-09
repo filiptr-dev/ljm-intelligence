@@ -448,7 +448,11 @@ def get_mailbox_source(settings: Settings) -> MailboxSource:
         return SimulatedMailbox()
     sa = resolve_sa_info(settings)
     if sa is None:
-        return SimulatedMailbox()
+        # mailbox_source=="gmail" but SA not yet pasted: do NOT fall back to
+        # the simulated corpus (that is how fake rows leak into prod when
+        # the owner briefly misconfigures DWD). Return an empty source so
+        # ingest is a clean no-op until credentials land.
+        return SimulatedMailbox(messages={})
     return GmailMailbox(settings)
 
 

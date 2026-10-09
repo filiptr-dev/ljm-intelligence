@@ -83,7 +83,14 @@ class TestSendOut(BaseModel):
 
 
 class BackfillIn(BaseModel):
-    mailbox: EmailStr
+    # Single-mailbox mode (back-compat). When omitted the handler fans out
+    # over every mailbox the configured source lists (Directory via
+    # GMAIL_ADMIN_IMPERSONATE for Gmail; the simulated corpus otherwise).
+    mailbox: EmailStr | None = None
+    # Explicit allow-list — lets the owner backfill a known set without
+    # Directory access (e.g. before the admin-impersonate account is granted
+    # the directory scope). Ignored when ``mailbox`` is set.
+    mailboxes: list[EmailStr] | None = None
     months: int = Field(default=12, ge=1, le=120)
     # Finer-grained override: when set, defines the Gmail query window in
     # days instead of months. Lets the owner kick off a "last 7 days" sync
@@ -91,6 +98,11 @@ class BackfillIn(BaseModel):
     # is still accepted (default behaviour unchanged) and only used when
     # ``days`` is omitted.
     days: int | None = Field(default=None, ge=1, le=3650)
+    # Even finer-grained window: hours wins over both ``days`` and
+    # ``months`` when provided (1..720 = up to 30 days). The owner asked
+    # for a "last 2 hours for one mailbox" trigger during a live Gmail
+    # cutover — this is that knob.
+    hours: int | None = Field(default=None, ge=1, le=720)
 
 
 class IncrementalIn(BaseModel):
@@ -110,6 +122,12 @@ class IngestStatsOut(BaseModel):
     # path (sqlite + tests) this stays null and the sync fields hold the
     # real result.
     job_id: int | None = None
+
+
+class BackfillFanOutOut(BaseModel):
+    """Fan-out result — one `IngestStatsOut` per mailbox the handler touched."""
+
+    items: list[IngestStatsOut]
 
 
 class IncrementalOut(BaseModel):
@@ -149,15 +167,27 @@ async def test_send(payload: TestSendIn, request: Request) -> TestSendOut:
     return TestSendOut(**row.__dict__)
 
 
-@cron_router.post("/backfill", response_model=IngestStatsOut)
+@cron_router.post("/backfill", response_model=BackfillFanOutOut)
 async def backfill(
     payload: BackfillIn,
     request: Request,
     background: BackgroundTasks,
     x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
-) -> IngestStatsOut:
+) -> BackfillFanOutOut:
     settings: Settings = request.app.state.settings
     check_secret(settings, x_cron_secret)
+
+    # Resolve the mailbox set (precedence: ``mailbox`` single → ``mailboxes``
+    # explicit list → Directory via ``svc_list_mailboxes``). The old
+    # single-mailbox contract is still honoured — one entry in / one entry
+    # out — so existing cron workflows keep working.
+    if payload.mailbox is not None:
+        targets: list[str] = [str(payload.mailbox)]
+    elif payload.mailboxes:
+        targets = [str(m) for m in payload.mailboxes]
+    else:
+        rows = await svc_list_mailboxes(request.app.state.sessionmaker, settings)
+        targets = [r.email for r in rows]
 
     # Whole-mailbox backfill would time out on Render free (web dynos die
     # mid-request on reclaim). Hand it to the worker when the queue exists;
@@ -168,33 +198,45 @@ async def backfill(
     from app.shared.orm import LJM_TENANT_ID
     from app.shared.queue_dispatch import maybe_dispatch
 
-    job_id = await maybe_dispatch(
-        request.app.state.sessionmaker,
-        "inbox.mail_backfill",
-        tenant_id=LJM_TENANT_ID,
-        mailbox=str(payload.mailbox),
-        months=payload.months,
-        days=payload.days,
-    )
-    if job_id is not None:
-        from app.integrations.jobs_router import kick_in_process_drain
-        background.add_task(
-            kick_in_process_drain, request.app.state.sessionmaker, settings,
-            seconds=settings.jobs_in_process_kick_seconds,
+    items: list[IngestStatsOut] = []
+    queue_kicked = False
+    for mbx in targets:
+        job_id = await maybe_dispatch(
+            request.app.state.sessionmaker,
+            "inbox.mail_backfill",
+            tenant_id=LJM_TENANT_ID,
+            mailbox=mbx,
+            months=payload.months,
+            days=payload.days,
+            hours=payload.hours,
         )
-        return IngestStatsOut(
-            mailbox=str(payload.mailbox), read=0, upserted=0, skipped=0,
-            last_history_id=None, status="queued", job_id=job_id,
-        )
+        if job_id is not None:
+            items.append(
+                IngestStatsOut(
+                    mailbox=mbx, read=0, upserted=0, skipped=0,
+                    last_history_id=None, status="queued", job_id=job_id,
+                )
+            )
+            if not queue_kicked:
+                from app.integrations.jobs_router import kick_in_process_drain
+                background.add_task(
+                    kick_in_process_drain, request.app.state.sessionmaker, settings,
+                    seconds=settings.jobs_in_process_kick_seconds,
+                )
+                queue_kicked = True
+            continue
 
-    row = await svc_backfill(
-        request.app.state.sessionmaker,
-        settings,
-        mailbox=str(payload.mailbox),
-        months=payload.months,
-        days=payload.days,
-    )
-    return IngestStatsOut(**row.__dict__)
+        row = await svc_backfill(
+            request.app.state.sessionmaker,
+            settings,
+            mailbox=mbx,
+            months=payload.months,
+            days=payload.days,
+            hours=payload.hours,
+        )
+        items.append(IngestStatsOut(**row.__dict__))
+
+    return BackfillFanOutOut(items=items)
 
 
 @cron_router.post("/incremental", response_model=IncrementalOut)

@@ -98,14 +98,18 @@ async def ingest_backfill(
     mailbox: str,
     months: int = 12,
     days: int | None = None,
+    hours: int | None = None,
 ) -> IngestStats:
-    """Backfill a mailbox since ``months`` ago, or ``days`` if provided.
+    """Backfill a mailbox since ``months`` ago, or ``days`` / ``hours`` if given.
 
-    ``days`` wins when non-None — lets the owner start a "last 7 days" sync
-    from the UI without touching months of unused mail.
+    Precedence (finest wins): ``hours`` > ``days`` > ``months``. ``hours``
+    lets the owner trigger a "last 2 hours for one mailbox" sync during a
+    live Gmail cutover without re-reading days of mail.
     """
     stats = IngestStats(mailbox=mailbox)
-    if days is not None and days > 0:
+    if hours is not None and hours > 0:
+        since = datetime.now(UTC) - timedelta(hours=hours)
+    elif days is not None and days > 0:
         since = datetime.now(UTC) - timedelta(days=days)
     else:
         since = datetime.now(UTC) - timedelta(days=30 * months)
