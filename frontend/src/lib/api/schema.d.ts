@@ -2737,6 +2737,13 @@ export interface components {
             /** Last Activity At */
             last_activity_at?: string | null;
             overview?: components["schemas"]["OverviewMetricsOut"] | null;
+            ai_next_step?: components["schemas"]["LeadNextStepOut"] | null;
+            /**
+             * Ai Summary Status
+             * @default none
+             * @enum {string}
+             */
+            ai_summary_status: "ready" | "none";
             address: components["schemas"]["ContactFieldOut"];
             /** Linkedin Company Url */
             linkedin_company_url?: string | null;
@@ -2832,6 +2839,13 @@ export interface components {
             /** Last Activity At */
             last_activity_at?: string | null;
             overview?: components["schemas"]["OverviewMetricsOut"] | null;
+            ai_next_step?: components["schemas"]["LeadNextStepOut"] | null;
+            /**
+             * Ai Summary Status
+             * @default none
+             * @enum {string}
+             */
+            ai_summary_status: "ready" | "none";
         };
         /** BrokerSummaryOut */
         BrokerSummaryOut: {

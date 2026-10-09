@@ -1265,3 +1265,36 @@ def segments_count(overview: dict[str, OverviewMetricsRow]) -> dict[str, int]:
     for om in overview.values():
         out[om.segment] = out.get(om.segment, 0) + 1
     return out
+
+
+# ---------- AI next-step lookup (per-page bulk) ---------------------------
+
+
+async def fetch_ai_next_steps(
+    sessionmaker: Any, lead_ids: list[str]
+) -> dict[str, dict | None]:
+    """One SELECT: for every lead id with a cached ``LeadAiSummary`` row, return
+    its ``next_step`` payload (``{"label", "detail"}`` or ``None`` for legacy
+    rows written before next_step existed).
+
+    Shape:
+      * ``lead_id in result`` ⇒ the broker has a summary row (``ai_summary_status
+        = "ready"``). ``result[lead_id]`` may still be ``None`` (legacy).
+      * ``lead_id not in result`` ⇒ no summary yet (``ai_summary_status =
+        "none"``).
+
+    The lookup runs on the *already-sliced* page (``len(lead_ids) ≤ limit``)
+    so it never participates in the keyset cursor and its cost is bounded by
+    the page size, not the broker total.
+    """
+    if not lead_ids:
+        return {}
+    from app.analysis.models import LeadAiSummary
+
+    async with sessionmaker() as s:
+        res = await s.execute(
+            select(LeadAiSummary.lead_id, LeadAiSummary.next_step).where(
+                LeadAiSummary.lead_id.in_(lead_ids)
+            )
+        )
+        return {str(lid): ns for lid, ns in res.all()}

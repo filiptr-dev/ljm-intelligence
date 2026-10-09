@@ -13,6 +13,13 @@ export type ContactField = components["schemas"]["ContactFieldOut"]
 export type NextActionOut = components["schemas"]["NextActionOut"]
 export type NamedContact = components["schemas"]["NamedContactOut"]
 export type BrokerRow = components["schemas"]["BrokerRowOut"]
+// AI "what next" surface. Carried on every list row so the brokers table can
+// show the cached next_step without touching the LLM. Status disambiguates
+// "no summary yet → Generate button" from "summary ready but next_step null →
+// nothing to say" (legacy pre-0033 rows).
+export type LeadNextStep = components["schemas"]["LeadNextStepOut"]
+export type AiSummaryStatus = BrokerRow["ai_summary_status"]
+export type LeadAiSummary = components["schemas"]["LeadAiSummaryOut"]
 export type BrokerList = components["schemas"]["BrokerListOut"]
 export type BrokerDetail = components["schemas"]["BrokerDetailOut"]
 export type OverviewMetrics = components["schemas"]["OverviewMetricsOut"]
@@ -116,4 +123,22 @@ export async function getBrokerObjections(
     signal,
   })
   return unwrap(res, `/brokers/${id}/objections`)
+}
+
+/** POST-equivalent — triggers (or returns cached) AI summary for one lead.
+ *
+ * Thin wrapper over the detail-page endpoint (``GET /analysis/lead/{id}``)
+ * so the brokers list can call the same code path. Reuses the server-side
+ * cache, provider resolution, and empty/unavailable states — one shape, one
+ * place to evolve. Keeps the ``lib/api/`` typed openapi-fetch pattern (no
+ * ad-hoc ``/api`` proxies). */
+export async function generateLeadAiSummary(
+  leadId: string,
+  signal?: AbortSignal,
+): Promise<LeadAiSummary> {
+  const res = await api.GET("/analysis/lead/{lead_id}", {
+    params: { path: { lead_id: leadId }, query: { refresh: false } },
+    signal,
+  })
+  return unwrap(res, `/analysis/lead/${leadId}`)
 }

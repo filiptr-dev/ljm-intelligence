@@ -19,7 +19,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Search, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,11 +36,13 @@ import { HealthPill, Sparkline } from "@/components/app/ui"
 import { cn } from "@/lib/utils"
 import { pct } from "@/lib/format"
 import {
+  generateLeadAiSummary,
   listBrokers,
   listBrokersOverviewSummary,
   type BrokerRow,
   type BrokerSegment,
   type BrokerSortKey,
+  type LeadNextStep,
   type NextActionKind,
   type OverviewMetrics,
   type SegmentsCount,
@@ -466,19 +468,20 @@ export function BrokersTable() {
                 </div>
               </div>
             </TableHead>
+            <TableHead>AI next step</TableHead>
             <TableHead>Suggested action</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={10} className="py-6 text-center text-sm text-muted-foreground">
                 Loading real broker leads…
               </TableCell>
             </TableRow>
           ) : sorted.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="py-6 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={10} className="py-6 text-center text-sm text-muted-foreground">
                 Nothing matches these filters. Clear them or run the FMCSA crawler to pull in fresh rows.
               </TableCell>
             </TableRow>
@@ -546,6 +549,13 @@ export function BrokersTable() {
                   </TableCell>
                   <TableCell className="pr-2">
                     <Sparkline values={series.length ? series : [0]} />
+                  </TableCell>
+                  <TableCell className="max-w-[260px]">
+                    <AiNextStepCell
+                      leadId={r.id}
+                      initialNextStep={r.ai_next_step ?? null}
+                      initialStatus={r.ai_summary_status}
+                    />
                   </TableCell>
                   <TableCell>
                     <span
@@ -617,5 +627,86 @@ function SortHeader({
       <span>{label}</span>
       <Icon className={cn("size-3.5 shrink-0", active ? "opacity-100" : "opacity-40")} aria-hidden />
     </button>
+  )
+}
+
+/** Per-row "AI next step" cell.
+ *
+ * Three states (plan 2026-10-09):
+ *   - ``ai_next_step`` present → clamped single-line label pill; the stored
+ *     ``detail`` goes into the native ``title`` tooltip (consistent with
+ *     the rest of this dense table). No click handler of its own — the
+ *     broker name link in the first column is the way into the detail
+ *     page.
+ *   - ``ai_summary_status === "none"`` → ghost "Generate" button; invokes
+ *     the detail-page endpoint via ``generateLeadAiSummary`` and swaps the
+ *     cell to the label state on success. ``empty``/``unavailable`` from
+ *     the server surface a toast using the server's own ``ai_error`` copy
+ *     (same handling the detail page uses).
+ *   - ``ready`` with a null ``next_step`` (legacy, pre-migration-0033 row)
+ *     → muted em-dash; nothing to regenerate without new emails.
+ */
+function AiNextStepCell({
+  leadId,
+  initialNextStep,
+  initialStatus,
+}: {
+  leadId: string
+  initialNextStep: LeadNextStep | null
+  initialStatus: "ready" | "none"
+}) {
+  const [status, setStatus] = React.useState(initialStatus)
+  const [nextStep, setNextStep] = React.useState<LeadNextStep | null>(initialNextStep)
+  const [loading, setLoading] = React.useState(false)
+
+  if (nextStep) {
+    return (
+      <span
+        className="inline-block max-w-full truncate rounded-sm bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
+        title={nextStep.detail || nextStep.label}
+      >
+        {nextStep.label}
+      </span>
+    )
+  }
+
+  if (status === "ready") {
+    return <span className="text-xs text-muted-foreground">—</span>
+  }
+
+  const onGenerate = async () => {
+    setLoading(true)
+    try {
+      const r = await generateLeadAiSummary(leadId)
+      if (r.status === "ok" && r.next_step) {
+        setNextStep(r.next_step)
+        setStatus("ready")
+      } else if (r.status === "ok") {
+        // Successful generation but no next_step came back — treat as the
+        // legacy "ready with null" state so the row doesn't keep offering
+        // the button for the same no-signal input.
+        setStatus("ready")
+      } else {
+        toast.error(r.ai_error || "AI summary unavailable")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not generate summary")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={() => void onGenerate()}
+      disabled={loading}
+      className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+    >
+      <Sparkles className="size-3.5" aria-hidden />
+      {loading ? "Generating…" : "Generate"}
+    </Button>
   )
 }

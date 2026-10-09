@@ -23,6 +23,7 @@ from app.prospecting.broker_rank_service import (
     RankFilters,
     rank_brokers as svc_rank_brokers,
 )
+from app.analysis.analysis_router import LeadNextStepOut
 from app.prospecting.brokers_service import (
     ActivityCallEvent,
     ActivityEmailEvent,
@@ -31,6 +32,7 @@ from app.prospecting.brokers_service import (
     NamedContactRow,
     NotFoundError,
     OverviewMetricsRow,
+    fetch_ai_next_steps as svc_fetch_ai_next_steps,
     get_activity_page as svc_get_activity_page,
     get_detail as svc_get_detail,
     get_objections as svc_get_objections,
@@ -116,6 +118,13 @@ class BrokerRowOut(BaseModel):
     # Opt-in via ?include=overview_metrics on GET /brokers. None otherwise so
     # the default list payload stays byte-identical to pre-overview callers.
     overview: OverviewMetricsOut | None = None
+    # Cached AI "what next" per broker (see migration 0033 /
+    # LeadAiSummary.next_step). Populated via a bulk per-page lookup — never
+    # a live LLM call on list load. ``ai_summary_status`` lets the UI pick
+    # between "show label" and "Generate" without a second request. Defaults
+    # keep the wire shape backwards-compatible for pre-change callers.
+    ai_next_step: LeadNextStepOut | None = None
+    ai_summary_status: Literal["ready", "none"] = "none"
 
 
 class SegmentsCountOut(BaseModel):
@@ -273,7 +282,33 @@ def _overview_out(om: OverviewMetricsRow) -> OverviewMetricsOut:
     )
 
 
-def _row_out(r: BrokerRowData, overview: OverviewMetricsRow | None = None) -> BrokerRowOut:
+def _ai_next_step_out(raw: dict | None) -> LeadNextStepOut | None:
+    """Project the stored ``next_step`` JSON into the wire DTO.
+
+    Returns ``None`` for legacy rows (``next_step`` was NULL before migration
+    0033) or any payload missing the required ``label`` so the UI falls
+    through to the muted em-dash state.
+    """
+    if not isinstance(raw, dict):
+        return None
+    label = raw.get("label")
+    if not isinstance(label, str) or not label:
+        return None
+    detail = raw.get("detail") or ""
+    return LeadNextStepOut(label=label, detail=detail if isinstance(detail, str) else "")
+
+
+def _row_out(
+    r: BrokerRowData,
+    overview: OverviewMetricsRow | None = None,
+    *,
+    ai_lookup: dict[str, dict | None] | None = None,
+) -> BrokerRowOut:
+    ai_status: Literal["ready", "none"] = "none"
+    ai_next_step_out: LeadNextStepOut | None = None
+    if ai_lookup is not None and r.id in ai_lookup:
+        ai_status = "ready"
+        ai_next_step_out = _ai_next_step_out(ai_lookup[r.id])
     return BrokerRowOut(
         id=r.id,
         name=r.name,
@@ -291,6 +326,8 @@ def _row_out(r: BrokerRowData, overview: OverviewMetricsRow | None = None) -> Br
         ),
         last_activity_at=r.last_activity_at,
         overview=_overview_out(overview) if overview is not None else None,
+        ai_next_step=ai_next_step_out,
+        ai_summary_status=ai_status,
     )
 
 
@@ -362,8 +399,11 @@ async def list_brokers(
             limit=limit,
             cursor=cursor,
         )
+        ai_lookup = await svc_fetch_ai_next_steps(
+            request.app.state.sessionmaker, [r.id for r in page.rows]
+        )
         return BrokerListOut(
-            items=[_row_out(r) for r in page.rows],
+            items=[_row_out(r, ai_lookup=ai_lookup) for r in page.rows],
             next_cursor=page.next_cursor,
             total=page.total,
             segments_count=None,
@@ -401,9 +441,16 @@ async def list_brokers(
     if include_overview and result.overview_segments_count:
         seg_count_out = SegmentsCountOut(**result.overview_segments_count)
 
+    ai_lookup = await svc_fetch_ai_next_steps(
+        request.app.state.sessionmaker, [r.id for r in page]
+    )
     return BrokerListOut(
         items=[
-            _row_out(r, result.overview.get(r.id) if include_overview else None)
+            _row_out(
+                r,
+                result.overview.get(r.id) if include_overview else None,
+                ai_lookup=ai_lookup,
+            )
             for r in page
         ],
         next_cursor=next_cursor,
