@@ -93,10 +93,11 @@ export function BrokerEmailAnalyticsPanel({ ea }: { ea: EmailAnalytics | null | 
     )
   }
 
-  const totalSentAll = ea.weekly_series_12w.reduce((n, p) => n + p.sent, 0)
-  const dowThin = (ea.best_day_of_week?.sample ?? 0) < SAMPLE_FLOOR
-  const hourThin = (ea.best_hour_et?.sample ?? 0) < SAMPLE_FLOOR
-  const belowFloor = totalSentAll < SAMPLE_FLOOR
+  // Trust the backend's floor: it returns `null` for best_day_of_week /
+  // best_hour_et when the broker's all-time send count is below the sample
+  // floor. Render whatever the backend sent — no second guess here.
+  const dowBucket = ea.best_day_of_week
+  const hourBucket = ea.best_hour_et
 
   return (
     <Panel
@@ -123,31 +124,27 @@ export function BrokerEmailAnalyticsPanel({ ea }: { ea: EmailAnalytics | null | 
           <Stat
             label="Best day"
             value={
-              ea.best_day_of_week && !dowThin && ea.best_day_of_week.dow !== null && ea.best_day_of_week.dow !== undefined
-                ? DOW_LABEL[ea.best_day_of_week.dow]
+              dowBucket && dowBucket.dow !== null && dowBucket.dow !== undefined
+                ? DOW_LABEL[dowBucket.dow]
                 : "—"
             }
             sub={
-              ea.best_day_of_week && !dowThin
-                ? `${fmtPct(ea.best_day_of_week.reply_rate)} reply · n=${ea.best_day_of_week.sample}`
-                : belowFloor
-                  ? `n < ${SAMPLE_FLOOR}`
-                  : "—"
+              dowBucket
+                ? `${fmtPct(dowBucket.reply_rate)} reply · n=${dowBucket.sample}`
+                : `n < ${SAMPLE_FLOOR}`
             }
           />
           <Stat
             label="Best hour"
             value={
-              ea.best_hour_et && !hourThin && ea.best_hour_et.hour !== null && ea.best_hour_et.hour !== undefined
-                ? fmtHourET(ea.best_hour_et.hour)
+              hourBucket && hourBucket.hour !== null && hourBucket.hour !== undefined
+                ? fmtHourET(hourBucket.hour)
                 : "—"
             }
             sub={
-              ea.best_hour_et && !hourThin
-                ? `${fmtPct(ea.best_hour_et.reply_rate)} reply · n=${ea.best_hour_et.sample}`
-                : belowFloor
-                  ? `n < ${SAMPLE_FLOOR}`
-                  : "—"
+              hourBucket
+                ? `${fmtPct(hourBucket.reply_rate)} reply · n=${hourBucket.sample}`
+                : `n < ${SAMPLE_FLOOR}`
             }
           />
         </div>
