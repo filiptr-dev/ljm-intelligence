@@ -14,7 +14,7 @@ import hashlib
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -47,7 +47,11 @@ class LeadSummaryResult:
     generated_at: datetime | None = None
     cached: bool = False
     email_count: int = 0
-    risks: list[str] | None = None
+    # Default to an empty list rather than None: the HTTP response model
+    # ``LeadAiSummaryOut`` types this as ``list[str]`` (not Optional), so a
+    # ``None`` here would make pydantic 500 the endpoint on every ``empty`` /
+    # ``unavailable`` result — which is exactly the regression users hit.
+    risks: list[str] = field(default_factory=list)
     next_step: dict[str, str] | None = None  # {"label": ..., "detail": ...}
 
 
