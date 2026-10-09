@@ -8,7 +8,7 @@
  * the broker detail page when the lookup matched a lead in our store.
  */
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, CheckCircle2, Shield, ShieldAlert, ShieldCheck } from "lucide-react"
 
@@ -33,6 +33,26 @@ export default function VettingPage() {
   const [report, setReport] = useState<VetReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Elapsed seconds so the user sees forward motion instead of a silent
+  // 15-second spinner. Backend budget is ~5s now; anything over that is
+  // network / cold start, not an app bug.
+  const [elapsed, setElapsed] = useState(0)
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (!loading) {
+      if (tickRef.current) clearInterval(tickRef.current)
+      tickRef.current = null
+      return
+    }
+    const started = Date.now()
+    tickRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - started) / 1000))
+    }, 250)
+    return () => {
+      if (tickRef.current) clearInterval(tickRef.current)
+    }
+  }, [loading])
 
   async function onSubmit(ev: React.FormEvent) {
     ev.preventDefault()
@@ -41,15 +61,18 @@ export default function VettingPage() {
     setLoading(true)
     setError(null)
     setReport(null)
+    setElapsed(0)
     try {
       const r = await vetBroker(key)
       setReport(r)
     } catch (e) {
       if (e instanceof ApiRequestError) {
         if (e.status === 404) {
-          setError("FMCSA unreachable or unknown MC/DOT — try again in a moment.")
+          setError("That MC or DOT isn't on file and FMCSA has no record for it.")
         } else if (e.status === 422) {
           setError("Enter a numeric MC or DOT (prefix MC-/DOT- optional).")
+        } else if (e.status === 503 || e.status === 504) {
+          setError("FMCSA is slow or offline right now — no cached snapshot to show. Try again in a moment.")
         } else {
           setError(`Lookup failed (${e.status}).`)
         }
@@ -79,9 +102,14 @@ export default function VettingPage() {
             aria-label="MC or DOT"
           />
           <Button type="submit" disabled={loading || !query.trim()}>
-            {loading ? "Checking…" : "Check"}
+            {loading ? `Checking FMCSA…${elapsed > 1 ? ` ${elapsed}s` : ""}` : "Check"}
           </Button>
         </form>
+        {loading && elapsed >= 4 ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            FMCSA is responding slowly — we&apos;ll fall back to the on-file snapshot if the live call times out.
+          </p>
+        ) : null}
         {error ? (
           <p className="mt-3 flex items-center gap-2 text-sm text-bad">
             <AlertTriangle className="size-4" aria-hidden /> {error}
@@ -112,7 +140,10 @@ function ReportView({ report }: { report: VetReport }) {
             {report.dot ? ` · DOT ${report.dot}` : ""}
           </p>
           {report.stale ? (
-            <p className="mt-1 text-xs opacity-80">Cached snapshot — FMCSA was unreachable.</p>
+            <p className="mt-1 text-xs opacity-80">
+              Cached snapshot — FMCSA was unreachable
+              {report.authority.add_date ? ` (as of ${report.authority.add_date})` : ""}.
+            </p>
           ) : null}
         </div>
       </section>

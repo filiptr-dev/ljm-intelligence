@@ -33,7 +33,15 @@ async def get_vet(
     except LeadNotFoundError as exc:
         raise HTTPException(404, "unknown MC or DOT") from exc
     except FmcsaUnreachableError as exc:
-        raise HTTPException(404, "FMCSA snapshot unreachable — try again in a moment") from exc
+        # Upstream FMCSA is unreachable AND we have no cache/lead to fall
+        # back on — a transient dependency outage, not a 404. 503 lets the
+        # client distinguish 'retry in a moment' from 'this MC/DOT doesn't
+        # exist'. 15.28s hangs with a 404 verdict were the audit smell.
+        raise HTTPException(
+            503,
+            "FMCSA snapshot unreachable and no cached data on file — try again shortly.",
+            headers={"Retry-After": "30"},
+        ) from exc
 
     today = datetime.now(UTC).date()
     age_days = (

@@ -181,12 +181,22 @@ async def test_get_vetting_422_on_bad_key(client: AsyncClient):
     assert r.status_code == 422
 
 
-async def test_get_vetting_404_when_no_cache_and_live_fails(
+async def test_get_vetting_falls_back_to_lead_when_live_fails(
     client: AsyncClient, monkeypatch
 ):
-    """Cache-miss edge: live fetch returns None → 404."""
+    """Cache-miss + live-fail + lead on file → 200 stale snapshot (not 404).
+
+    Covers the 2026-10-09 prod audit regression: MC-50975720 hit a 15s hang
+    and 404 because the code path raised FmcsaUnreachableError whenever the
+    live call failed, ignoring the lead row we already had. The fallback
+    keeps the UX whole and reserves 503 for 'nothing on file anywhere'.
+    """
     sm = client._test_sessionmaker  # type: ignore[attr-defined]
-    await _seed_lead(sm, id="MC-55555", mc="55555", dot="7777777")
+    await _seed_lead(
+        sm, id="MC-55555", mc="55555", dot="7777777",
+        name="Fallback Carrier", phone="5559990000",
+        primary_email="ops@fallback.example",
+    )
 
     async def _dead_live(dot):
         return None
@@ -195,4 +205,56 @@ async def test_get_vetting_404_when_no_cache_and_live_fails(
 
     monkeypatch.setattr(vrepo, "live_fmcsa_fetch", _dead_live)
     r = await client.get("/vetting/MC-55555")
-    assert r.status_code == 404
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["stale"] is True
+    assert body["legal_name"] == "Fallback Carrier"
+    assert body["mc"] == "55555"
+    assert body["lead_id"] == "MC-55555"
+
+
+async def test_get_vetting_503_when_truly_unknown(
+    client: AsyncClient, monkeypatch
+):
+    """No lead, no cache, live fails → 503 (upstream unreachable), not 404.
+
+    404 is reserved for 'this MC/DOT genuinely does not exist'; a flaky
+    FMCSA snapshot endpoint is a transient dependency failure.
+    """
+    async def _dead_live(dot):
+        return None
+
+    from app.vetting import repository as vrepo
+
+    monkeypatch.setattr(vrepo, "live_fmcsa_fetch", _dead_live)
+    r = await client.get("/vetting/DOT-9999999")
+    assert r.status_code == 503
+    assert r.headers.get("Retry-After") == "30"
+
+
+async def test_mc_prefix_is_honoured_even_for_8_digit_numbers(
+    client: AsyncClient, monkeypatch
+):
+    """Explicit 'MC-' must route to the MC column — the length heuristic
+    (>=7 digits → DOT) must not override a user-supplied prefix. This was
+    the exact failure on MC-50975720 (8 digits) in the 2026-10-09 audit.
+    """
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _seed_lead(
+        sm, id="MC-50975720", mc="50975720", dot=None,
+        name="Eight-Digit MC Co",
+    )
+
+    async def _dead_live(dot):
+        # Should never be called — no DOT to look up, lead fallback takes over.
+        raise AssertionError(f"live called with dot={dot}; should have used lead fallback")
+
+    from app.vetting import repository as vrepo
+
+    monkeypatch.setattr(vrepo, "live_fmcsa_fetch", _dead_live)
+    r = await client.get("/vetting/MC-50975720")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["mc"] == "50975720"
+    assert body["stale"] is True
+    assert body["legal_name"] == "Eight-Digit MC Co"

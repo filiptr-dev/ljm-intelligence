@@ -27,7 +27,9 @@ class LeadNotFoundError(Exception):
 
 
 class FmcsaUnreachableError(Exception):
-    pass
+    """FMCSA live call failed AND no cache/lead fallback existed. True 'unknown'."""
+
+
 
 
 class FmcsaPort(Protocol):
@@ -62,13 +64,19 @@ async def _lookup_snapshot(
     mc: str | None,
     dot: str | None,
     fmcsa: FmcsaPort,
-) -> tuple[BrokerSnapshot, str | None, bool]:
-    """Resolve snapshot via cache-then-live. Returns (snapshot, evidence_url, stale).
+    lead: object | None = None,
+) -> tuple[BrokerSnapshot, str | None, bool, bool]:
+    """Resolve snapshot via cache-then-live. Returns (snapshot, evidence_url, stale, upstream_failed).
 
-    * cache hit, fresh → fresh snapshot, stale=False.
-    * cache miss → live fetch; on 200 cache and return fresh; on failure 404.
-    * cache hit, STALE (>30d) → live fetch; on success refresh cache; on
-      failure return the stale cached row with stale=True.
+    * cache hit, fresh → fresh snapshot, stale=False, upstream_failed=False.
+    * cache miss → live fetch; on 200 cache and return fresh.
+    * cache hit, STALE (>30d) → live fetch; on success refresh; on failure
+      return cached row with stale=True, upstream_failed=True.
+    * cache miss AND live fails AND we have an on-file Lead → synthesise a
+      minimal snapshot from the lead row with stale=True, upstream_failed=True
+      so the router can emit 503 instead of 404.
+    * only truly unknown MC/DOT (no lead, no cache, live None) raises
+      ``FmcsaUnreachableError`` which the router maps to 404.
     """
     # The cache is keyed on DOT. If the request is MC-only, try to resolve
     # DOT via the leads table; otherwise fall through to a live fetch which
@@ -85,6 +93,15 @@ async def _lookup_snapshot(
             dot = str(lead.dot)
 
     if not dot:
+        # No DOT — but if we have a lead on file (matched by MC), use it as
+        # a stale snapshot. Nothing to query, so no upstream call.
+        if lead is not None:
+            return (
+                _snapshot_from_lead(lead, mc=mc, dot=dot),
+                None,
+                True,
+                False,
+            )
         raise FmcsaUnreachableError("no DOT to look up (MC not in local leads)")
 
     cached_payload, cached_at = await repo.read_fmcsa_cache(s, dot)
@@ -100,6 +117,7 @@ async def _lookup_snapshot(
             repo.extract_snapshot_fields(cached_payload, mc=mc, dot=dot),
             evidence_url,
             False,
+            False,
         )
 
     live = await fmcsa.fetch(dot)
@@ -109,6 +127,7 @@ async def _lookup_snapshot(
             repo.extract_snapshot_fields(live, mc=mc, dot=dot),
             evidence_url,
             False,
+            False,
         )
 
     if cached_payload:
@@ -116,9 +135,37 @@ async def _lookup_snapshot(
             repo.extract_snapshot_fields(cached_payload, mc=mc, dot=dot),
             evidence_url,
             True,
+            True,
+        )
+
+    if lead is not None:
+        return (
+            _snapshot_from_lead(lead, mc=mc, dot=dot),
+            evidence_url,
+            True,
+            True,
         )
 
     raise FmcsaUnreachableError("FMCSA snapshot unreachable and no cache row")
+
+
+def _snapshot_from_lead(lead: object, *, mc: str | None, dot: str | None) -> BrokerSnapshot:
+    """Synthesise a minimal snapshot from an on-file lead row.
+
+    Enrichment only ingests active brokers, so authority_status='A' is a safe
+    default; add_date is unknown (no 'new authority' flag will fire).
+    """
+    return BrokerSnapshot(
+        mc=mc or getattr(lead, "mc", None),
+        dot=str(dot) if dot else (str(getattr(lead, "dot", "")) or None),
+        legal_name=getattr(lead, "name", None),
+        dba_name=None,
+        authority_status="A",
+        add_date=None,
+        oos_date=None,
+        phone=getattr(lead, "phone", None),
+        email=getattr(lead, "primary_email", None),
+    )
 
 
 async def vet_broker(
@@ -132,13 +179,21 @@ async def vet_broker(
     if not normalized:
         raise LeadNotFoundError("invalid key")
 
-    # Heuristic: 7+ digits are typically DOT numbers; shorter are MC. The
-    # repository tries both when either is present, so this is just a
-    # starting bias.
+    # Honour an explicit MC-/DOT- prefix first — users type it for a reason
+    # (an 8-digit MC like "MC-50975720" otherwise flips to DOT and loses the
+    # leads lookup entirely). Fall back to a length heuristic only when the
+    # prefix is absent: 7+ digits trend DOT, shorter trends MC.
     raw_upper = raw_key.strip().upper()
-    is_dot_hint = "DOT" in raw_upper or len(normalized) >= 7
-    mc: str | None = None if is_dot_hint else normalized
-    dot: str | None = normalized if is_dot_hint else None
+    if raw_upper.startswith("MC"):
+        mc: str | None = normalized
+        dot: str | None = None
+    elif raw_upper.startswith("DOT"):
+        mc = None
+        dot = normalized
+    else:
+        is_dot_hint = len(normalized) >= 7
+        mc = None if is_dot_hint else normalized
+        dot = normalized if is_dot_hint else None
 
     port = fmcsa or _DefaultFmcsa()
     async with sessionmaker() as s:
@@ -149,8 +204,8 @@ async def vet_broker(
             mc = mc or lead.mc
             dot = dot or (str(lead.dot) if lead.dot else None)
 
-        snapshot, evidence_url, stale = await _lookup_snapshot(
-            s, mc=mc, dot=dot, fmcsa=port
+        snapshot, evidence_url, stale, upstream_failed = await _lookup_snapshot(
+            s, mc=mc, dot=dot, fmcsa=port, lead=lead
         )
 
         prior = PriorContact()
@@ -160,6 +215,11 @@ async def vet_broker(
         suppressed = await repo.is_suppressed(s, snapshot.email)
 
     verdict = vet(snapshot, prior, suppressed)
+    # ``upstream_failed`` is already surfaced to the client via ``stale=True``;
+    # the UI shows a 'Cached snapshot — FMCSA was unreachable' line. We don't
+    # fail the request when a fallback is available — only truly unknown
+    # MC/DOT bubble up as ``FmcsaUnreachableError`` from ``_lookup_snapshot``.
+    _ = upstream_failed
     return VetReport(
         key=raw_key,
         mc=mc,

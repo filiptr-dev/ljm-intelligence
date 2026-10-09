@@ -119,8 +119,12 @@ async def live_fmcsa_fetch(dot: str) -> dict | None:
 
     headers = {"User-Agent": "LJM-Intelligence-Bot/1.0 (+https://ljminternational.com)"}
     url = SNAPSHOT_URL_TMPL.format(dot=dot)
+    # Short budget on the interactive path — a user is watching a spinner.
+    # Prod audit hung 15s before 404; 5s connect+read keeps the fallback
+    # (cache / lead row) warm instead of blocking the request.
+    timeout = httpx.Timeout(connect=2.0, read=5.0, write=5.0, pool=5.0)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
                 return None
