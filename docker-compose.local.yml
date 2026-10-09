@@ -1,0 +1,57 @@
+# LOCAL OVERRIDE — gitignored (.env.local-docker supplies secrets).
+# Extends docker-compose.yml for the all-in-one local dev stack.
+# Run with:
+#   COMPOSE_PROJECT_NAME=ljm-local docker compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.local-docker up -d
+#
+# Why a separate override file: keeps prod docker-compose.yml clean of local-only
+# settings (host ports, frontend service, dev env vars) — a habit that prevents
+# "works locally, different on Render" drift. The override is additive; compose
+# merges it with the base at runtime.
+
+services:
+  postgres:
+    env_file: .env.local-docker
+    ports:
+      - "5460:5432"
+
+  api:
+    env_file: .env.local-docker
+    environment:
+      DATABASE_URL: postgresql://ljm:ljm@postgres:5432/ljm
+      DATABASE_URL_DIRECT: postgresql://ljm:ljm@postgres:5432/ljm
+      CORS_ALLOWED_ORIGINS: "http://localhost:3001"
+    # Use explicit venv paths so the CMD works regardless of how the shell sources PATH
+    command: sh -c "/app/.venv/bin/alembic upgrade head && exec /app/.venv/bin/uvicorn app.main:create_app --factory --host 0.0.0.0 --port \"$$PORT\" --proxy-headers --forwarded-allow-ips='*'"
+    ports:
+      - "8001:8000"
+
+  worker:
+    env_file: .env.local-docker
+    environment:
+      DATABASE_URL: postgresql://ljm:ljm@postgres:5432/ljm
+      DATABASE_URL_DIRECT: postgresql://ljm:ljm@postgres:5432/ljm
+    command: sh -c "/app/.venv/bin/python3 -m procrastinate --app=app.shared.queue.app worker --queues=default"
+
+  agent-browser:
+    environment:
+      AGENT_BROWSER_TOKEN: "${AGENT_BROWSER_TOKEN:-}"
+    ports:
+      - "8081:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.local-docker
+    environment:
+      BACKEND_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+      CRON_SECRET: "${CRON_SECRET:-}"
+      # CI=true prevents pnpm from asking for TTY confirmation when
+      # it detects a mismatch between container node_modules and lockfile.
+      CI: "true"
+    depends_on:
+      - api
+    ports:
+      - "3001:3000"

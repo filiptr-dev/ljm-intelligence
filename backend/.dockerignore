@@ -1,0 +1,13 @@
+# Never copy the local venv — uv builds it fresh inside the container.
+# Without this, COPY . . overwrites the container venv with the host venv
+# (which has hardcoded host-absolute shebangs and breaks inside Docker).
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+tests/
+local-dev.db
+*.log
+.env
+.env.*
