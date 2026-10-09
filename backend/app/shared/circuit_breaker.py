@@ -6,8 +6,8 @@ instance per vendor adapter — a DAT outage must not disable CHR.
 
 Rules:
 
-* ``record_failure(status)`` counts only 5xx and network errors (``status is
-  None``). A 4xx (unauthorized, bad request) is not a vendor-health signal and
+* ``record_failure(status)`` counts 5xx, 429 and network errors (``status is
+  None``). Any other 4xx (unauthorized, bad request) is not a vendor-health signal and
   resets the counter.
 * Once ``_consecutive_failures >= threshold``, the breaker is open and
   ``is_open()`` returns True until ``cooldown_seconds`` elapse (monotonic
@@ -45,8 +45,8 @@ class CircuitBreaker:
         self._opened_at = None
 
     def record_failure(self, status_code: int | None = None, now: float | None = None) -> None:
-        # 4xx is not a vendor-health signal — reset.
-        if status_code is not None and 400 <= status_code < 500:
+        # 4xx is not a vendor-health signal — reset. 429 (rate limited) IS one.
+        if status_code is not None and 400 <= status_code < 500 and status_code != 429:
             self._consecutive_failures = 0
             return
         self._consecutive_failures += 1

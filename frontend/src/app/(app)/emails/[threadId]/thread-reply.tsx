@@ -18,7 +18,8 @@ import {
 import { DEFAULT_DESIGN, type EmailDesign } from "@/components/app/engine"
 import type { Recipient } from "@/lib/campaigns/types"
 import { Segmented } from "@/components/app/segmented"
-import { rewrite as aiRewrite, sendReply as apiSendReply } from "@/lib/api/inbox"
+import { rewrite as aiRewrite } from "@/lib/api/inbox"
+import { replySendAdapter } from "@/lib/api/email-send"
 
 /**
  * Rich inline thread reply — Steps 3 (Message) + 4 (Design) + 5 (Sending)
@@ -90,15 +91,9 @@ export function ThreadReply({
     if (!canSend) return
     setPending(true)
     try {
-      const res = await apiSendReply(threadId, { body_text: body, design: {
-        accent_hex: design.accent,
-        signature: design.signature,
-        logo: design.showLogo,
-        cta_label: design.ctaLabel,
-        cta_url: design.ctaUrl,
-        layout: design.layout,
-        show_truck: design.showTruck,
-      }, tone })
+      const adapter = replySendAdapter(threadId)
+      if (adapter.kind !== "reply") return
+      const res = await adapter.send({ body_text: body, design, tone })
       if (!res.ok) {
         toast.error(res.reason ?? "Send failed")
         return

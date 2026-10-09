@@ -190,3 +190,10 @@ async def test_adapter_fetch_short_circuits_when_breaker_open(
     assert adapter.reason() == "circuit_open"
     # Keep the import referenced so ruff doesn't trim it.
     assert httpx is not None
+
+
+def test_429_counts_as_failure() -> None:
+    cb = CircuitBreaker()
+    for _ in range(10):
+        cb.record_failure(429, now=0.0)
+    assert cb.is_open(now=0.0) is True
