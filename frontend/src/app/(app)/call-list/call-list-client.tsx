@@ -136,10 +136,18 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
   const [callbackAt, setCallbackAt] = React.useState<string>(plusDaysISO(2))
 
   const items = React.useMemo(() => envelope?.items ?? [], [envelope])
-  const selected = React.useMemo(
-    () => items.find((r) => r.lead_id === selectedId) ?? null,
-    [items, selectedId],
-  )
+  // BUG 3 — after logging an outcome the list may re-rank and drop the
+  // just-called lead (callback into the future, do_not_call, etc.), but the
+  // operator asked to STAY on that broker until they pick another one. Pin
+  // the last-seen row for the current `selectedId`; if the live list drops
+  // it, we fall back to the pin so the detail panel + history stay visible.
+  const [pinned, setPinned] = React.useState<CallRow | null>(null)
+  const liveRow = items.find((r) => r.lead_id === selectedId) ?? null
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (liveRow) setPinned(liveRow)
+  }, [liveRow])
+  const selected = liveRow ?? (pinned && pinned.lead_id === selectedId ? pinned : null)
 
   // Load the ranked list on mount + whenever health flips back to live.
   const load = React.useCallback(async () => {
@@ -225,10 +233,15 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
       if (!response.ok || !data) throw new Error(`outcome ${response.status}`)
       const j = data as unknown as CallListEnvelope
       setEnvelope(j)
-      // Keep the same lead selected if it survived (e.g. callback in the future
-      // drops it); otherwise pick the new top row.
-      const stillThere = j.items.some((x) => x.lead_id === selected.lead_id)
-      setSelectedId(stillThere ? selected.lead_id : (j.items[0]?.lead_id ?? null))
+      // BUG 3 — the operator doesn't want to jump to the next broker after
+      // logging an outcome. Keep `selectedId` exactly where it is. If the
+      // just-called lead drops out of the ranked list (e.g. callback into
+      // the future, do_not_call), the `pinned` fallback above keeps its
+      // detail + history on screen until the operator picks another row.
+      // Patch the pinned row's `last_outcome` optimistically so the "Last:"
+      // badge updates even when the lead drops out of the live items.
+      const newLast: LastOutcome = { outcome: kind, logged_at: new Date().toISOString() }
+      setPinned((p) => (p && p.lead_id === selected.lead_id ? { ...p, last_outcome: newLast } : p))
       setNote("")
       setHistoryTick((t) => t + 1)
       // Undo action — if the backend handed us the row id, offer a one-click
