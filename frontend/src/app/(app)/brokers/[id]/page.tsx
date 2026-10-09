@@ -600,21 +600,6 @@ export default function BrokerDetailPage() {
           ) : null}
 
           <EmailTimeline emails={emailOnly} />
-
-          <Panel
-            title="Email analytics"
-            description="Sample data — real analytics unlock when the inbox connector is live."
-          >
-            <div className="rounded-sm border border-dashed border-warn bg-warn/10 p-3 text-xs text-asphalt">
-              These tiles are seeded placeholders. Open-rate, best send-time and
-              reply-rate will light up once <code>gmail-inbox-connector</code> +{" "}
-              <code>inbox-analysis</code> ship. The data below is real:{" "}
-              <strong>{data.summary.sent_count_30d}</strong> emails sent in the
-              last 30 days,{" "}
-              <strong>{data.summary.reply_count_30d}</strong> replies. Everything
-              else here is for layout — not for decisions.
-            </div>
-          </Panel>
         </div>
 
         {/* ---- right rail ---- */}
