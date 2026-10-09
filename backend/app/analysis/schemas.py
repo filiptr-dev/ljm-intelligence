@@ -9,13 +9,20 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---- Lanes history (plan 2026-10-09-lanes-history-analysis) ----------------
 LanesPeriod = Literal["week", "month", "year"]
 
 
-class LaneMetrics(BaseModel):
+class _Out(BaseModel):
+    """Response base: fields with defaults are still always sent, so the
+    generated TypeScript types mark them required instead of optional."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
+class LaneMetrics(_Out):
     """Every number the page shows for one slice of runs. Derived in SQL sums."""
 
     runs: int = 0
@@ -32,27 +39,27 @@ class LaneMetrics(BaseModel):
     cost_per_mile: float | None = None
 
 
-class LaneBucket(BaseModel):
+class LaneBucket(_Out):
     key: str  # ISO date of the bucket start
     label: str
     metrics: LaneMetrics
 
 
-class LengthBand(BaseModel):
+class LengthBand(_Out):
     band: str
     runs: int
     pct: float
     revenue: float
 
 
-class CostShare(BaseModel):
+class CostShare(_Out):
     key: Literal["fuel", "driver", "load", "dispatch"]
     label: str
     amount: float
     pct: float
 
 
-class LaneTrend(BaseModel):
+class LaneTrend(_Out):
     """Recent half of the window vs the half before it."""
 
     label: str
@@ -62,7 +69,7 @@ class LaneTrend(BaseModel):
     margin_pp: float | None = None
 
 
-class LaneStatement(BaseModel):
+class LaneStatement(_Out):
     """One plain-language sentence next to a chart (amendment A1)."""
 
     key: str
@@ -70,7 +77,7 @@ class LaneStatement(BaseModel):
     text: str
 
 
-class LaneRef(BaseModel):
+class LaneRef(_Out):
     key: str  # filter key: "Chicago,IL>Atlanta,GA"
     label: str
     runs: int
@@ -79,7 +86,7 @@ class LaneRef(BaseModel):
     rate_per_mile: float | None = None
 
 
-class LanesSummary(BaseModel):
+class LanesSummary(_Out):
     period: LanesPeriod
     window_label: str
     window_start: str
@@ -98,7 +105,7 @@ class LanesSummary(BaseModel):
     statements: list[LaneStatement]
 
 
-class TopLane(BaseModel):
+class TopLane(_Out):
     key: str
     origin: str
     dest: str
@@ -111,13 +118,13 @@ class TopLane(BaseModel):
     runs_trend_pct: float | None = None
 
 
-class TopLanes(BaseModel):
+class TopLanes(_Out):
     level: Literal["state", "city"]
     window_label: str
     lanes: list[TopLane]
 
 
-class LaneEntity(BaseModel):
+class LaneEntity(_Out):
     """Everything the map popover shows for one state, city or lane arc."""
 
     key: str  # state:TX | city:Dallas,TX | lane:Dallas,TX>Memphis,TN
@@ -131,7 +138,7 @@ class LaneEntity(BaseModel):
     text: str
 
 
-class HeatPoint(BaseModel):
+class HeatPoint(_Out):
     lat: float
     lng: float
     weight: float
@@ -145,7 +152,7 @@ class CityEntity(LaneEntity):
     lng: float
 
 
-class HeatArc(BaseModel):
+class HeatArc(_Out):
     key: str
     o_lat: float
     o_lng: float
@@ -158,7 +165,7 @@ class HeatArc(BaseModel):
     entity: LaneEntity
 
 
-class HeatmapData(BaseModel):
+class HeatmapData(_Out):
     period: LanesPeriod
     window_label: str
     origins: list[HeatPoint]
@@ -168,7 +175,7 @@ class HeatmapData(BaseModel):
     arcs: list[HeatArc]
 
 
-class RunRow(BaseModel):
+class RunRow(_Out):
     id: int
     pickup_at: str
     origin: str
@@ -184,30 +191,30 @@ class RunRow(BaseModel):
     margin_pct: float | None = None
 
 
-class RunsPage(BaseModel):
+class RunsPage(_Out):
     items: list[RunRow]
     next_cursor: str | None = None
     total: int
 
 
-class LaneInsightItem(BaseModel):
+class LaneInsightItem(_Out):
     lane: str
     why: str
     metric: str = ""
     delta_pct: float | None = None
 
 
-class ShiftItem(BaseModel):
+class ShiftItem(_Out):
     headline: str
     evidence: str = ""
 
 
-class LeverItem(BaseModel):
+class LeverItem(_Out):
     lever: str
     impact_hint: str = ""
 
 
-class LaneAiInsights(BaseModel):
+class LaneAiInsights(_Out):
     status: Literal["ok", "unavailable", "empty"]
     focus_lanes: list[LaneInsightItem] = Field(default_factory=list)
     declining_lanes: list[LaneInsightItem] = Field(default_factory=list)

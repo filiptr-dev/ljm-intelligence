@@ -1733,6 +1733,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analysis/lanes/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lanes Summary */
+        get: operations["lanes_summary_analysis_lanes_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lanes/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lanes Top */
+        get: operations["lanes_top_analysis_lanes_top_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lanes/heatmap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lanes Heatmap */
+        get: operations["lanes_heatmap_analysis_lanes_heatmap_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lanes/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lanes Runs */
+        get: operations["lanes_runs_analysis_lanes_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analysis/lanes/ai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lanes Ai Cached Entities
+         * @description Whatever per-entity suggestions are cached. Never calls the model.
+         */
+        get: operations["lanes_ai_cached_entities_analysis_lanes_ai_get"];
+        put?: never;
+        /** Lanes Ai */
+        post: operations["lanes_ai_analysis_lanes_ai_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mail/backfill": {
         parameters: {
             query?: never;
@@ -2807,6 +2896,32 @@ export interface components {
             tiles: components["schemas"]["KpiBlockOut"][];
             funnel: components["schemas"]["FunnelOut"];
         };
+        /** CityEntity */
+        CityEntity: {
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "state" | "city" | "lane";
+            /** Label */
+            label: string;
+            metrics: components["schemas"]["LaneMetrics"];
+            /** Dominant Band */
+            dominant_band: string | null;
+            trend: components["schemas"]["LaneTrend"];
+            /** Runs As Origin */
+            runs_as_origin: number | null;
+            /** Runs As Dest */
+            runs_as_dest: number | null;
+            /** Text */
+            text: string;
+            /** Lat */
+            lat: number;
+            /** Lng */
+            lng: number;
+        };
         /** CityStateIn */
         CityStateIn: {
             /** City */
@@ -2936,6 +3051,20 @@ export interface components {
             last_verified_at?: string | null;
             /** Discovered At */
             discovered_at?: string | null;
+        };
+        /** CostShare */
+        CostShare: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "fuel" | "driver" | "load" | "dispatch";
+            /** Label */
+            label: string;
+            /** Amount */
+            amount: number;
+            /** Pct */
+            pct: number;
         };
         /** CrawlRunOut */
         CrawlRunOut: {
@@ -3465,6 +3594,63 @@ export interface components {
             app_env: string;
             jobs?: components["schemas"]["JobsHealth"] | null;
         };
+        /** HeatArc */
+        HeatArc: {
+            /** Key */
+            key: string;
+            /** O Lat */
+            o_lat: number;
+            /** O Lng */
+            o_lng: number;
+            /** D Lat */
+            d_lat: number;
+            /** D Lng */
+            d_lng: number;
+            /** O Label */
+            o_label: string;
+            /** D Label */
+            d_label: string;
+            /** Runs */
+            runs: number;
+            /** Trend Pct */
+            trend_pct: number | null;
+            entity: components["schemas"]["LaneEntity"];
+        };
+        /** HeatPoint */
+        HeatPoint: {
+            /** Lat */
+            lat: number;
+            /** Lng */
+            lng: number;
+            /** Weight */
+            weight: number;
+            /** Runs */
+            runs: number;
+            /** Revenue */
+            revenue: number;
+            /** Key */
+            key: string;
+        };
+        /** HeatmapData */
+        HeatmapData: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "week" | "month" | "year";
+            /** Window Label */
+            window_label: string;
+            /** Origins */
+            origins: components["schemas"]["HeatPoint"][];
+            /** Dests */
+            dests: components["schemas"]["HeatPoint"][];
+            /** Cities */
+            cities: components["schemas"]["CityEntity"][];
+            /** States */
+            states: components["schemas"]["LaneEntity"][];
+            /** Arcs */
+            arcs: components["schemas"]["HeatArc"][];
+        };
         /** IncrementalIn */
         IncrementalIn: {
             /** Mailbox */
@@ -3595,6 +3781,82 @@ export interface components {
             /** Thin */
             thin: boolean;
         };
+        /** LaneAiInsights */
+        LaneAiInsights: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "empty";
+            /** Focus Lanes */
+            focus_lanes: components["schemas"]["LaneInsightItem"][];
+            /** Declining Lanes */
+            declining_lanes: components["schemas"]["LaneInsightItem"][];
+            /** Market Shifts */
+            market_shifts: components["schemas"]["ShiftItem"][];
+            /** Cost Levers */
+            cost_levers: components["schemas"]["LeverItem"][];
+            /** Entity Insights */
+            entity_insights: {
+                [key: string]: string[];
+            };
+            /** Generated At */
+            generated_at: string | null;
+            /**
+             * Cached
+             * @default false
+             */
+            cached: boolean;
+            /** Ai Error */
+            ai_error: string | null;
+        };
+        /** LaneBucket */
+        LaneBucket: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            metrics: components["schemas"]["LaneMetrics"];
+        };
+        /**
+         * LaneEntity
+         * @description Everything the map popover shows for one state, city or lane arc.
+         */
+        LaneEntity: {
+            /** Key */
+            key: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "state" | "city" | "lane";
+            /** Label */
+            label: string;
+            metrics: components["schemas"]["LaneMetrics"];
+            /** Dominant Band */
+            dominant_band: string | null;
+            trend: components["schemas"]["LaneTrend"];
+            /** Runs As Origin */
+            runs_as_origin: number | null;
+            /** Runs As Dest */
+            runs_as_dest: number | null;
+            /** Text */
+            text: string;
+        };
+        /** LaneInsightItem */
+        LaneInsightItem: {
+            /** Lane */
+            lane: string;
+            /** Why */
+            why: string;
+            /**
+             * Metric
+             * @default
+             */
+            metric: string;
+            /** Delta Pct */
+            delta_pct: number | null;
+        };
         /** LaneKpiOut */
         LaneKpiOut: {
             /** Period */
@@ -3604,6 +3866,63 @@ export interface components {
             /** Rows */
             rows: components["schemas"]["LaneRow"][];
             top: components["schemas"]["BreakdownOut"];
+        };
+        /**
+         * LaneMetrics
+         * @description Every number the page shows for one slice of runs. Derived in SQL sums.
+         */
+        LaneMetrics: {
+            /**
+             * Runs
+             * @default 0
+             */
+            runs: number;
+            /**
+             * Miles
+             * @default 0
+             */
+            miles: number;
+            /**
+             * Revenue
+             * @default 0
+             */
+            revenue: number;
+            /**
+             * Cost Fuel
+             * @default 0
+             */
+            cost_fuel: number;
+            /**
+             * Cost Driver
+             * @default 0
+             */
+            cost_driver: number;
+            /**
+             * Cost Load
+             * @default 0
+             */
+            cost_load: number;
+            /**
+             * Cost Dispatch
+             * @default 0
+             */
+            cost_dispatch: number;
+            /**
+             * Cost Total
+             * @default 0
+             */
+            cost_total: number;
+            /**
+             * Margin
+             * @default 0
+             */
+            margin: number;
+            /** Margin Pct */
+            margin_pct: number | null;
+            /** Rate Per Mile */
+            rate_per_mile: number | null;
+            /** Cost Per Mile */
+            cost_per_mile: number | null;
         };
         /** LanePredictionOut */
         LanePredictionOut: {
@@ -3631,6 +3950,21 @@ export interface components {
              */
             computed_at: string;
         };
+        /** LaneRef */
+        LaneRef: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Runs */
+            runs: number;
+            /** Miles */
+            miles: number;
+            /** Revenue */
+            revenue: number;
+            /** Rate Per Mile */
+            rate_per_mile: number | null;
+        };
         /** LaneRow */
         LaneRow: {
             /** Lane */
@@ -3643,6 +3977,70 @@ export interface components {
             avg_usd_per_mile: number | null;
             /** N */
             n: number;
+        };
+        /**
+         * LaneStatement
+         * @description One plain-language sentence next to a chart (amendment A1).
+         */
+        LaneStatement: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * LaneTrend
+         * @description Recent half of the window vs the half before it.
+         */
+        LaneTrend: {
+            /** Label */
+            label: string;
+            /** Runs Pct */
+            runs_pct: number | null;
+            /** Revenue Pct */
+            revenue_pct: number | null;
+            /** Rate Pct */
+            rate_pct: number | null;
+            /** Margin Pp */
+            margin_pp: number | null;
+        };
+        /** LanesSummary */
+        LanesSummary: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "week" | "month" | "year";
+            /** Window Label */
+            window_label: string;
+            /** Window Start */
+            window_start: string;
+            /** Window End */
+            window_end: string;
+            /** History Runs */
+            history_runs: number;
+            /** History Months */
+            history_months: number;
+            /** Buckets */
+            buckets: components["schemas"]["LaneBucket"][];
+            kpis: components["schemas"]["LaneMetrics"];
+            trend: components["schemas"]["LaneTrend"];
+            /** Cost Split */
+            cost_split: components["schemas"]["CostShare"][];
+            /** Length Bands */
+            length_bands: components["schemas"]["LengthBand"][];
+            most_frequent_lane: components["schemas"]["LaneRef"] | null;
+            most_miles_lane: components["schemas"]["LaneRef"] | null;
+            most_revenue_lane: components["schemas"]["LaneRef"] | null;
+            /**
+             * Shifting
+             * @default false
+             */
+            shifting: boolean;
+            /** Statements */
+            statements: components["schemas"]["LaneStatement"][];
         };
         /** LastCallOut */
         LastCallOut: {
@@ -3817,6 +4215,27 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+        };
+        /** LengthBand */
+        LengthBand: {
+            /** Band */
+            band: string;
+            /** Runs */
+            runs: number;
+            /** Pct */
+            pct: number;
+            /** Revenue */
+            revenue: number;
+        };
+        /** LeverItem */
+        LeverItem: {
+            /** Lever */
+            lever: string;
+            /**
+             * Impact Hint
+             * @default
+             */
+            impact_hint: string;
         };
         /** LiveFeedItemOut */
         LiveFeedItemOut: {
@@ -4756,6 +5175,44 @@ export interface components {
              */
             brief: string;
         };
+        /** RunRow */
+        RunRow: {
+            /** Id */
+            id: number;
+            /** Pickup At */
+            pickup_at: string;
+            /** Origin */
+            origin: string;
+            /** Dest */
+            dest: string;
+            /** Equipment */
+            equipment: string | null;
+            /** Miles */
+            miles: number;
+            /** Revenue */
+            revenue: number;
+            /** Cost Fuel */
+            cost_fuel: number;
+            /** Cost Driver */
+            cost_driver: number;
+            /** Cost Load */
+            cost_load: number;
+            /** Cost Dispatch */
+            cost_dispatch: number;
+            /** Margin */
+            margin: number;
+            /** Margin Pct */
+            margin_pct: number | null;
+        };
+        /** RunsPage */
+        RunsPage: {
+            /** Items */
+            items: components["schemas"]["RunRow"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Total */
+            total: number;
+        };
         /** SaveNoteIn */
         SaveNoteIn: {
             /**
@@ -4953,6 +5410,16 @@ export interface components {
             ai_features?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** ShiftItem */
+        ShiftItem: {
+            /** Headline */
+            headline: string;
+            /**
+             * Evidence
+             * @default
+             */
+            evidence: string;
         };
         /** ShipperDetailOut */
         ShipperDetailOut: {
@@ -5220,6 +5687,41 @@ export interface components {
             to_call_today: components["schemas"]["TileCount"];
             new_leads_since_last_crawl: components["schemas"]["NewLeadsTile"];
             loads_booked_90d: components["schemas"]["LoadsBookedTile"];
+        };
+        /** TopLane */
+        TopLane: {
+            /** Key */
+            key: string;
+            /** Origin */
+            origin: string;
+            /** Dest */
+            dest: string;
+            /** Runs */
+            runs: number;
+            /** Miles */
+            miles: number;
+            /** Revenue */
+            revenue: number;
+            /** Avg Rate Per Mi */
+            avg_rate_per_mi: number | null;
+            /** Margin Pct */
+            margin_pct: number | null;
+            /** Trend Pct */
+            trend_pct: number | null;
+            /** Runs Trend Pct */
+            runs_trend_pct: number | null;
+        };
+        /** TopLanes */
+        TopLanes: {
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "state" | "city";
+            /** Window Label */
+            window_label: string;
+            /** Lanes */
+            lanes: components["schemas"]["TopLane"][];
         };
         /** TopbarCountersOut */
         TopbarCountersOut: {
@@ -8750,6 +9252,235 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrokerKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lanes_summary_analysis_lanes_summary_get: {
+        parameters: {
+            query?: {
+                period?: "week" | "month" | "year";
+                /** @description Filter: runs touching this state */
+                state?: string | null;
+                /** @description Filter: one lane, "Chicago,IL>Atlanta,GA" or "IL>GA" */
+                lane?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LanesSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lanes_top_analysis_lanes_top_get: {
+        parameters: {
+            query?: {
+                period?: "week" | "month" | "year";
+                level?: "state" | "city";
+                limit?: number;
+                /** @description Filter: runs touching this state */
+                state?: string | null;
+                /** @description Filter: one lane, "Chicago,IL>Atlanta,GA" or "IL>GA" */
+                lane?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TopLanes"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lanes_heatmap_analysis_lanes_heatmap_get: {
+        parameters: {
+            query?: {
+                period?: "week" | "month" | "year";
+                /** @description Filter: runs touching this state */
+                state?: string | null;
+                /** @description Filter: one lane, "Chicago,IL>Atlanta,GA" or "IL>GA" */
+                lane?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeatmapData"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lanes_runs_analysis_lanes_runs_get: {
+        parameters: {
+            query?: {
+                period?: "week" | "month" | "year";
+                cursor?: string | null;
+                limit?: number;
+                /** @description Filter: runs touching this state */
+                state?: string | null;
+                /** @description Filter: one lane, "Chicago,IL>Atlanta,GA" or "IL>GA" */
+                lane?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lanes_ai_cached_entities_analysis_lanes_ai_get: {
+        parameters: {
+            query?: {
+                period?: "week" | "month" | "year";
+                /** @description Filter: runs touching this state */
+                state?: string | null;
+                /** @description Filter: one lane, "Chicago,IL>Atlanta,GA" or "IL>GA" */
+                lane?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string[];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lanes_ai_analysis_lanes_ai_post: {
+        parameters: {
+            query?: {
+                period?: "week" | "month" | "year";
+                refresh?: boolean;
+                /** @description Filter: runs touching this state */
+                state?: string | null;
+                /** @description Filter: one lane, "Chicago,IL>Atlanta,GA" or "IL>GA" */
+                lane?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LaneAiInsights"];
                 };
             };
             /** @description Validation Error */

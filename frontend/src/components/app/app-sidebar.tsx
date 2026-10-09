@@ -21,6 +21,7 @@ import {
   SquarePen,
   Truck,
   Wallet,
+  Waypoints,
 } from "lucide-react"
 import { HazardStripe, Wordmark } from "@/components/brand/marks"
 import { Tire } from "@/components/brand/tire"
@@ -42,6 +43,7 @@ import { useEngine } from "./engine"
 const ANALYSE = [
   { href: "/", label: "Overview", icon: Gauge },
   { href: "/intelligence", label: "Broker Intelligence", icon: ChartColumnBig },
+  { href: "/intelligence/lanes", label: "Lanes history", icon: Waypoints },
   { href: "/brokers", label: "Brokers", icon: Building2 },
   { href: "/emails", label: "Email Analysis", icon: Mail },
 ]
@@ -67,7 +69,13 @@ const CONFIG = [{ href: "/settings", label: "Settings", icon: SettingsIcon }]
 export function AppSidebar() {
   const pathname = usePathname()
   const { campaigns } = useEngine()
-  const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href))
+  // The longest matching href wins, so /intelligence/lanes doesn't also light up "Broker Intelligence".
+  const ALL_HREFS = [...ANALYSE, ...GROW, ...TOOLS, ...CONFIG].map((i) => i.href)
+  const active = (href: string) =>
+    href === "/"
+      ? pathname === "/"
+      : pathname.startsWith(href) &&
+        !ALL_HREFS.some((h) => h.length > href.length && h.startsWith(href) && pathname.startsWith(h))
   const sending = campaigns.filter((c) => !c.single).reduce((s, c) => s + c.recipients.filter((r) => r.status === "queued").length, 0)
   const newReplies = campaigns.filter((c) => c.single && c.recipients[0]?.reply).length
   // Lead Finder badge used to show `+liveLeads.length` (fake per-session count
