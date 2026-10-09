@@ -9,9 +9,11 @@ Returns plain dataclasses. Cursor encoding stays in the router.
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,6 +148,43 @@ class MainLaneRow:
 
 
 @dataclass
+class EmailAnalyticsBucket:
+    """Winning dow/hour bucket with its sample size, so the UI can mark thin."""
+    dow: int | None = None  # Monday=0 (only set on the dow bucket)
+    hour: int | None = None  # 0..23 ET (only set on the hour bucket)
+    reply_rate: float = 0.0
+    sample: int = 0
+
+
+@dataclass
+class WeeklyPoint:
+    week_start: str  # ISO date, Monday 00:00 ET anchor
+    sent: int
+    replied: int
+
+
+@dataclass
+class EmailAnalyticsRow:
+    """Honest-by-design email analytics for a single broker/lead.
+
+    Every scalar is nullable so the UI renders ``—`` for empty cells; the
+    weekly series is always exactly 12 points (oldest first, zero-filled).
+    """
+
+    sent_30d: int = 0
+    sent_90d: int = 0
+    replied_30d: int = 0
+    replied_90d: int = 0
+    reply_rate_30d: float | None = None
+    reply_rate_90d: float | None = None
+    avg_reply_hours: float | None = None
+    median_reply_hours: float | None = None
+    best_day_of_week: EmailAnalyticsBucket | None = None
+    best_hour_et: EmailAnalyticsBucket | None = None
+    weekly_series_12w: list[WeeklyPoint] = field(default_factory=list)
+
+
+@dataclass
 class BrokerDetailResult:
     broker: BrokerRowData
     address: ContactField
@@ -156,6 +195,7 @@ class BrokerDetailResult:
     summary: SummaryRow
     main_lane: MainLaneRow | None
     overview_metrics: OverviewMetricsRow | None = None
+    email_analytics: EmailAnalyticsRow | None = None
 
 
 # ---------- helpers ---------------------------------------------------------
@@ -178,6 +218,142 @@ def _as_utc(dt: datetime | None) -> datetime | None:
 
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
+
+
+# Operator-local timezone for dow/hour bucketing + weekly anchoring. Mirrors
+# ``call_list_service._ET`` — kept local to avoid an import cycle.
+_ET = ZoneInfo("America/New_York")
+
+# Suppress "best day/hour" when total sends are below this floor; mirrors the
+# ``health_thin`` / ``win_rate_thin`` pattern elsewhere in this file.
+_EMAIL_ANALYTICS_SAMPLE_FLOOR = 10
+
+
+async def get_email_analytics(
+    sessionmaker: Any, broker_id: str
+) -> EmailAnalyticsRow:
+    """Compute real email analytics for one broker from ``sent_log``.
+
+    Single ``SELECT sent_at, replied_at`` scoped by ``lead_id`` (reuses the
+    existing ``sent_log_contact_sent`` lead-id index), then pure-Python
+    bucketing. Detail-only so the list page's cost stays flat.
+    """
+    now = _now()
+    cutoff_30 = now - timedelta(days=30)
+    cutoff_90 = now - timedelta(days=90)
+
+    async with sessionmaker() as s:
+        rows = (
+            await s.execute(
+                select(SentLog.sent_at, SentLog.replied_at).where(
+                    SentLog.lead_id == broker_id
+                )
+            )
+        ).all()
+
+    sent_30 = replied_30 = sent_90 = replied_90 = 0
+    reply_deltas_h: list[float] = []
+    # Reply-rate per bucket needs per-bucket sent + replied counts.
+    dow_sent: dict[int, int] = {}
+    dow_replied: dict[int, int] = {}
+    hour_sent: dict[int, int] = {}
+    hour_replied: dict[int, int] = {}
+    total_sent = 0
+
+    for sent_at_raw, replied_at_raw in rows:
+        sent_at = _as_utc(sent_at_raw)
+        replied_at = _as_utc(replied_at_raw)
+        if sent_at is None:
+            continue
+        total_sent += 1
+        if sent_at >= cutoff_30:
+            sent_30 += 1
+            if replied_at is not None:
+                replied_30 += 1
+        if sent_at >= cutoff_90:
+            sent_90 += 1
+            if replied_at is not None:
+                replied_90 += 1
+        if replied_at is not None:
+            reply_deltas_h.append((replied_at - sent_at).total_seconds() / 3600.0)
+        et = sent_at.astimezone(_ET)
+        dow = et.weekday()
+        hour = et.hour
+        dow_sent[dow] = dow_sent.get(dow, 0) + 1
+        hour_sent[hour] = hour_sent.get(hour, 0) + 1
+        if replied_at is not None:
+            dow_replied[dow] = dow_replied.get(dow, 0) + 1
+            hour_replied[hour] = hour_replied.get(hour, 0) + 1
+
+    reply_rate_30 = (replied_30 / sent_30) if sent_30 else None
+    reply_rate_90 = (replied_90 / sent_90) if sent_90 else None
+    avg_h = (sum(reply_deltas_h) / len(reply_deltas_h)) if reply_deltas_h else None
+    med_h = statistics.median(reply_deltas_h) if reply_deltas_h else None
+
+    best_dow: EmailAnalyticsBucket | None = None
+    best_hour: EmailAnalyticsBucket | None = None
+    if total_sent >= _EMAIL_ANALYTICS_SAMPLE_FLOOR:
+        if dow_sent:
+            d, n = max(
+                dow_sent.items(),
+                key=lambda kv: (dow_replied.get(kv[0], 0) / kv[1], kv[1]),
+            )
+            best_dow = EmailAnalyticsBucket(
+                dow=d,
+                reply_rate=dow_replied.get(d, 0) / n,
+                sample=n,
+            )
+        if hour_sent:
+            h, n = max(
+                hour_sent.items(),
+                key=lambda kv: (hour_replied.get(kv[0], 0) / kv[1], kv[1]),
+            )
+            best_hour = EmailAnalyticsBucket(
+                hour=h,
+                reply_rate=hour_replied.get(h, 0) / n,
+                sample=n,
+            )
+
+    # Weekly series: exactly 12 Monday-anchored buckets in ET, oldest first.
+    now_et = now.astimezone(_ET)
+    today_et_midnight = datetime.combine(now_et.date(), time(0, 0), tzinfo=_ET)
+    this_monday_et = today_et_midnight - timedelta(days=now_et.weekday())
+    weeks: list[WeeklyPoint] = []
+    for i in range(11, -1, -1):
+        wk_start = this_monday_et - timedelta(weeks=i)
+        wk_end = wk_start + timedelta(weeks=1)
+        sent_c = 0
+        replied_c = 0
+        for sent_at_raw, replied_at_raw in rows:
+            sent_at = _as_utc(sent_at_raw)
+            if sent_at is None:
+                continue
+            sa_et = sent_at.astimezone(_ET)
+            if wk_start <= sa_et < wk_end:
+                sent_c += 1
+                if _as_utc(replied_at_raw) is not None:
+                    replied_c += 1
+        weeks.append(
+            WeeklyPoint(
+                week_start=wk_start.date().isoformat(),
+                sent=sent_c,
+                replied=replied_c,
+            )
+        )
+
+    return EmailAnalyticsRow(
+        sent_30d=sent_30,
+        sent_90d=sent_90,
+        replied_30d=replied_30,
+        replied_90d=replied_90,
+        reply_rate_30d=reply_rate_30,
+        reply_rate_90d=reply_rate_90,
+        avg_reply_hours=avg_h,
+        median_reply_hours=med_h,
+        best_day_of_week=best_dow,
+        best_hour_et=best_hour,
+        weekly_series_12w=weeks,
+    )
 
 
 def _field(
@@ -650,6 +826,8 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         last_activity_by_lead={lead.id: last_activity},
     )
 
+    email_analytics = await get_email_analytics(sessionmaker, lead.id)
+
     return BrokerDetailResult(
         broker=broker_row,
         address=_field(lead.address, lead.address_source),
@@ -660,6 +838,7 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         summary=summary,
         main_lane=main_lane,
         overview_metrics=overview_map.get(lead.id),
+        email_analytics=email_analytics,
     )
 
 

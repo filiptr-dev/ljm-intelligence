@@ -31,6 +31,7 @@ import type { ContactOption } from "@/components/app/email-composer"
 import { SingleEmailBuilder } from "@/components/app/single-email-builder"
 import { singleSendAdapter } from "@/lib/api/email-send"
 import { InboxCards } from "./inbox-cards"
+import { BrokerEmailAnalyticsPanel } from "./email-analytics"
 import { BrokerKpis } from "./broker-kpis"
 import { AiSummaryCard, BrokerOverviewSections, BrokerStatTiles } from "./overview-sections"
 import {
@@ -598,6 +599,8 @@ export default function BrokerDetailPage() {
               </div>
             </section>
           ) : null}
+
+          <BrokerEmailAnalyticsPanel ea={data.email_analytics ?? null} />
 
           <EmailTimeline emails={emailOnly} />
         </div>

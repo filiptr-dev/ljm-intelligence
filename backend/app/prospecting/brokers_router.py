@@ -29,6 +29,7 @@ from app.prospecting.brokers_service import (
     ActivityEmailEvent,
     BrokerRowData,
     ContactField,
+    EmailAnalyticsRow,
     NamedContactRow,
     NotFoundError,
     OverviewMetricsRow,
@@ -215,6 +216,41 @@ class MainLaneOut(BaseModel):
     last_seen_at: str | None = None
 
 
+class EmailAnalyticsBucketOut(BaseModel):
+    """Winning dow or hour bucket. Only one of ``dow`` / ``hour`` is set."""
+
+    dow: int | None = None
+    hour: int | None = None
+    reply_rate: float
+    sample: int
+
+
+class WeeklyPointOut(BaseModel):
+    week_start: str
+    sent: int
+    replied: int
+
+
+class EmailAnalyticsOut(BaseModel):
+    """Honest email analytics for the broker detail page.
+
+    Every scalar is nullable so the UI renders ``—`` for empty cells;
+    ``weekly_series_12w`` is always exactly 12 entries, oldest first.
+    """
+
+    sent_30d: int
+    sent_90d: int
+    replied_30d: int
+    replied_90d: int
+    reply_rate_30d: float | None = None
+    reply_rate_90d: float | None = None
+    avg_reply_hours: float | None = None
+    median_reply_hours: float | None = None
+    best_day_of_week: EmailAnalyticsBucketOut | None = None
+    best_hour_et: EmailAnalyticsBucketOut | None = None
+    weekly_series_12w: list[WeeklyPointOut]
+
+
 class BrokerDetailBody(BrokerRowOut):
     address: ContactFieldOut
     linkedin_company_url: str | None = None
@@ -228,6 +264,7 @@ class BrokerDetailOut(BaseModel):
     activity: list[ActivityCallOut | ActivityEmailOut]
     summary: BrokerSummaryOut
     overview_metrics: OverviewMetricsOut | None = None
+    email_analytics: EmailAnalyticsOut | None = None
 
 
 # ---------- cursor helpers --------------------------------------------------
@@ -252,6 +289,41 @@ def _decode_cursor(cursor: str | None) -> str | None:
 
 def _field_out(f: ContactField) -> ContactFieldOut:
     return ContactFieldOut(**f.__dict__)
+
+
+def _email_analytics_out(ea: EmailAnalyticsRow) -> EmailAnalyticsOut:
+    return EmailAnalyticsOut(
+        sent_30d=ea.sent_30d,
+        sent_90d=ea.sent_90d,
+        replied_30d=ea.replied_30d,
+        replied_90d=ea.replied_90d,
+        reply_rate_30d=ea.reply_rate_30d,
+        reply_rate_90d=ea.reply_rate_90d,
+        avg_reply_hours=ea.avg_reply_hours,
+        median_reply_hours=ea.median_reply_hours,
+        best_day_of_week=(
+            EmailAnalyticsBucketOut(
+                dow=ea.best_day_of_week.dow,
+                reply_rate=ea.best_day_of_week.reply_rate,
+                sample=ea.best_day_of_week.sample,
+            )
+            if ea.best_day_of_week is not None
+            else None
+        ),
+        best_hour_et=(
+            EmailAnalyticsBucketOut(
+                hour=ea.best_hour_et.hour,
+                reply_rate=ea.best_hour_et.reply_rate,
+                sample=ea.best_hour_et.sample,
+            )
+            if ea.best_hour_et is not None
+            else None
+        ),
+        weekly_series_12w=[
+            WeeklyPointOut(week_start=w.week_start, sent=w.sent, replied=w.replied)
+            for w in ea.weekly_series_12w
+        ],
+    )
 
 
 def _overview_out(om: OverviewMetricsRow) -> OverviewMetricsOut:
@@ -652,6 +724,11 @@ async def get_broker(request: Request, broker_id: str) -> BrokerDetailOut:
         overview_metrics=(
             _overview_out(result.overview_metrics)
             if result.overview_metrics is not None
+            else None
+        ),
+        email_analytics=(
+            _email_analytics_out(result.email_analytics)
+            if result.email_analytics is not None
             else None
         ),
     )

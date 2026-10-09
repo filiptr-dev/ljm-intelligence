@@ -2760,6 +2760,7 @@ export interface components {
             activity: (components["schemas"]["ActivityCallOut"] | components["schemas"]["ActivityEmailOut"])[];
             summary: components["schemas"]["BrokerSummaryOut"];
             overview_metrics?: components["schemas"]["OverviewMetricsOut"] | null;
+            email_analytics?: components["schemas"]["EmailAnalyticsOut"] | null;
         };
         /** BrokerKpiOut */
         BrokerKpiOut: {
@@ -3481,6 +3482,49 @@ export interface components {
             key_masked?: string | null;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * EmailAnalyticsBucketOut
+         * @description Winning dow or hour bucket. Only one of ``dow`` / ``hour`` is set.
+         */
+        EmailAnalyticsBucketOut: {
+            /** Dow */
+            dow?: number | null;
+            /** Hour */
+            hour?: number | null;
+            /** Reply Rate */
+            reply_rate: number;
+            /** Sample */
+            sample: number;
+        };
+        /**
+         * EmailAnalyticsOut
+         * @description Honest email analytics for the broker detail page.
+         *
+         *     Every scalar is nullable so the UI renders ``—`` for empty cells;
+         *     ``weekly_series_12w`` is always exactly 12 entries, oldest first.
+         */
+        EmailAnalyticsOut: {
+            /** Sent 30D */
+            sent_30d: number;
+            /** Sent 90D */
+            sent_90d: number;
+            /** Replied 30D */
+            replied_30d: number;
+            /** Replied 90D */
+            replied_90d: number;
+            /** Reply Rate 30D */
+            reply_rate_30d?: number | null;
+            /** Reply Rate 90D */
+            reply_rate_90d?: number | null;
+            /** Avg Reply Hours */
+            avg_reply_hours?: number | null;
+            /** Median Reply Hours */
+            median_reply_hours?: number | null;
+            best_day_of_week?: components["schemas"]["EmailAnalyticsBucketOut"] | null;
+            best_hour_et?: components["schemas"]["EmailAnalyticsBucketOut"] | null;
+            /** Weekly Series 12W */
+            weekly_series_12w: components["schemas"]["WeeklyPointOut"][];
         };
         /**
          * EmailDesignIn
@@ -6443,6 +6487,15 @@ export interface components {
             last_verified_at: string | null;
             /** Pipeline Status */
             pipeline_status: string;
+        };
+        /** WeeklyPointOut */
+        WeeklyPointOut: {
+            /** Week Start */
+            week_start: string;
+            /** Sent */
+            sent: number;
+            /** Replied */
+            replied: number;
         };
         /** WorkloadCellOut */
         WorkloadCellOut: {

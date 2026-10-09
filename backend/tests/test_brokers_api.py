@@ -241,6 +241,31 @@ async def test_detail_404(client: AsyncClient):
     assert r.status_code == 404
 
 
+async def test_get_broker_returns_email_analytics(client: AsyncClient):
+    """3 sends (2 replied, 1 unreplied) → sent_30d==3, replied_30d==2,
+    reply_rate_30d==2/3, weekly series is exactly 12 zero-filled points."""
+    sm = client._sm  # type: ignore[attr-defined]
+    await _seed_lead(sm, id="L-ea")
+    await _seed_sent(sm, "L-ea", days_ago=1, replied=True)
+    await _seed_sent(sm, "L-ea", days_ago=3, replied=True)
+    await _seed_sent(sm, "L-ea", days_ago=5, replied=False)
+
+    r = await client.get("/brokers/L-ea")
+    assert r.status_code == 200, r.text
+    ea = r.json()["email_analytics"]
+    assert ea is not None
+    assert ea["sent_30d"] == 3
+    assert ea["replied_30d"] == 2
+    assert ea["reply_rate_30d"] == pytest.approx(2 / 3)
+    # Weekly series: exactly 12 Monday-anchored points, oldest first.
+    assert len(ea["weekly_series_12w"]) == 12
+    assert sum(p["sent"] for p in ea["weekly_series_12w"]) == 3
+    assert sum(p["replied"] for p in ea["weekly_series_12w"]) == 2
+    # Below the 10-send sample floor → best day/hour suppressed.
+    assert ea["best_day_of_week"] is None
+    assert ea["best_hour_et"] is None
+
+
 async def test_detail_shows_dash_for_missing_fields(client: AsyncClient):
     sm = client._sm  # type: ignore[attr-defined]
     await _seed_lead(sm, id="L-blank", phone=None, primary_email=None, address=None)
