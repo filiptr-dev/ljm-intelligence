@@ -57,7 +57,10 @@ function prettyReason(reason: string | null | undefined): string {
   return "Disabled."
 }
 
-export function ConnectorsPanel() {
+export type ConnectorSection = "mail" | "sources" | "eia"
+
+/** `sections` picks which cards render (the Settings page mounts them in dialogs). */
+export function ConnectorsPanel({ sections = ["mail", "sources", "eia"] }: { sections?: ConnectorSection[] }) {
   const [mail, setMail] = React.useState<MailStatus | null>(null)
   const [sources, setSources] = React.useState<LoadSourceRow[]>([])
   const [testTo, setTestTo] = React.useState("")
@@ -226,9 +229,10 @@ export function ConnectorsPanel() {
 
   return (
     <>
+      {sections.includes("mail") && (
       <Panel
         title="Mail connection"
-        description="Default is simulated. Paste the Google Workspace service-account JSON + admin-impersonate email on the Gmail card below (stored encrypted in the DB vault — no Render env needed). Flip Owner-send ON in Owner switches, then use the two Test buttons: Test connection sends a tiny email (write-side); Test read lists one mailbox and shows the most recent message. Start first sync kicks a 3-month backfill of the owner mailbox."
+        description="Default is simulated. Store the service-account JSON on the Gmail card, then use Test connection (send) and Test read."
       >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm">
@@ -308,7 +312,9 @@ export function ConnectorsPanel() {
           </Button>
         </div>
       </Panel>
+      )}
 
+      {sections.includes("sources") && (
       <Panel
         title="Load sources"
         description="Every connector starts off. See the Load boards card below to paste credentials + choose a driver (off, api, or agent). This table is a live status readout."
@@ -380,7 +386,9 @@ export function ConnectorsPanel() {
           </table>
         </div>
       </Panel>
+      )}
 
+      {sections.includes("eia") && (
       <Panel
         title="EIA diesel API key"
         description="Optional. Lets the Lane Rate / Load Profit tools fetch live weekly diesel per PADD district. No key → the tools still work with a stale fallback and badge it. Grab one from eia.gov/opendata (free). Stored encrypted in the DB vault, never in env."
@@ -421,6 +429,7 @@ export function ConnectorsPanel() {
           ) : null}
         </div>
       </Panel>
+      )}
     </>
   )
 }

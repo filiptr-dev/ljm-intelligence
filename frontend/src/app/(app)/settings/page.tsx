@@ -15,7 +15,6 @@
 
 import { api } from "@/lib/api/server"
 import SettingsClient, { type SettingsOut } from "./settings-client"
-import { OwnerSwitches } from "./owner-switches"
 
 export const dynamic = "force-dynamic"
 
@@ -28,11 +27,6 @@ export default async function SettingsPage() {
     initial = null
   }
   return (
-    <>
-      <SettingsClient initial={initial} />
-      <div className="mt-6">
-        <OwnerSwitches />
-      </div>
-    </>
+    <SettingsClient initial={initial} />
   )
 }

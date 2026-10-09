@@ -10,7 +10,7 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { Loader2, Plug, Trash2, Save, Check, RefreshCw, Plus, X } from "lucide-react"
+import { Loader2, Plug, Trash2, Save, Check, Plus, X } from "lucide-react"
 
 import { Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
@@ -25,18 +25,19 @@ import {
   setLoadboardCred,
   testLoadboardCred,
   type LoadboardCredRow,
+  type LoadboardCredsList,
   type LoadboardDriverIn,
   type LoadboardDriverOut,
 } from "@/lib/api/connectors"
 
-const SRCS = [
+export const SRCS = [
   { key: "dat", label: "DAT" },
   { key: "truckstop", label: "Truckstop" },
   { key: "loadboard123", label: "123Loadboard" },
   { key: "chr", label: "C.H. Robinson" },
 ] as const
 
-type SrcKey = (typeof SRCS)[number]["key"]
+export type SrcKey = (typeof SRCS)[number]["key"]
 type DriverKey = Exclude<keyof LoadboardDriverOut, "env_override_active" | "agent_kill">
 
 const SRC_TO_DRIVER_KEY: Record<SrcKey, DriverKey> = {
@@ -48,15 +49,16 @@ const SRC_TO_DRIVER_KEY: Record<SrcKey, DriverKey> = {
 
 type UrlRow = { label: string; url: string; enabled: boolean }
 
-export function LoadboardsPanel() {
+/** `src` → just that board's driver + credential row (per-board Edit dialog).
+ *  `src` omitted → the shared bits only: kill switch + broker-page URLs. */
+export function LoadboardsPanel({ src }: { src?: SrcKey }) {
   const [rows, setRows] = React.useState<Record<string, LoadboardCredRow>>({})
   const [drivers, setDrivers] = React.useState<LoadboardDriverOut | null>(null)
   const [urls, setUrls] = React.useState<UrlRow[]>([])
   const [input, setInput] = React.useState<Record<string, { username: string; password: string }>>({})
   const [busy, setBusy] = React.useState<string | null>(null)
 
-  const refresh = React.useCallback(async () => {
-    const [creds, drv] = await Promise.all([listLoadboardCreds(), getLoadboardDrivers()])
+  const applyCreds = (creds: LoadboardCredsList | null, drv: LoadboardDriverOut | null) => {
     if (creds) {
       const byKey: Record<string, LoadboardCredRow> = {}
       for (const r of creds.items) byKey[r.source] = r
@@ -68,14 +70,30 @@ export function LoadboardsPanel() {
       })))
     }
     if (drv) setDrivers(drv)
+  }
+
+  const refresh = React.useCallback(async () => {
+    const [creds, drv] = await Promise.all([listLoadboardCreds(), getLoadboardDrivers()])
+    applyCreds(creds, drv)
   }, [])
 
   React.useEffect(() => {
-    void refresh().catch(() => {
-      // Swallow — initial fetch failure just leaves the panel empty. The
-      // Save/Test buttons will still work once the operator interacts.
-    })
-  }, [refresh])
+    // Initial load inline (state is set after the await, behind a cancel flag)
+    // so the effect never calls a state-setting callback synchronously.
+    let cancelled = false
+    void (async () => {
+      try {
+        const [creds, drv] = await Promise.all([listLoadboardCreds(), getLoadboardDrivers()])
+        if (!cancelled) applyCreds(creds, drv)
+      } catch {
+        // Swallow — initial fetch failure just leaves the panel empty. The
+        // Save/Test buttons will still work once the operator interacts.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function onSave(src: SrcKey) {
     const v = input[src] ?? { username: "", password: "" }
@@ -160,8 +178,8 @@ export function LoadboardsPanel() {
 
   return (
     <Panel
-      title="Load boards"
-      description="Paste each board's login once; it stores encrypted in the DB vault (no Render env needed). Pick a driver: off, api (official API, needs vendor key), or agent (headless browser login). The agent kill switch disables every agent run instantly."
+      title={src ? (SRCS.find((x) => x.key === src)?.label ?? "Load board") : "Load board settings"}
+      description={src ? "Login is stored encrypted in the DB vault. Driver: off, api (vendor key) or agent (headless browser)." : "Agent kill switch and the public broker-page URL allowlist."}
     >
       {drivers?.env_override_active && (
         <p className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -169,6 +187,7 @@ export function LoadboardsPanel() {
         </p>
       )}
 
+      {src && (
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-xs text-muted-foreground">
@@ -182,7 +201,7 @@ export function LoadboardsPanel() {
             </tr>
           </thead>
           <tbody>
-            {SRCS.map(({ key, label }) => {
+            {SRCS.filter((x) => x.key === src).map(({ key, label }) => {
               const row = rows[key]
               const inp = input[key] ?? { username: "", password: "" }
               const driverVal = drivers ? (drivers[SRC_TO_DRIVER_KEY[key]] as string) : "off"
@@ -272,8 +291,10 @@ export function LoadboardsPanel() {
           </tbody>
         </table>
       </div>
+      )}
 
-      <div className="mt-5 flex items-center gap-3">
+      {!src && (<>
+      <div className="flex items-center gap-3">
         <Label>Agent kill switch (disables every agent run)</Label>
         <Button
           size="sm"
@@ -367,6 +388,7 @@ export function LoadboardsPanel() {
           </table>
         )}
       </div>
+      </>)}
     </Panel>
   )
 }

@@ -39,9 +39,15 @@ import {
   FIT_WEIGHT_META,
 } from "./fit-weight-meta"
 import { api } from "@/lib/api/client"
-import { AiProvidersPanel } from "./ai-providers-panel"
-import { ConnectorsPanel } from "./connectors-panel"
-import { LoadboardsPanel } from "./loadboards-panel"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { IntegrationsStatus } from "./integrations-status"
+import { OwnerSwitches } from "./owner-switches"
 
 type FitWeights = Record<string, number>
 
@@ -102,6 +108,7 @@ function InfoDot({ label, children }: { label: string; children: React.ReactNode
 }
 
 export default function SettingsClient({ initial }: { initial: SettingsOut | null }) {
+  const [fitOpen, setFitOpen] = React.useState(false)
   // SSR seed: the Server Component resolved the first `GET /settings` with the
   // HttpOnly cookie, so there is no mount-time flash. `loaded` starts true when
   // we got a payload; otherwise we flip into "load failed" mode and the save
@@ -190,8 +197,9 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
         description="You decide when the crawler contacts a broker on its own — this is off by default. Turn it on when you're ready."
       />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
-        <div className="space-y-5">
+      <div className="space-y-5">
+        <IntegrationsStatus />
+
           <Panel title="Auto-contact" description="When on, high-fit leads at or above the Minimum fit threshold (set in the Auto-outreach panel below) are contacted automatically after each crawl. Simulated delivery is the demo safety net — nothing leaves the box.">
             <div className="flex items-center justify-between rounded-sm border border-border bg-background p-3">
               <div>
@@ -353,9 +361,22 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
 
           <Panel
             title="Fit-score weights"
-            description={FIT_PANEL_INTRO.headline}
+            description="Rare tuning of how leads are scored."
+            action={<Button size="sm" variant="outline" onClick={() => setFitOpen(true)}>Tune fit weights</Button>}
           >
-            <div className="mb-3 space-y-2 rounded-sm border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground">{FIT_PANEL_INTRO.headline}</p>
+          </Panel>
+
+          <OwnerSwitches sections={["forget"]} />
+        </div>
+
+        <Dialog open={fitOpen} onOpenChange={setFitOpen}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Fit-score weights</DialogTitle>
+              <DialogDescription>{FIT_PANEL_INTRO.headline}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 rounded-sm border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
               <div>{FIT_PANEL_INTRO.worked_example}</div>
               <div>{FIT_PANEL_INTRO.auto_outreach_link}</div>
             </div>
@@ -426,31 +447,8 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
                 <Save /> {saving ? "Saving…" : "Save"}
               </Button>
             </div>
-          </Panel>
-
-          <Panel title="Template" description="Which saved template auto-send uses. Pickable from the email builder's saved templates.">
-            <p className="text-sm text-muted-foreground">
-              <span className="mr-2 inline-flex items-center rounded-sm bg-safety px-2 py-0.5 text-[0.68rem] font-bold tracking-wider text-asphalt uppercase">Coming next</span>
-              The template picker unlocks once the shared email builder&apos;s saved templates ship.
-            </p>
-          </Panel>
-        </div>
-
-        <div className="space-y-4 xl:sticky xl:top-20 xl:self-start">
-          <AiProvidersPanel />
-          <ConnectorsPanel />
-          <LoadboardsPanel />
-          <Panel title="How this works">
-            <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground marker:text-safety">
-              <li>The crawler finds new brokers/shippers every day at 3 PM ET.</li>
-              <li>Each lead gets an AI match score against LJM.</li>
-              <li>If auto-send is on, leads scoring ≥ threshold get emailed automatically.</li>
-              <li>All sends are logged and capped by the daily cap.</li>
-              <li>Unsubscribed addresses are always skipped.</li>
-            </ol>
-          </Panel>
-        </div>
-      </div>
+          </DialogContent>
+        </Dialog>
     </TooltipProvider>
   )
 }

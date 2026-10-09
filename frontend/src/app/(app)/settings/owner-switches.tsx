@@ -14,7 +14,11 @@ import * as inbox from "@/lib/api/inbox"
  * - Gmail SA JSON upload — paste JSON, hits POST /settings/connectors/gmail (stores in CredentialVault).
  * - Forget contact — purges every message/insight for an address, writes an audit row.
  */
-export function OwnerSwitches() {
+export type OwnerSection = "gmail" | "switches" | "forget"
+
+/** `sections` lets the Settings page mount the Gmail/switches cards inside the
+ *  Gmail Edit dialog and the Forget-contact card on the page, same handlers. */
+export function OwnerSwitches({ sections = ["gmail", "switches", "forget"] }: { sections?: OwnerSection[] }) {
   const [saJson, setSaJson] = useState("")
   const [impersonate, setImpersonate] = useState("")
   const [email, setEmail] = useState("")
@@ -68,6 +72,7 @@ export function OwnerSwitches() {
 
   return (
     <div className="space-y-4">
+      {sections.includes("gmail") && (
       <div className="rounded-sm border border-border bg-card p-3">
         <div className="mb-2 font-semibold">Gmail connector (owner-only)</div>
         <textarea
@@ -83,7 +88,9 @@ export function OwnerSwitches() {
           <Button variant="outline" onClick={revokeGmail} disabled={pending}>Revoke</Button>
         </div>
       </div>
+      )}
 
+      {sections.includes("switches") && (
       <div className="rounded-sm border border-border bg-card p-3">
         <div className="mb-2 font-semibold">Owner switches</div>
         <div className="flex flex-wrap gap-2">
@@ -96,7 +103,9 @@ export function OwnerSwitches() {
           <Button onClick={() => sendSwitch(true)} disabled={pending || confirm !== "CONFIRM"}>Send via Gmail: ON</Button>
         </div>
       </div>
+      )}
 
+      {sections.includes("forget") && (
       <div className="rounded-sm border border-border bg-card p-3">
         <div className="mb-2 font-semibold">Forget contact (GDPR-style)</div>
         <div className="flex items-center gap-2">
@@ -107,6 +116,7 @@ export function OwnerSwitches() {
           Deletes every stored message + insight for that address and writes an audit row.
         </p>
       </div>
+      )}
 
       {msg ? <div className="rounded-sm border border-good/40 bg-good/5 p-3 text-sm text-good">{msg}</div> : null}
       {err ? <div className="rounded-sm border border-bad/40 bg-bad/5 p-3 text-sm text-bad">{err}</div> : null}
