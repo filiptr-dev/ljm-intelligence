@@ -209,10 +209,17 @@ async def _get_page(session_id: str) -> Any:
     # Guard every outgoing request from this context — redirects, nested
     # iframes, JS fetches. Installing it on the context (not the page)
     # means pop-ups and new-tab navigations inherit it automatically.
+    # Fail CLOSED: an unguarded context is an open SSRF proxy, so if the
+    # guard can't be installed we tear the context down and 500 the call.
     try:
         await context.route("**/*", _request_guard)
-    except Exception:  # pragma: no cover - tests may stub context
-        log.warning("agent_browser: route guard not installed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("agent_browser: route guard install failed")
+        try:
+            await context.close()
+        except Exception:  # pragma: no cover
+            pass
+        raise HTTPException(500, f"ssrf_guard_install_failed:{type(exc).__name__}") from exc
     page = await context.new_page()
     _sessions[session_id] = {"page": page, "touched": time.time()}
     return page

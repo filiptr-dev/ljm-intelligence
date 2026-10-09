@@ -42,6 +42,11 @@ class _FakeContext:
     async def new_page(self) -> _FakePage:
         return _FakePage()
 
+    async def route(self, *_a, **_kw) -> None:
+        """Stub for Playwright's `BrowserContext.route`. Must exist — the
+        sidecar fails CLOSED if the guard can't be installed."""
+        return None
+
     async def close(self) -> None:
         return None
 
