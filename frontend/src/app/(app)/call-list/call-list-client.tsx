@@ -23,6 +23,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import {
   Phone,
@@ -108,6 +109,12 @@ const OUTCOME_LABEL: Record<string, string> = {
 
 export default function CallListClient({ initial }: { initial: CallListEnvelope | null }) {
   const { live } = useBackendHealth()
+  // Follow-ups "Log call" deep-links here with ?lead=<id>. If the id is in
+  // today's ranked list we land on it; otherwise the normal first-row default
+  // takes over. Reads once at mount — a navigation back to /call-list without
+  // the param keeps the user's current selection.
+  const searchParams = useSearchParams()
+  const requestedLead = searchParams?.get("lead") ?? null
 
   // SSR seed: the Server Component resolved the first `GET /tools/call-list`
   // with the HttpOnly cookie. If that failed we start with an empty envelope
@@ -115,7 +122,11 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
   // explains why the list is empty).
   const [envelope, setEnvelope] = React.useState<CallListEnvelope | null>(initial)
   const [loading, setLoading] = React.useState<boolean>(initial === null)
-  const [selectedId, setSelectedId] = React.useState<string | null>(initial?.items[0]?.lead_id ?? null)
+  const [selectedId, setSelectedId] = React.useState<string | null>(
+    (requestedLead && initial?.items.some((r) => r.lead_id === requestedLead) ? requestedLead : null)
+      ?? initial?.items[0]?.lead_id
+      ?? null,
+  )
   const [history, setHistory] = React.useState<HistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = React.useState(false)
   const [postingOutcome, setPostingOutcome] = React.useState<OutcomeKind | null>(null)
@@ -159,12 +170,15 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
   }, [initial, load])
 
   // Auto-pick the first row so desktop users see the detail column filled in.
+  // When a `?lead=<id>` deep-link brought us here and that row is in the
+  // freshly-loaded list, prefer it over the top row.
   React.useEffect(() => {
     if (!selectedId && items.length > 0) {
+      const preferred = requestedLead && items.find((r) => r.lead_id === requestedLead)
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedId(items[0].lead_id)
+      setSelectedId(preferred ? preferred.lead_id : items[0].lead_id)
     }
-  }, [items, selectedId])
+  }, [items, selectedId, requestedLead])
 
   // Pull history for the selected lead. History is small; refetching on
   // selection keeps the code trivial and the payload cheap.

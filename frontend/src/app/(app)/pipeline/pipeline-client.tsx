@@ -129,7 +129,7 @@ function Card({ card }: { card: BoardCard }) {
 
       <footer className="mt-1 flex gap-2 text-xs">
         <Link
-          href={`/brokers/${encodeURIComponent(card.lead_id)}?action=call`}
+          href={`/call-list?lead=${encodeURIComponent(card.lead_id)}`}
           className="inline-flex items-center rounded-sm border border-border px-2 py-1 hover:bg-muted"
         >
           <Phone className="mr-1 size-3.5" aria-hidden /> Log call
