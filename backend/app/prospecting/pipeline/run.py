@@ -11,6 +11,7 @@ from typing import Literal
 
 import httpx
 from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -315,6 +316,11 @@ async def _upsert_fmcsa_page(
     """
     new_ids: list[str] = []
     min_add_date: str | None = None
+    # Within one page, remember which id we settled on for each dot/mc/domain so
+    # two incoming rows that share a key (same DOT emitted twice, say) merge
+    # onto the first one's id instead of racing for a new row — a DB lookup
+    # alone wouldn't see the still-uncommitted siblings in this session.
+    in_page_by_key: dict[tuple[str, str], str] = {}
     async with sessionmaker() as s:
         for lead in page_leads:
             if not in_region(lead.state):
@@ -324,61 +330,114 @@ async def _upsert_fmcsa_page(
                 s_ad = str(add_date)
                 if min_add_date is None or s_ad < min_add_date:
                     min_add_date = s_ad
-            stmt = pg_insert(Lead).values(
-                id=lead.id,
-                mc=lead.mc,
-                dot=lead.dot,
-                domain=lead.domain,
-                name=lead.name,
-                kind=lead.kind,
-                state=lead.state,
-                city=lead.city,
-                address=lead.address,
-                phone=lead.phone,
-                primary_email=lead.primary_email,
-                first_seen_at=started,
-                last_seen_at=started,
-                first_seen_run_id=run_id,
-                last_seen_run_id=run_id,
-                raw={"fmcsa": lead.raw},
-                evidence={},
-                recommendations=[],
-            )
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["id"],
-                set_={
-                    "last_seen_at": started,
-                    "last_seen_run_id": run_id,
-                    "raw": Lead.raw.op("||")({"fmcsa": lead.raw}),
-                    # fill a missing email, never blank out one we already have
-                    "primary_email": func.coalesce(Lead.primary_email, stmt.excluded.primary_email),
-                },
-            ).returning(Lead.id, Lead.first_seen_run_id)
-            res = await s.execute(stmt)
-            row = res.first()
-            if row and row.first_seen_run_id == run_id:
-                new_ids.append(row.id)
 
-            await add_contact_email(
-                s, lead_id=lead.id, email=lead.primary_email, phone=lead.phone, source="FMCSA Census"
-            )
+            # Re-publish guard: FMCSA sometimes reissues a DOT (or MC, or a
+            # recovered domain) under a *new* MC — our generated `lead.id`
+            # changes (e.g. ``DOT-6315665`` → ``MC-78836882``) but ``leads``
+            # has partial-unique indexes on dot/mc/domain, so a plain
+            # ``on_conflict (id)`` insert aborts the whole page's transaction
+            # with ``UniqueViolation`` and the crawl records a `status=error`
+            # with ``fmcsa_pages=0``. Prefer the existing row's id so the
+            # upsert merges onto it instead of trying to create a sibling.
+            effective_id = lead.id
+            for key_col, key_val in (("dot", lead.dot), ("mc", lead.mc), ("domain", lead.domain)):
+                if not key_val:
+                    continue
+                # First check within this page (uncommitted siblings).
+                in_page = in_page_by_key.get((key_col, key_val))
+                if in_page and in_page != lead.id:
+                    effective_id = in_page
+                    break
+                existing = await s.execute(select(Lead.id).where(getattr(Lead, key_col) == key_val))
+                found = existing.scalar_one_or_none()
+                if found and found != lead.id:
+                    effective_id = found
+                    break
+            # Remember the id we picked under every key this row carries, so
+            # the next row in the page lands on the same row.
+            for key_col, key_val in (("dot", lead.dot), ("mc", lead.mc), ("domain", lead.domain)):
+                if key_val:
+                    in_page_by_key.setdefault((key_col, key_val), effective_id)
 
-            src_ref = lead.mc or lead.dot or lead.id
-            await s.execute(
-                pg_insert(LeadSource)
-                .values(
-                    lead_id=lead.id,
-                    source="FMCSA Census",
-                    source_ref=src_ref,
-                    first_seen_at=started,
-                    last_seen_at=started,
-                    payload=lead.raw,
+            # Per-row savepoint: a UniqueViolation on any other partial-unique
+            # key we didn't anticipate rolls back just this row, not the whole
+            # page — the crawl keeps progressing instead of recording a
+            # status=error with fmcsa_pages=0.
+            try:
+                async with s.begin_nested():
+                    stmt = pg_insert(Lead).values(
+                        id=effective_id,
+                        mc=lead.mc,
+                        dot=lead.dot,
+                        domain=lead.domain,
+                        name=lead.name,
+                        kind=lead.kind,
+                        state=lead.state,
+                        city=lead.city,
+                        address=lead.address,
+                        phone=lead.phone,
+                        primary_email=lead.primary_email,
+                        first_seen_at=started,
+                        last_seen_at=started,
+                        first_seen_run_id=run_id,
+                        last_seen_run_id=run_id,
+                        raw={"fmcsa": lead.raw},
+                        evidence={},
+                        recommendations=[],
+                    )
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["id"],
+                        set_={
+                            "last_seen_at": started,
+                            "last_seen_run_id": run_id,
+                            "raw": Lead.raw.op("||")({"fmcsa": lead.raw}),
+                            # fill a missing email, never blank out one we already have
+                            "primary_email": func.coalesce(Lead.primary_email, stmt.excluded.primary_email),
+                            # backfill mc/dot/domain only when currently NULL,
+                            # so a re-publish never clobbers the stable key
+                            # already stored.
+                            "mc": func.coalesce(Lead.mc, stmt.excluded.mc),
+                            "dot": func.coalesce(Lead.dot, stmt.excluded.dot),
+                            "domain": func.coalesce(Lead.domain, stmt.excluded.domain),
+                        },
+                    ).returning(Lead.id, Lead.first_seen_run_id)
+                    res = await s.execute(stmt)
+                    row = res.first()
+                    if row and row.first_seen_run_id == run_id:
+                        new_ids.append(row.id)
+
+                    await add_contact_email(
+                        s,
+                        lead_id=effective_id,
+                        email=lead.primary_email,
+                        phone=lead.phone,
+                        source="FMCSA Census",
+                    )
+
+                    src_ref = lead.mc or lead.dot or effective_id
+                    await s.execute(
+                        pg_insert(LeadSource)
+                        .values(
+                            lead_id=effective_id,
+                            source="FMCSA Census",
+                            source_ref=src_ref,
+                            first_seen_at=started,
+                            last_seen_at=started,
+                            payload=lead.raw,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["lead_id", "source", "source_ref"],
+                            set_={"last_seen_at": started, "payload": lead.raw},
+                        )
+                    )
+            except IntegrityError:
+                # Known shape is the DOT/MC/domain partial-unique collision we
+                # just guarded against; log + skip so one bad row never costs
+                # us the whole page.
+                log.warning(
+                    "fmcsa upsert skipped on IntegrityError lead_id=%s dot=%s mc=%s",
+                    lead.id, lead.dot, lead.mc,
                 )
-                .on_conflict_do_update(
-                    index_elements=["lead_id", "source", "source_ref"],
-                    set_={"last_seen_at": started, "payload": lead.raw},
-                )
-            )
         await s.commit()
     return new_ids, min_add_date
 

@@ -90,9 +90,11 @@ function pillState(status: MonitoringStatus, at: string | null): { label: string
       }
     case "error":
       return {
-        label: `Scan failed · ${rel}`,
+        // Honest but not scary: say the last run didn't finish, keep the
+        // destructive dot so it still reads as "needs attention".
+        label: `Last scan didn't finish · ${rel}`,
         dotClass: "bg-destructive",
-        aria: `Last scan failed ${rel}`,
+        aria: `The last scan didn't finish, ${rel}`,
       }
     case "none":
     default:
