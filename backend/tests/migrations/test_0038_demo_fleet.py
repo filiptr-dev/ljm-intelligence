@@ -152,3 +152,10 @@ def test_pg_up_down_up_leaves_other_rows_alone():
     command.upgrade(cfg, "head")
 
 
+
+
+def test_an_inspection_with_findings_is_never_a_clean_pass(fleet):
+    linked = {(d["unit_number"], d["inspected_at"]) for d in fleet["defects"] if d["inspected_at"]}
+    for i in fleet["inspections"]:
+        if (i["unit_number"], i["inspected_at"]) in linked:
+            assert i["result"] != "pass" and i["notes"] != "No findings."

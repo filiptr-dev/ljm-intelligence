@@ -173,9 +173,7 @@ def generate_fleet(now: datetime) -> dict[str, list[dict[str, Any]]]:
             result = "pass" if r < 0.78 else "conditional" if r < 0.97 else "fail"
             insp_rows.append({
                 "unit_number": un, "inspected_at": days_ago(age), "inspector_name": rng.choice(_INSPECTORS),
-                "result": result, "odometer_at_inspection": o,
-                "notes": {"pass": "No findings.", "conditional": "Minor findings, fix at next service.",
-                          "fail": "Out-of-service findings, re-inspect after repair."}[result],
+                "result": result, "odometer_at_inspection": o, "notes": None,
             })
         latest = insp_rows[-1]
 
@@ -204,11 +202,16 @@ def generate_fleet(now: datetime) -> dict[str, list[dict[str, Any]]]:
             sev = rng.choice(["minor", "major"])
             title, desc = rng.choice(cat[sev])
             rep = src["inspected_at"]
+            if src["result"] == "pass":
+                src["result"] = "conditional"  # a defect was found there, so it was never a clean pass
             defects.append({
                 "unit_number": un, "severity": sev, "title": title, "description": desc, "status": "resolved",
                 "reported_at": rep, "resolved_at": rep + timedelta(days=rng.randint(2, 14)),
                 "inspected_at": src["inspected_at"],
             })
+        for r in insp_rows:  # notes follow the final result, so an inspection never says "no findings" next to a defect
+            r["notes"] = {"pass": "No findings.", "conditional": "Findings logged, fix at next service.",
+                          "fail": "Out-of-service findings, re-inspect after repair."}[r["result"]]
         inspections.extend(insp_rows)
 
         # --- maintenance: 1-2 done, 1 scheduled
