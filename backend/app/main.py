@@ -310,4 +310,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # projects/ljm-intelligence/plan/2026-10-09-tools-vetting-followups.md.
     app.include_router(vetting_router, dependencies=user_only)
     app.include_router(followups_router, dependencies=user_only)
+
+    # Fleet (Kamioni) — trucks + Inspectio-style records behind the FleetSource port.
+    from app.fleet.router import router as fleet_router
+
+    app.include_router(fleet_router, dependencies=user_only)
     return app

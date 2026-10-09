@@ -20,6 +20,7 @@ source_modules =
     app.outreach.router
     app.inbox.router
     app.analysis.router
+    app.fleet.router
 forbidden_modules =
     app.identity.router
     app.integrations.router
@@ -27,6 +28,7 @@ forbidden_modules =
     app.outreach.router
     app.inbox.router
     app.analysis.router
+    app.fleet.router
 ignore_imports =
     # a module importing its own router is fine; the forbidden graph
     # excludes self-loops by construction, no exclusion needed.
@@ -49,6 +51,7 @@ source_modules =
     app.outreach.router
     app.inbox.router
     app.analysis.router
+    app.fleet.router
 forbidden_modules =
     app.identity.models
     app.integrations.models
@@ -56,6 +59,7 @@ forbidden_modules =
     app.outreach.models
     app.inbox.models
     app.analysis.models
+    app.fleet.models
 
 # -------------------------------------------------------------------
 # Contract 3 — domain.py is pure: no FastAPI, no SQLAlchemy, no siblings.
@@ -70,6 +74,7 @@ source_modules =
     app.outreach.domain
     app.inbox.domain
     app.analysis.domain
+    app.fleet.domain
 forbidden_modules =
     fastapi
     sqlalchemy
@@ -116,6 +121,7 @@ source_modules =
     app.outreach.service
     app.inbox.service
     app.analysis.service
+    app.fleet.service
 forbidden_modules =
     sqlalchemy
 unmatched_ignore_imports_alerting = none
@@ -138,6 +144,7 @@ source_modules =
     app.outreach.router
     app.inbox.router
     app.analysis.router
+    app.fleet.router
 forbidden_modules =
     app.identity.repository
     app.integrations.repository
@@ -145,6 +152,7 @@ forbidden_modules =
     app.outreach.repository
     app.inbox.repository
     app.analysis.repository
+    app.fleet.repository
 
 # -------------------------------------------------------------------
 # Contract 7 — routers never import `app.models` (the compat shim).
@@ -163,6 +171,7 @@ source_modules =
     app.outreach.router
     app.inbox.router
     app.analysis.router
+    app.fleet.router
 forbidden_modules =
     app.models
 
