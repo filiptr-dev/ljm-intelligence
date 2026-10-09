@@ -24,10 +24,12 @@ from app.fleet.schemas import (
     MaintRef,
     NextDocExpiry,
     RecentRun,
+    TruckCreate,
     TruckDetail,
     TruckKpi,
     TruckOut,
     TruckRow,
+    TruckUpdate,
 )
 
 LIST_WINDOW_DAYS = 30
@@ -174,3 +176,43 @@ async def truck_detail(session: AsyncSession, tenant_id: str, unit_id: int) -> T
         ],
         recent_runs=runs,
     )
+
+
+class UnitNumberTaken(Exception):
+    """``unit_number`` already belongs to another unit of this tenant (unique per tenant)."""
+
+
+async def _commit_unique(session: AsyncSession) -> None:
+    if not await repo.commit_unique(session):  # a concurrent insert slipped past the pre-check
+        raise UnitNumberTaken
+
+
+async def create_unit(session: AsyncSession, tenant_id: str, body: TruckCreate) -> TruckDetail:
+    if await repo.unit_number_taken(session, tenant_id, body.unit_number):
+        raise UnitNumberTaken
+    unit = repo.add_unit(session, tenant_id, body.model_dump())
+    await _commit_unique(session)
+    detail = await truck_detail(session, tenant_id, unit.id)
+    assert detail is not None
+    return detail
+
+
+async def update_unit(session: AsyncSession, tenant_id: str, unit_id: int, body: TruckUpdate) -> TruckDetail | None:
+    unit = await repo.get_unit(session, tenant_id, unit_id)
+    if unit is None:
+        return None
+    changes = body.model_dump(exclude_unset=True)
+    new_number = changes.get("unit_number")
+    if new_number and new_number != unit.unit_number and await repo.unit_number_taken(session, tenant_id, new_number, unit_id):
+        raise UnitNumberTaken
+    for k, v in changes.items():
+        setattr(unit, k, v)
+    unit.updated_at = _now()
+    await _commit_unique(session)
+    return await truck_detail(session, tenant_id, unit_id)
+
+
+async def delete_unit(session: AsyncSession, tenant_id: str, unit_id: int) -> bool:
+    gone = await repo.delete_unit(session, tenant_id, unit_id)
+    await session.commit()
+    return gone

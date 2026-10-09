@@ -9,7 +9,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.models import FreightRun as R
@@ -168,3 +169,33 @@ async def snapshot_rows(session: AsyncSession, tenant_id: str, source: str) -> d
         "units": await of(Truck), "inspections": await of(TruckInspection), "defects": await of(TruckDefect),
         "maintenance": await of(TruckMaintenance), "documents": await of(TruckDocument),
     }
+
+
+async def unit_number_taken(session: AsyncSession, tenant_id: str, unit_number: str, except_id: int | None = None) -> bool:
+    q = select(Truck.id).where(Truck.tenant_id == tenant_id, Truck.unit_number == unit_number)
+    if except_id is not None:
+        q = q.where(Truck.id != except_id)
+    return (await session.execute(q.limit(1))).first() is not None
+
+
+def add_unit(session: AsyncSession, tenant_id: str, fields: dict[str, Any]) -> Truck:
+    """Stage a new owner-entered unit (``source='manual'``); the caller commits."""
+    unit = Truck(tenant_id=tenant_id, source="manual", **fields)
+    session.add(unit)
+    return unit
+
+
+async def delete_unit(session: AsyncSession, tenant_id: str, unit_id: int) -> bool:
+    """Children cascade (FK ON DELETE CASCADE); runs keep their row with ``truck_id`` set NULL."""
+    res = await session.execute(delete(Truck).where(Truck.tenant_id == tenant_id, Truck.id == unit_id))
+    return (res.rowcount or 0) > 0
+
+
+async def commit_unique(session: AsyncSession) -> bool:
+    """Commit; ``False`` (after a rollback) when the unique (tenant, unit_number) constraint refused it."""
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        return False
+    return True

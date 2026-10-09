@@ -1,14 +1,18 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
+import { Plus } from "lucide-react"
 import { Segmented } from "@/components/app/segmented"
 import { PageHeader, Panel } from "@/components/app/ui"
 import { EmptyChart } from "@/components/charts/primitives"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { AlertStrip, FleetList } from "@/lib/api/fleet"
 import { AlertsStrip } from "./alerts-strip"
 import { EQUIPMENT_LABEL, EQUIPMENT_ORDER, STATUS_LABEL, STATUS_ORDER } from "./format"
 import { TruckDrawer } from "./truck-drawer"
+import { TruckFormDialog } from "./truck-form-dialog"
 import { sortRows, TrucksTable, type Sort, type SortKey } from "./trucks-table"
 
 type Kind = "trucks" | "trailers"
@@ -31,6 +35,8 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 
 export function FleetView({ initial }: { initial: { list: FleetList; alerts: AlertStrip } }) {
   const { list, alerts } = initial
+  const router = useRouter()
+  const [adding, setAdding] = React.useState(false)
   const [kind, setKind] = React.useState<Kind>("trucks")
   const [status, setStatus] = React.useState<string | null>(null)
   const [equipment, setEquipment] = React.useState<string | null>(null)
@@ -60,6 +66,11 @@ export function FleetView({ initial }: { initial: { list: FleetList; alerts: Ale
             Your trucks and trailers, their inspections, defects, maintenance and paperwork, next to what each one earns.
             {list.source === "demo" ? " Showing demo data until your fleet software is connected." : null}
           </>
+        }
+        actions={
+          <Button type="button" size="sm" onClick={() => setAdding(true)}>
+            <Plus className="size-4" aria-hidden /> Add truck
+          </Button>
         }
       />
       <AlertsStrip alerts={alerts} onOpen={setOpenId} />
@@ -101,6 +112,12 @@ export function FleetView({ initial }: { initial: { list: FleetList; alerts: Ale
         )}
       </Panel>
       <TruckDrawer id={openId} onClose={() => setOpenId(null)} />
+      <TruckFormDialog
+        open={adding}
+        onOpenChange={setAdding}
+        truck={null}
+        onSaved={(d) => { setKind(d.truck.kind === "trailer" ? "trailers" : "trucks"); router.refresh() }}
+      />
     </>
   )
 }

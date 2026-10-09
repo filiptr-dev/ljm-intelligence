@@ -20,6 +20,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -59,7 +60,10 @@ class Truck(TenantMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (Index("ix_trucks_tenant_source", "tenant_id", "source"),)
+    __table_args__ = (
+        Index("ix_trucks_tenant_source", "tenant_id", "source"),
+        UniqueConstraint("tenant_id", "unit_number", name="trucks_tenant_id_unit_number_key"),
+    )
 
 
 class TruckInspection(TenantMixin, Base):

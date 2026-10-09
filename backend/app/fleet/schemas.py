@@ -4,8 +4,11 @@ generated TypeScript types mark them required instead of optional."""
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.analysis.operating_area import OPERATING_STATE_SET
 
 
 class _Out(BaseModel):
@@ -183,3 +186,63 @@ class TruckDetail(_Out):
     maintenance: list[MaintenanceOut]
     documents: list[DocumentOut]
     recent_runs: list[RecentRun]
+
+
+# --- owner-managed units (POST / PATCH) ---------------------------------------------------------
+
+Kind = Literal["truck", "trailer"]
+Equipment = Literal["van", "reefer", "flatbed", "stepdeck"]
+Status = Literal["available", "on_load", "in_shop", "out_of_service"]
+
+
+class _TruckFields(BaseModel):
+    """Shared validation. Blank strings become ``None``; the state must be one we operate in."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    make: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=64)
+    year: int | None = Field(default=None, ge=1980, le=2100)
+    vin: str | None = Field(default=None, max_length=32)
+    plate: str | None = Field(default=None, max_length=24)
+    equipment: Equipment | None = None
+    odometer_miles: int | None = Field(default=None, ge=0, le=5_000_000)
+    home_base_city: str | None = Field(default=None, max_length=128)
+    home_base_state: str | None = Field(default=None, max_length=8)
+    assigned_driver_name: str | None = Field(default=None, max_length=128)
+
+    @field_validator("make", "model", "vin", "plate", "home_base_city", "assigned_driver_name", mode="after")
+    @classmethod
+    def _blank_is_none(cls, v: str | None) -> str | None:
+        return v or None
+
+    @field_validator("home_base_state", mode="after")
+    @classmethod
+    def _state_in_area(cls, v: str | None) -> str | None:
+        if not v:
+            return None
+        v = v.upper()
+        if v not in OPERATING_STATE_SET:
+            raise ValueError("home base state must be one of the states you operate in")
+        return v
+
+
+class TruckCreate(_TruckFields):
+    unit_number: str = Field(min_length=1, max_length=32)
+    kind: Kind = "truck"
+    status: Status = "available"
+
+
+class TruckUpdate(_TruckFields):
+    """Partial update: only the fields the client sent are changed (``model_fields_set``)."""
+
+    unit_number: str | None = Field(default=None, min_length=1, max_length=32)
+    kind: Kind | None = None
+    status: Status | None = None
+
+    @field_validator("unit_number", "kind", "status", mode="after")
+    @classmethod
+    def _not_null(cls, v: str | None) -> str | None:
+        if v is None:
+            raise ValueError("cannot be cleared")
+        return v

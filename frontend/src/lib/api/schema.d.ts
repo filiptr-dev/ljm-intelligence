@@ -2299,7 +2299,8 @@ export interface paths {
         /** Fleet Trucks */
         get: operations["fleet_trucks_fleet_trucks_get"];
         put?: never;
-        post?: never;
+        /** Fleet Truck Create */
+        post: operations["fleet_truck_create_fleet_trucks_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2317,10 +2318,12 @@ export interface paths {
         get: operations["fleet_truck_detail_fleet_trucks__unit_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Fleet Truck Delete */
+        delete: operations["fleet_truck_delete_fleet_trucks__unit_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Fleet Truck Update */
+        patch: operations["fleet_truck_update_fleet_trucks__unit_id__patch"];
         trace?: never;
     };
     "/fleet/alerts": {
@@ -6063,6 +6066,43 @@ export interface components {
             /** Snippet */
             snippet: string;
         };
+        /** TruckCreate */
+        TruckCreate: {
+            /** Make */
+            make?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Year */
+            year?: number | null;
+            /** Vin */
+            vin?: string | null;
+            /** Plate */
+            plate?: string | null;
+            /** Equipment */
+            equipment?: ("van" | "reefer" | "flatbed" | "stepdeck") | null;
+            /** Odometer Miles */
+            odometer_miles?: number | null;
+            /** Home Base City */
+            home_base_city?: string | null;
+            /** Home Base State */
+            home_base_state?: string | null;
+            /** Assigned Driver Name */
+            assigned_driver_name?: string | null;
+            /** Unit Number */
+            unit_number: string;
+            /**
+             * Kind
+             * @default truck
+             * @enum {string}
+             */
+            kind: "truck" | "trailer";
+            /**
+             * Status
+             * @default available
+             * @enum {string}
+             */
+            status: "available" | "on_load" | "in_shop" | "out_of_service";
+        };
         /** TruckDetail */
         TruckDetail: {
             /** Source */
@@ -6215,6 +6255,38 @@ export interface components {
              * @default 0
              */
             open_critical_defects: number;
+        };
+        /**
+         * TruckUpdate
+         * @description Partial update: only the fields the client sent are changed (``model_fields_set``).
+         */
+        TruckUpdate: {
+            /** Make */
+            make?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Year */
+            year?: number | null;
+            /** Vin */
+            vin?: string | null;
+            /** Plate */
+            plate?: string | null;
+            /** Equipment */
+            equipment?: ("van" | "reefer" | "flatbed" | "stepdeck") | null;
+            /** Odometer Miles */
+            odometer_miles?: number | null;
+            /** Home Base City */
+            home_base_city?: string | null;
+            /** Home Base State */
+            home_base_state?: string | null;
+            /** Assigned Driver Name */
+            assigned_driver_name?: string | null;
+            /** Unit Number */
+            unit_number?: string | null;
+            /** Kind */
+            kind?: ("truck" | "trailer") | null;
+            /** Status */
+            status?: ("available" | "on_load" | "in_shop" | "out_of_service") | null;
         };
         /** UnsubscribeOut */
         UnsubscribeOut: {
@@ -10861,6 +10933,41 @@ export interface operations {
             };
         };
     };
+    fleet_truck_create_fleet_trucks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TruckCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TruckDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     fleet_truck_detail_fleet_trucks__unit_id__get: {
         parameters: {
             query?: never;
@@ -10873,6 +10980,74 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TruckDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fleet_truck_delete_fleet_trucks__unit_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                unit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fleet_truck_update_fleet_trucks__unit_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                unit_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TruckUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
