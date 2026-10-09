@@ -93,7 +93,7 @@ def test_pg_0037_reseeds_demo_only_clears_cache_and_downgrade_restores_0036_shap
             " (%s,'year||','h','m','[]','[]','[]','[]','{}')", (TENANT,),
         )
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0037")  # 0037 is the unit under test; later revisions reseed again
     assert scalar("SELECT count(*) FROM freight_runs WHERE source='demo'") == 2000
     assert scalar("SELECT count(*) FROM freight_runs WHERE source='real'") == 1
     assert scalar("SELECT count(*) FROM lane_insights_cache") == 0
@@ -103,5 +103,5 @@ def test_pg_0037_reseeds_demo_only_clears_cache_and_downgrade_restores_0036_shap
     assert scalar("SELECT count(*) FROM freight_runs WHERE source='demo'") == 2000
     assert scalar("SELECT count(*) FROM freight_runs WHERE source='real'") == 1
     assert scalar("SELECT count(*) FROM freight_runs WHERE raw->>'lane_group'='lrd-chi' AND raw->>'shift_arc'='pre'") == 0
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0037")  # 0037 is the unit under test; later revisions reseed again
     assert scalar("SELECT count(*) FROM freight_runs WHERE source='demo'") == 2000

@@ -179,6 +179,7 @@ class HeatmapData(_Out):
     cities: list[CityEntity]
     states: list[LaneEntity]
     arcs: list[HeatArc]
+    operating_states: list[str]  # the carrier's operating area (app.analysis.operating_area)
 
 
 class RunRow(_Out):

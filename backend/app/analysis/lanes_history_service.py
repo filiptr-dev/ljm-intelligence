@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis import lanes_repository as repo, lanes_text as T
 from app.analysis.lanes_repository import AGG_NAMES, Scope
+from app.analysis.operating_area import OPERATING_STATES
 from app.analysis.schemas import (
     CityEntity,
     HeatArc,
@@ -353,7 +354,7 @@ async def heatmap(
             o_label=f"{k[0]}, {k[1]}", d_label=f"{k[2]}, {k[3]}", runs=m.runs, trend_pct=tr.rate_pct, entity=ent,
         ))
     return HeatmapData(period=period, window_label=wl, origins=origins, dests=dests, cities=cities,
-                       states=states, arcs=arcs)
+                       states=states, arcs=arcs, operating_states=list(OPERATING_STATES))
 
 
 # ---- runs table (keyset) ----------------------------------------------------

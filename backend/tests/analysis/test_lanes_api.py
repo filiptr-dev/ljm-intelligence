@@ -42,6 +42,7 @@ async def test_summary_top_heatmap_runs_shapes(client):
     assert len(t["lanes"]) == 5
     h = (await client.get("/analysis/lanes/heatmap", params={"period": "year"})).json()
     assert 0 < len(h["arcs"]) <= 50 and h["states"] and h["arcs"][0]["entity"]["text"]
+    assert len(h["operating_states"]) == 32 and "TX" not in h["operating_states"] and "LA" in h["operating_states"]
     r = (await client.get("/analysis/lanes/runs", params={"limit": 10})).json()
     assert len(r["items"]) == 10 and r["next_cursor"]
     r2 = (await client.get("/analysis/lanes/runs", params={"limit": 10, "cursor": r["next_cursor"]})).json()
