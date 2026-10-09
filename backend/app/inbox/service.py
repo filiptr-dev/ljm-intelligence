@@ -1022,6 +1022,8 @@ async def ask_question(
     import json
     import logging as _log
 
+    from app.shared.untrusted import FENCE_CLOSE, FENCE_OPEN, neutralize, security_instruction
+
     _l = _log.getLogger(__name__)
 
     def _fail(error: str, answer: str) -> AskOut:
@@ -1050,19 +1052,24 @@ async def ask_question(
             "The AI provider isn't configured. Add a Gemini API key in Settings to get real answers.",
         )
 
-    # Pull real mail to ground the answer. With no session we skip the
-    # DB read — the AI still runs, but on question-only context.
+    # Pull real mail to ground the answer; no session means no data.
+    if session is None:
+        return _fail(
+            "no_data",
+            "There is no inbox connection to read mail from, so this can't be answered "
+            "against real data.",
+        )
     context_rows: list[dict[str, Any]] = []
-    if session is not None:
-        try:
-            context_rows = await _fetch_ask_context(
-                session, keywords=_naive_keywords(q)
-            )
-        except Exception as exc:  # noqa: BLE001
-            _l.info("ask_question: context fetch failed: %s", type(exc).__name__)
-            context_rows = []
+    try:
+        context_rows = await _fetch_ask_context(session, keywords=_naive_keywords(q))
+    except Exception as exc:  # noqa: BLE001
+        _l.warning("ask_question: context fetch failed: %s", type(exc).__name__, exc_info=True)
+        return _fail(
+            "ai_error",
+            "Couldn't read your mail just now (database error). Try again in a moment.",
+        )
 
-    if session is not None and not context_rows:
+    if not context_rows:
         return _fail(
             "no_data",
             "There are no emails in the inbox yet. Connect Gmail in Settings and ingest "
@@ -1080,7 +1087,7 @@ async def ask_question(
         parts = [
             f"intent={row['intent'] or 'unknown'}",
             f"sent={row['sent_at'][:10]}",
-            f"from={row['from_addr']}",
+            f"from={neutralize(str(row['from_addr']))}",
             f"sentiment={row['sentiment']:.2f}" if row['sentiment'] is not None else "sentiment=na",
         ]
         if row.get("lane_from") or row.get("lane_to"):
@@ -1088,10 +1095,11 @@ async def ask_question(
         if row.get("rate_usd") is not None:
             parts.append(f"rate_usd={row['rate_usd']:.0f}")
         if row.get("evidence"):
-            parts.append(f"evidence={row['evidence']}")
+            parts.append(f"evidence={neutralize(str(row['evidence']))}")
         header = " | ".join(parts)
         ctx_lines.append(
-            f"{cid}: {header}\n   subject: {row['subject']}\n   body: {row['snippet']}"
+            f"{cid}: {header}\n   subject: {neutralize(str(row['subject']))}\n"
+            f"   body: {neutralize(str(row['snippet']))}"
         )
     context_block = "\n".join(ctx_lines) if ctx_lines else "(no mail available)"
 
@@ -1113,8 +1121,11 @@ async def ask_question(
         "sentiment ('positive','negative', or null), "
         "summary (one short sentence stating how you understood the "
         "question, ≤180 chars).\n\n"
+        f"{security_instruction('analyse')}\n\n"
         f"Question: {q[:500]}\n\n"
+        f"{FENCE_OPEN}\n"
         f"Emails ({len(ctx_lines)} most relevant):\n{context_block}\n"
+        f"{FENCE_CLOSE}\n"
     )
 
     try:
