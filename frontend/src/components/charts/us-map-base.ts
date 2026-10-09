@@ -13,8 +13,42 @@ import { STATE_ABBR_BY_NAME, STATE_NAMES } from "@/components/app/lanes/format"
 export type RGBA = [number, number, number, number]
 export type StateProps = { abbr: string; name: string }
 
-export const US_BOUNDS: [[number, number], [number, number]] = [[-125.5, 24], [-66, 49.8]]
-export const MAX_BOUNDS: [[number, number], [number, number]] = [[-140, 18], [-52, 56]]
+/**
+ * Fallback operating area, used only when the API does not send `operating_states`.
+ * MUST mirror backend/app/analysis/operating_area.py OPERATING_STATES (the single source of truth).
+ */
+export const OPERATING_STATES_FALLBACK: readonly string[] = [
+  "LA", "AR", "MO", "IA", "MN", "WI", "IL", "MI", "IN", "OH", "KY", "TN", "MS", "AL", "GA", "FL",
+  "SC", "NC", "VA", "WV", "MD", "DE", "PA", "NJ", "NY", "CT", "RI", "MA", "VT", "NH", "ME", "DC",
+]
+
+type LngLatBounds = [[number, number], [number, number]]
+export type OperatingArea = { states: FeatureCollection<Geometry, StateProps>; set: Set<string>; bounds: LngLatBounds; maxBounds: LngLatBounds }
+
+const areaCache = new Map<string, OperatingArea>()
+
+/** ONLY the operating states' polygons, plus the bounds the map fits to and may not leave. */
+export function operatingArea(abbrs?: readonly string[] | null): OperatingArea {
+  const list = abbrs && abbrs.length ? abbrs : OPERATING_STATES_FALLBACK
+  const key = [...list].sort().join(",")
+  const hit = areaCache.get(key)
+  if (hit) return hit
+  const set = new Set(list)
+  const features = STATES.features.filter((f) => set.has(f.properties.abbr))
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const walk = (c: unknown): void => {
+    if (Array.isArray(c) && typeof c[0] === "number") {
+      const [x, y] = c as number[]
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+    } else if (Array.isArray(c)) c.forEach(walk)
+  }
+  features.forEach((f) => walk((f.geometry as { coordinates: unknown }).coordinates))
+  const bounds: LngLatBounds = [[minX, minY], [maxX, maxY]]
+  const maxBounds: LngLatBounds = [[minX - 2, minY - 2], [maxX + 2, maxY + 2]]
+  const area = { states: { type: "FeatureCollection", features } as FeatureCollection<Geometry, StateProps>, set, bounds, maxBounds }
+  areaCache.set(key, area)
+  return area
+}
 
 // Lower 48 + DC. Alaska's Aleutians cross the antimeridian and smear across a
 // mercator view; the carrier's lanes are continental.
@@ -67,10 +101,10 @@ const labelCache = new Map<string, StateLabel[]>()
  * an already-placed one (or doesn't fit the state at all) is dropped, so DC/RI/DE only
  * appear once zoomed in. Pure maths on mercator pixels — no map instance needed.
  */
-export function placeStateLabels(zoom: number, opts: { abbrOnly?: boolean; fontPx?: number } = {}): StateLabel[] {
+export function placeStateLabels(zoom: number, opts: { abbrOnly?: boolean; fontPx?: number; only?: Set<string> } = {}): StateLabel[] {
   const fontPx = opts.fontPx ?? 11
   const z = Math.round(zoom * 4) / 4
-  const key = `${z}|${opts.abbrOnly ? 1 : 0}|${fontPx}`
+  const key = `${opts.only ? [...opts.only].sort().join(",") : "*"}|${z}|${opts.abbrOnly ? 1 : 0}|${fontPx}`
   const hit = labelCache.get(key)
   if (hit) return hit
   const scale = 512 * 2 ** z
@@ -78,12 +112,12 @@ export function placeStateLabels(zoom: number, opts: { abbrOnly?: boolean; fontP
   const placed: { x0: number; x1: number; y0: number; y1: number }[] = []
   const out: StateLabel[] = []
   for (const g of [...STATE_GEOMS].sort((a, b) => b.area - a.area)) {
-    if (!g.abbr) continue
+    if (!g.abbr || (opts.only && !opts.only.has(g.abbr))) continue
     const [dx, dy] = LABEL_NUDGE[g.abbr] ?? [0, 0]
     const lng = g.lng + dx, lat = g.lat + dy
     const cx = ((lng + 180) / 360) * scale, cy = mercY(lat) * scale
     const stateW = (g.spanLng / 360) * scale
-    for (const text of opts.abbrOnly ? [g.abbr] : [STATE_NAMES[g.abbr] ?? g.name, g.abbr]) {
+    for (const text of opts.abbrOnly || g.abbr === "DC" ? [g.abbr] : [STATE_NAMES[g.abbr] ?? g.name, g.abbr]) {
       const w = text.length * charW + 6
       const h = fontPx + 4
       if (w > stateW * (text === g.abbr ? 1.1 : 0.95)) continue

@@ -25,7 +25,7 @@ import { RotateCcw } from "lucide-react"
 import { EmptyStateCard, EntityCard } from "@/components/app/lanes/entity-card"
 import type { CityEntity, HeatArc, HeatmapData, LaneEntity } from "@/lib/api/lanes"
 import {
-  hex, mix, placeStateLabels, readPalette, rgb, MAX_BOUNDS, STATES, US_BOUNDS,
+  hex, mix, placeStateLabels, readPalette, rgb, operatingArea,
   type Palette, type RGBA, type StateLabel, type StateProps,
 } from "./us-map-base"
 
@@ -63,7 +63,10 @@ export default function UsLaneMap({
   const live = React.useRef({ onSelectState, onSelectLane, canSelect: (abbr: string): boolean => abbr.length > 0 })
 
   // The carrier's operating area comes from the API (one list, app.analysis.operating_area).
-  const operating = React.useMemo(() => new Set(data.operating_states), [data.operating_states])
+  const area = React.useMemo(() => operatingArea(data.operating_states), [data.operating_states])
+  const operating = area.set
+  const areaRef = React.useRef(area)
+  React.useEffect(() => { areaRef.current = area })
 
   const stateByAbbr = React.useMemo(() => new Map(data.states.map((s) => [s.label, s])), [data.states])
   // Filtering by a state only makes sense for one the carrier runs (or has data for).
@@ -94,10 +97,10 @@ export default function UsLaneMap({
     const map = new MapLibreMap({
       container: hostRef.current,
       style: { version: 8, sources: {}, layers: [{ id: "bg", type: "background", paint: { "background-color": hex(palette.bg) } }] },
-      bounds: US_BOUNDS,
+      bounds: areaRef.current.bounds,
       fitBoundsOptions: { padding: 16 },
-      maxBounds: MAX_BOUNDS,
-      minZoom: 2.2,
+      maxBounds: areaRef.current.maxBounds,
+      minZoom: 2,
       maxZoom: 9,
       attributionControl: false,
       dragRotate: false,
@@ -127,6 +130,8 @@ export default function UsLaneMap({
     map.addControl(overlay as unknown as IControl)
     const onZoom = () => setZoom(Math.round(map.getZoom() * 4) / 4)
     map.on("zoom", onZoom)
+    // The fitted zoom is the floor: no zooming out into the (undrawn) west.
+    map.once("load", () => map.setMinZoom(Math.max(2, map.getZoom() - 0.3)))
     onZoom()
     mapRef.current = map
     overlayRef.current = overlay
@@ -162,13 +167,13 @@ export default function UsLaneMap({
       return (mode === "origin" ? s.runs_as_origin : mode === "dest" ? s.runs_as_dest : s.metrics.runs) ?? 0
     }
     const cityPoints = data.cities.filter((c) => (mode === "origin" ? (c.runs_as_origin ?? 0) > 0 : mode === "dest" ? (c.runs_as_dest ?? 0) > 0 : true))
-    const labels = placeStateLabels(zoom)
+    const labels = placeStateLabels(zoom, { only: operating })
     const heatSource = mode === "origin" ? data.origins : mode === "dest" ? data.dests : []
 
     const layers = [
       new GeoJsonLayer<StateProps>({
         id: "states",
-        data: STATES,
+        data: area.states,
         pickable: true,
         stroked: true,
         filled: true,
@@ -176,15 +181,14 @@ export default function UsLaneMap({
           const abbr = f.properties.abbr
           const n = stateRuns(abbr)
           if (n) return rgb(mix(p.card, p.brand, 0.08 + 0.34 * Math.sqrt(n / maxState)), 255)
-          // distinct "no runs" (inside the area, quiet: pale card) vs "outside" (greyed out, darker)
-          return operating.has(abbr) ? rgb(mix(p.card, p.steel, 0.1), 255) : rgb(mix(p.bg, p.steel, 0.38), 255)
+          return rgb(mix(p.card, p.steel, 0.1), 255) // inside the area, no runs: pale card
         },
         getLineColor: (f) => (f.properties.abbr === sel ? rgb(p.brand, 255) : rgb(p.border, 255)),
         getLineWidth: (f) => (f.properties.abbr === sel ? 2.5 : 0.8),
         lineWidthUnits: "pixels",
         autoHighlight: true,
         highlightColor: [...p.brand, 60] as RGBA,
-        updateTriggers: { getFillColor: [mode, maxState, data, p, operating], getLineColor: [sel, p], getLineWidth: [sel] },
+        updateTriggers: { getFillColor: [mode, maxState, data, p, area], getLineColor: [sel, p], getLineWidth: [sel] },
       }),
       new HeatmapLayer({
         id: "heat",
@@ -224,14 +228,14 @@ export default function UsLaneMap({
         getText: (l) => l.text,
         getSize: 11,
         sizeUnits: "pixels",
-        getColor: (l) => (operating.has(l.abbr) ? rgb(p.ink, 200) : rgb(p.ink, 95)),
+        getColor: rgb(p.ink, 200),
         fontWeight: 600,
         fontSettings: { sdf: true },
         outlineWidth: 2,
         outlineColor: rgb(p.card, 220),
         getTextAnchor: "middle",
         getAlignmentBaseline: "center",
-        updateTriggers: { getColor: [p, operating] },
+        updateTriggers: { getColor: [p] },
       }),
       new ScatterplotLayer<CityEntity>({
         id: "cities",
@@ -251,9 +255,9 @@ export default function UsLaneMap({
       }),
     ]
     overlay.setProps({ layers })
-  }, [data, mode, palette, selectedState, selectedLane, highlightLane, stateByAbbr, maxState, maxArc, operating, zoom])
+  }, [data, mode, palette, selectedState, selectedLane, highlightLane, stateByAbbr, maxState, maxArc, operating, area, zoom])
 
-  const reset = () => mapRef.current?.fitBounds(US_BOUNDS, { padding: 16, duration: 600 })
+  const reset = () => mapRef.current?.fitBounds(area.bounds, { padding: 16, duration: 600 })
 
   // keep the card inside the frame
   const CARD_W = 336
@@ -284,10 +288,6 @@ export default function UsLaneMap({
           <span className="inline-flex items-center gap-1.5">
             <span className="size-2.5 rounded-[2px] border border-border" style={{ background: "color-mix(in oklab, var(--card) 90%, var(--steel))" }} aria-hidden />
             no runs
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2.5 rounded-[2px] border border-border" style={{ background: "color-mix(in oklab, var(--background) 62%, var(--steel))" }} aria-hidden />
-            outside operating area
           </span>
         </div>
         {mode === "flows" ? (
