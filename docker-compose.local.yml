@@ -15,7 +15,13 @@ services:
       - "5460:5432"
 
   api:
-    env_file: .env.local-docker
+    env_file:
+      - .env.local-docker
+      # backend/.env carries GEMINI_API_KEY and other AI keys.
+      # The explicit DATABASE_URL / DATABASE_URL_DIRECT in environment: below
+      # take precedence over anything in this file, so the deleted Neon URL
+      # that backend/.env may contain cannot reach the container.
+      - backend/.env
     environment:
       DATABASE_URL: postgresql://ljm:ljm@postgres:5432/ljm
       DATABASE_URL_DIRECT: postgresql://ljm:ljm@postgres:5432/ljm
@@ -45,7 +51,12 @@ services:
     restart: unless-stopped
     env_file: .env.local-docker
     environment:
-      BACKEND_URL: http://api:8000
+      # API_URL is the server-side base URL read by client.ts and the proxy/login
+      # BFF routes (process.env.API_URL || process.env.NEXT_PUBLIC_API_URL).
+      # Without this, Next.js server code falls back to NEXT_PUBLIC_API_URL
+      # (http://localhost:8001) which resolves to the frontend container itself,
+      # not the api service — causing 502s on every server-rendered page.
+      API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: http://localhost:8001
       CRON_SECRET: "${CRON_SECRET:-}"
       # CI=true prevents pnpm from asking for TTY confirmation when
