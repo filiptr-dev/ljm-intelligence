@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     })
   }
 
-  let data: { access_token?: string; expires_in?: number } = {}
+  let data: { access_token?: string; expires_in?: number; user?: unknown } = {}
   try {
     data = JSON.parse(text)
   } catch {
@@ -95,22 +95,11 @@ export async function POST(req: Request) {
     "SameSite=Lax",
   ].join("; ")
 
-  // Fetch user profile with the fresh token so the browser can render the
-  // signed-in chrome without ever learning the token itself.
-  let user: unknown = null
-  try {
-    const me = await fetch(`${BACKEND}/auth/me`, {
-      headers: { authorization: `Bearer ${data.access_token}` },
-      cache: "no-store",
-    })
-    if (me.ok) user = await me.json()
-  } catch {
-    // Non-fatal: the SessionProvider will refetch /api/auth/me on mount.
-  }
-
+  // The backend login response already carries `user`; no second /auth/me
+  // round trip (it cost an extra Render hop on the login critical path).
   // NOTE: `access_token` is intentionally stripped from the response body.
   // The browser never sees the JWT (cookie-only auth).
-  return new Response(JSON.stringify({ ok: true, user }), {
+  return new Response(JSON.stringify({ ok: true, user: data.user ?? null }), {
     status: 200,
     headers: {
       "content-type": "application/json",

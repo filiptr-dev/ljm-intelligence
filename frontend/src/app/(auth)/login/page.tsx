@@ -9,23 +9,37 @@
  * on bad password, "backend unreachable" on BFF failure.
  */
 
-import { useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
 import { useSession } from "@/lib/auth/session"
 
 export default function LoginPage() {
-  const router = useRouter()
   const params = useSearchParams()
-  const next = params.get("next") || "/"
+  const rawNext = params.get("next") || "/"
+  // Same-origin paths only (blocks `//evil.com` open redirects).
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/"
   const { status, login } = useSession()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  const redirecting = useRef(false)
+
+  // Hard navigation, not router.replace(): the Next client router cache may
+  // hold the proxy's earlier "/ -> /login" redirect (from a prefetch or the
+  // first unauthenticated visit), so a soft nav lands back on /login until a
+  // manual refresh. A full load always re-requests with the fresh cookie.
+  function go() {
+    if (redirecting.current) return
+    redirecting.current = true
+    window.location.replace(next)
+  }
+
   useEffect(() => {
-    if (status === "authenticated") router.replace(next)
-  }, [status, next, router])
+    if (status === "authenticated") go()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, next])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -37,9 +51,9 @@ export default function LoginPage() {
         setError(res.detail || "login failed")
         return
       }
-      router.replace(next)
+      go()
     } finally {
-      setSubmitting(false)
+      if (!redirecting.current) setSubmitting(false)
     }
   }
 

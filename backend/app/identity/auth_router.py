@@ -15,6 +15,7 @@ theatre. Revisit before real client use.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -115,7 +116,9 @@ async def login(request: Request, body: LoginIn) -> LoginOut:
             bool(user)
             and user.is_active
             and user.password_hash is not None
-            and verify_password(body.password.get_secret_value(), user.password_hash)
+            and await asyncio.to_thread(
+                verify_password, body.password.get_secret_value(), user.password_hash
+            )
         )
         if not ok or user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
