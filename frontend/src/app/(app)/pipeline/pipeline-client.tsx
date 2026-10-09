@@ -58,6 +58,31 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
     }
   }, [])
 
+  // Mirror every note/next-touch edit into board state so (a) the card
+  // carries the latest text through an optimistic column move, and (b)
+  // when a Card remounts (either via a move or a refresh), the NoteEditor
+  // seeds from the fresh value instead of the stale initial card prop.
+  const patchCard = useCallback(
+    (leadId: string, patch: { note?: string | null; next_touch?: string | null }) => {
+      setBoard((prev) => {
+        if (!prev) return prev
+        const cols: ColumnKey[] = ["new", "contacted", "replied", "booked"]
+        const next: Board = { ...prev }
+        for (const col of cols) {
+          const idx = prev[col].findIndex((c) => c.lead_id === leadId)
+          if (idx === -1) continue
+          const updated = { ...prev[col][idx], ...patch }
+          const list = prev[col].slice()
+          list[idx] = updated
+          next[col] = list
+          break
+        }
+        return next
+      })
+    },
+    [],
+  )
+
   // Optimistic column move. Snapshots prior state so we can revert on
   // PATCH failure; `setStage` is the only backend hop.
   const moveCard = useCallback(
@@ -123,6 +148,7 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
             cards={board ? board[col.key] : []}
             loading={loading && !board}
             onDropCard={moveCard}
+            onCardEdit={patchCard}
           />
         ))}
       </div>
@@ -137,6 +163,7 @@ function Column({
   cards,
   loading,
   onDropCard,
+  onCardEdit,
 }: {
   columnKey: ColumnKey
   label: string
@@ -144,6 +171,7 @@ function Column({
   cards: BoardCard[]
   loading: boolean
   onDropCard: (leadId: string, from: ColumnKey, to: ColumnKey) => void
+  onCardEdit: (leadId: string, patch: { note?: string | null; next_touch?: string | null }) => void
 }) {
   const [over, setOver] = useState(false)
 
@@ -174,14 +202,29 @@ function Column({
         ) : cards.length === 0 ? (
           <p className="text-xs text-muted-foreground">Nothing here yet.</p>
         ) : (
-          cards.map((card) => <Card key={card.lead_id} card={card} fromColumn={columnKey} />)
+          cards.map((card) => (
+            <Card
+              key={card.lead_id}
+              card={card}
+              fromColumn={columnKey}
+              onCardEdit={onCardEdit}
+            />
+          ))
         )}
       </Panel>
     </div>
   )
 }
 
-function Card({ card, fromColumn }: { card: BoardCard; fromColumn: ColumnKey }) {
+function Card({
+  card,
+  fromColumn,
+  onCardEdit,
+}: {
+  card: BoardCard
+  fromColumn: ColumnKey
+  onCardEdit: (leadId: string, patch: { note?: string | null; next_touch?: string | null }) => void
+}) {
   const [dragging, setDragging] = useState(false)
 
   return (
@@ -223,7 +266,7 @@ function Card({ card, fromColumn }: { card: BoardCard; fromColumn: ColumnKey }) 
         />
       </header>
 
-      <NoteEditor card={card} />
+      <NoteEditor card={card} onCardEdit={onCardEdit} />
 
       <footer className="mt-1 flex gap-2 text-xs">
         <Link
@@ -271,7 +314,16 @@ function ActionPill({
   )
 }
 
-function NoteEditor({ card }: { card: BoardCard }) {
+function NoteEditor({
+  card,
+  onCardEdit,
+}: {
+  card: BoardCard
+  onCardEdit: (leadId: string, patch: { note?: string | null; next_touch?: string | null }) => void
+}) {
+  // Seed from card.* once; after that, every keystroke mirrors itself
+  // back into board state via onCardEdit, so a drop-and-move carries the
+  // latest text (including debounce-pending edits) through the remount.
   const [note, setNote] = useState(card.note ?? "")
   const [nextTouch, setNextTouch] = useState(card.next_touch ?? "")
   const [saving, setSaving] = useState(false)
@@ -319,6 +371,7 @@ function NoteEditor({ card }: { card: BoardCard }) {
         value={note}
         onChange={(ev) => {
           setNote(ev.target.value)
+          onCardEdit(card.lead_id, { note: ev.target.value })
           schedule(ev.target.value, nextTouch)
         }}
         placeholder="Note (auto-saved)"
@@ -333,6 +386,7 @@ function NoteEditor({ card }: { card: BoardCard }) {
             value={nextTouch}
             onChange={(ev) => {
               setNextTouch(ev.target.value)
+              onCardEdit(card.lead_id, { next_touch: ev.target.value || null })
               schedule(note, ev.target.value)
             }}
             className="h-6 w-32 px-1 text-[0.7rem]"
