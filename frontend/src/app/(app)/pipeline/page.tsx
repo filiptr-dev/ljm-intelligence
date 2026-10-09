@@ -1,23 +1,24 @@
-import { ToolPlaceholder } from "@/components/app/tool-placeholder"
+/**
+ * Follow-ups — /pipeline. SERVER COMPONENT shell.
+ *
+ * Fetches the board once server-side so the first paint carries real
+ * cards. Everything interactive (refresh, note editor, deep-links) lives
+ * in ./pipeline-client.tsx. Same pattern as /call-list.
+ */
 
-export default function PipelinePage() {
-  return (
-    <ToolPlaceholder
-      eyebrow="Follow-ups"
-      title="Move leads through your pipeline"
-      description="A kanban of leads across New → Contacted → Replied → Booked, with reminder-based follow-ups so nothing falls through the cracks."
-      whatItWillDo={[
-        "Drag leads through four columns as they progress.",
-        "Auto-schedule the next follow-up based on reply state.",
-        "Nudge you when a hot lead has gone quiet for too long.",
-        "Close the loop with the campaigns store so counts stay consistent.",
-      ]}
-      data={[
-        "Crawled leads (Neon `leads`) as the New column",
-        "`sent_log` mode='simulated'|'real' + replied_at drive stage",
-        "Campaign follow-up schedule from the existing engine",
-        "Owner-owned notes + next-touch date per card",
-      ]}
-    />
-  )
+import { api } from "@/lib/api/server"
+import type { Board } from "@/lib/api/followups"
+import PipelineClient from "./pipeline-client"
+
+export const dynamic = "force-dynamic"
+
+export default async function PipelinePage() {
+  let initial: Board | null = null
+  try {
+    const { data, response } = await api.GET("/followups", { params: { query: { limit: 50 } } })
+    if (response.ok && data) initial = data as unknown as Board
+  } catch {
+    initial = null
+  }
+  return <PipelineClient initial={initial} />
 }

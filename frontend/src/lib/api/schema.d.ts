@@ -2075,6 +2075,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/vetting/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Vet */
+        get: operations["get_vet_vetting__key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/followups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Board */
+        get: operations["get_board_followups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/followups/{lead_id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Note */
+        post: operations["post_note_followups__lead_id__note_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2193,6 +2244,17 @@ export interface components {
              */
             summary: string;
         };
+        /** AuthorityOut */
+        AuthorityOut: {
+            /** Status */
+            status?: string | null;
+            /** Add Date */
+            add_date?: string | null;
+            /** Age Days */
+            age_days?: number | null;
+            /** Oos Date */
+            oos_date?: string | null;
+        };
         /** AutoSendIn */
         AutoSendIn: {
             /**
@@ -2233,6 +2295,57 @@ export interface components {
              * @default 12
              */
             months: number;
+        };
+        /** BoardCardOut */
+        BoardCardOut: {
+            /** Lead Id */
+            lead_id: string;
+            /** Name */
+            name: string;
+            /** City */
+            city?: string | null;
+            /** State */
+            state?: string | null;
+            /** Mc */
+            mc?: string | null;
+            /** Dot */
+            dot?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Primary Email */
+            primary_email?: string | null;
+            next_action: components["schemas"]["NextActionPill"];
+            /** Days Waiting */
+            days_waiting?: number | null;
+            /** Last Activity At */
+            last_activity_at?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Next Touch */
+            next_touch?: string | null;
+        };
+        /** BoardOut */
+        BoardOut: {
+            /**
+             * New
+             * @default []
+             */
+            new: components["schemas"]["BoardCardOut"][];
+            /**
+             * Contacted
+             * @default []
+             */
+            contacted: components["schemas"]["BoardCardOut"][];
+            /**
+             * Replied
+             * @default []
+             */
+            replied: components["schemas"]["BoardCardOut"][];
+            /**
+             * Booked
+             * @default []
+             */
+            booked: components["schemas"]["BoardCardOut"][];
         };
         /** BookedVsRejected */
         BookedVsRejected: {
@@ -3795,6 +3908,15 @@ export interface components {
             /** Due At */
             due_at?: string | null;
         };
+        /** NextActionPill */
+        NextActionPill: {
+            /** Kind */
+            kind: string;
+            /** Reason */
+            reason: string;
+            /** Due At */
+            due_at?: string | null;
+        };
         /** NoReplyOut */
         NoReplyOut: {
             /** Thread Id */
@@ -4089,6 +4211,21 @@ export interface components {
             /** First Touch */
             first_touch: components["schemas"]["FirstTouchOut"][];
         };
+        /** PriorOut */
+        PriorOut: {
+            /** Last Sent At */
+            last_sent_at?: string | null;
+            /**
+             * Booked Count
+             * @default 0
+             */
+            booked_count: number;
+            /**
+             * Rejected Count
+             * @default 0
+             */
+            rejected_count: number;
+        };
         /** PromoteIn */
         PromoteIn: {
             /** Candidate Id */
@@ -4128,6 +4265,13 @@ export interface components {
         ReconnectOut: {
             /** Ok */
             ok: boolean;
+        };
+        /** RedFlagOut */
+        RedFlagOut: {
+            /** Code */
+            code: string;
+            /** Reason */
+            reason: string;
         };
         /** RefreshAllOut */
         RefreshAllOut: {
@@ -4260,6 +4404,28 @@ export interface components {
              * @default
              */
             brief: string;
+        };
+        /** SaveNoteIn */
+        SaveNoteIn: {
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Next Touch */
+            next_touch?: string | null;
+        };
+        /** SaveNoteOut */
+        SaveNoteOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Lead Id */
+            lead_id: string;
+            /** Updated At */
+            updated_at: string;
         };
         /** SegmentsCountOut */
         SegmentsCountOut: {
@@ -4833,6 +4999,45 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VetReportOut */
+        VetReportOut: {
+            /** Key */
+            key: string;
+            /** Mc */
+            mc?: string | null;
+            /** Dot */
+            dot?: string | null;
+            /** Legal Name */
+            legal_name?: string | null;
+            /** Dba Name */
+            dba_name?: string | null;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "safe" | "caution" | "avoid";
+            /**
+             * Red Flags
+             * @default []
+             */
+            red_flags: components["schemas"]["RedFlagOut"][];
+            authority: components["schemas"]["AuthorityOut"];
+            prior: components["schemas"]["PriorOut"];
+            /**
+             * Suppressed
+             * @default false
+             */
+            suppressed: boolean;
+            /** Evidence Url */
+            evidence_url?: string | null;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** Lead Id */
+            lead_id?: string | null;
         };
         /** WebsiteContactOut */
         WebsiteContactOut: {
@@ -8782,6 +8987,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vet_vetting__key__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VetReportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_board_followups_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_note_followups__lead_id__note_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveNoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveNoteOut"];
                 };
             };
             /** @description Validation Error */
