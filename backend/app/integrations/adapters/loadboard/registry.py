@@ -10,7 +10,7 @@ live source on (plan rule).
 from __future__ import annotations
 
 from app.integrations.adapters.loadboard.agent_browser import AgentSource
-from app.integrations.adapters.loadboard.ai_page import AiPageSource
+from app.integrations.adapters.loadboard.ai_page import AiPageSource, BrokerPageSource
 from app.integrations.adapters.loadboard.base import ConnectionTest, LoadSource, RawLoad
 from app.integrations.adapters.loadboard.chr import ChrSource
 from app.integrations.adapters.loadboard.dat import DatSource
@@ -136,6 +136,7 @@ class _DriverSwitch:
 def all_sources(settings) -> list[LoadSource]:
     return [
         AiPageSource(settings),
+        BrokerPageSource(settings),
         PasteSource(),
         _DriverSwitch("dat", DatSource(settings), settings),
         _DriverSwitch("chr", ChrSource(settings), settings),

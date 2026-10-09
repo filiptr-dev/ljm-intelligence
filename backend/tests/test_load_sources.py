@@ -147,6 +147,7 @@ async def test_truckstop_env_gate_and_mapping() -> None:
 def test_registry_counts_six() -> None:
     assert [s.kind for s in all_sources(_s())] == [
         "ai_page",
+        "broker_page",
         "paste",
         "dat",
         "chr",
@@ -163,3 +164,15 @@ def test_registry_counts_six() -> None:
 def test_registry_by_kind() -> None:
     assert by_kind(_s(), "truckstop") is not None
     assert by_kind(_s(), "no-such-source") is None
+
+
+def test_registry_knows_broker_page() -> None:
+    """GH workflow refreshes `broker_page` on its own matrix row — the backend
+    must register it or the hourly curl 404s. Shares the ai_page URL list;
+    only the persisted `source` tag differs."""
+    src = by_kind(_s(), "broker_page")
+    assert src is not None
+    assert src.kind == "broker_page"
+    # Disabled by default (no agent sidecar URL, no source URLs) — matches
+    # ai_page gating so a cron refresh returns status=disabled, not an error.
+    assert src.enabled is False

@@ -95,4 +95,25 @@ class AiPageSource:
         return ConnectionTest(ok=True, latency_ms=0, reason=None, sample_count=0)
 
 
-__all__ = ["AiPageSource"]
+class BrokerPageSource(AiPageSource):
+    """Alias of :class:`AiPageSource` with ``kind="broker_page"``.
+
+    The hourly GH workflow (``.github/workflows/loads-agent.yml``) refreshes
+    a ``broker_page`` source directly — kept as its own matrix row by user
+    decision 2026-10-09 so the operator can tell AI-pages and broker-pages
+    apart in Actions logs. Shares the same ``settings.load_source_urls``
+    list so the operator only maintains one place in the UI; the only
+    difference from ``ai_page`` is the ``source`` tag written to persisted
+    load rows.
+    """
+
+    kind: str = "broker_page"
+
+    async def fetch(self, settings):  # type: ignore[override]
+        raws = await super().fetch(settings)
+        for r in raws:
+            r.source = "broker_page"
+        return raws
+
+
+__all__ = ["AiPageSource", "BrokerPageSource"]

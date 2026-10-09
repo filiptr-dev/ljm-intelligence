@@ -57,7 +57,7 @@ jobs:
 
       - name: Pull session blob
         env:
-          API_BASE: ${{ secrets.API_BASE }}
+          API_BASE: ${{ secrets.API_BASE || secrets.BACKEND_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           mkdir -p /tmp/sessions
@@ -77,16 +77,25 @@ jobs:
 
       - name: Trigger run
         env:
-          API_BASE: ${{ secrets.API_BASE }}
+          API_BASE: ${{ secrets.API_BASE || secrets.BACKEND_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" \
+          set -euo pipefail
+          if [ -z "${API_BASE:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Need API_BASE (or BACKEND_URL) + CRON_SECRET repo secrets." >&2
+            exit 1
+          fi
+          # --fail-with-body: curl returns non-zero on HTTP >=400 but still
+          # prints the response body so the Actions log shows *why* (prod
+          # may still need broker-board URLs in Settings → disabled sources
+          # come back 2xx with status=disabled, which does NOT fail).
+          curl -sS --fail-with-body -X POST -H "X-Cron-Secret: $CRON_SECRET" \
             "$API_BASE/loads/sources/${{ matrix.src }}/refresh"
 
       - name: Push session blob
         if: always()
         env:
-          API_BASE: ${{ secrets.API_BASE }}
+          API_BASE: ${{ secrets.API_BASE || secrets.BACKEND_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           test -f /tmp/sessions/${{ matrix.src }}.save.json || exit 0
