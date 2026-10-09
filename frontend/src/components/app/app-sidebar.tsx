@@ -6,6 +6,7 @@ import {
   Building2,
   Calculator,
   ChartColumnBig,
+  Container,
   Gauge,
   KanbanSquare,
   Mail,
@@ -55,7 +56,8 @@ const GROW = [
 ]
 const TOOLS = [
   { href: "/loads", label: "Loads", icon: Package },
-  { href: "/capacity", label: "Capacity Posts", icon: Truck },
+  { href: "/fleet", label: "Fleet", icon: Truck },
+  { href: "/capacity", label: "Capacity Posts", icon: Container },
   { href: "/call-list", label: "Call List", icon: PhoneCall },
   { href: "/shippers", label: "Shipper Finder", icon: MapPinned },
   { href: "/rates", label: "Lane Rate Calculator", icon: Calculator },
