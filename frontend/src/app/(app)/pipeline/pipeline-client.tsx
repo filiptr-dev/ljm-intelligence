@@ -10,11 +10,34 @@
  *
  * Initial payload comes from the server shell at ./page-shell.tsx so the
  * first paint carries real rows without a client-side spinner.
+ *
+ * ## Why @dnd-kit instead of native HTML5 drag
+ *
+ * The earlier native `draggable` version worked in some browsers and
+ * silently refused to start a drag in others — the usual Chromium
+ * suspects (trackpad on macOS, a React re-render inside `onDragStart`
+ * aborting the drag, SVG child intercepting the pointerdown). We switched
+ * to `@dnd-kit/core` with a `PointerSensor` so every pointing device
+ * (mouse, trackpad, touch) goes through the same code path. The grip is
+ * still the ONLY handle via `useDraggable`'s `listeners`, so the note
+ * textarea and date input stay text-selectable. A 5px activation
+ * distance keeps simple clicks on the grip from starting a drag.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { AlertCircle, GripVertical, Mail, Phone } from "lucide-react"
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core"
 
 import { PageHeader, Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
@@ -31,8 +54,6 @@ import {
 
 type ColumnKey = keyof Board
 
-const DRAG_MIME = "application/x-ljm-leadcard"
-
 const COLUMNS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "new", label: "New", hint: "Leads we have not touched yet." },
   { key: "contacted", label: "Contacted", hint: "Email went out — waiting on reply." },
@@ -40,10 +61,28 @@ const COLUMNS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "booked", label: "Booked", hint: "Loads moving. Ops owns these now." },
 ]
 
+// Encode "which column is this card currently in" into the draggable id so
+// `onDragEnd` can compute the from→to move without a parallel lookup map.
+function makeDragId(col: ColumnKey, leadId: string): string {
+  return `${col}|${leadId}`
+}
+
+function parseDragId(id: string): { col: ColumnKey; leadId: string } | null {
+  const idx = id.indexOf("|")
+  if (idx <= 0) return null
+  return { col: id.slice(0, idx) as ColumnKey, leadId: id.slice(idx + 1) }
+}
+
 export default function PipelineClient({ initial }: { initial: Board | null }) {
   const [board, setBoard] = useState<Board | null>(initial)
   const [error, setError] = useState<string | null>(initial ? null : "No initial board.")
   const [loading, setLoading] = useState(false)
+  const [activeCard, setActiveCard] = useState<BoardCard | null>(null)
+
+  // 5px activation distance: a mousedown on the grip without movement
+  // stays a click (so :active + the cursor-grab affordance still fire),
+  // but any real drag intent kicks in immediately.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -102,7 +141,6 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
         await setStage(leadId, to as Stage)
         setError(null)
       } catch (e) {
-        // Revert.
         setBoard((prev) => {
           if (!prev) return prev
           const card = prev[to].find((c) => c.lead_id === leadId)
@@ -117,6 +155,31 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
       }
     },
     [],
+  )
+
+  const handleDragStart = useCallback(
+    (ev: DragStartEvent) => {
+      const parsed = parseDragId(String(ev.active.id))
+      if (!parsed || !board) {
+        setActiveCard(null)
+        return
+      }
+      const card = board[parsed.col].find((c) => c.lead_id === parsed.leadId) ?? null
+      setActiveCard(card)
+    },
+    [board],
+  )
+
+  const handleDragEnd = useCallback(
+    (ev: DragEndEvent) => {
+      setActiveCard(null)
+      if (!ev.over) return
+      const from = parseDragId(String(ev.active.id))
+      const to = String(ev.over.id) as ColumnKey
+      if (!from) return
+      void moveCard(from.leadId, from.col, to)
+    },
+    [moveCard],
   )
 
   return (
@@ -138,20 +201,40 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {COLUMNS.map((col) => (
-          <Column
-            key={col.key}
-            columnKey={col.key}
-            label={col.label}
-            hint={col.hint}
-            cards={board ? board[col.key] : []}
-            loading={loading && !board}
-            onDropCard={moveCard}
-            onCardEdit={patchCard}
-          />
-        ))}
-      </div>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveCard(null)}>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {COLUMNS.map((col) => (
+            <Column
+              key={col.key}
+              columnKey={col.key}
+              label={col.label}
+              hint={col.hint}
+              cards={board ? board[col.key] : []}
+              loading={loading && !board}
+              onCardEdit={patchCard}
+            />
+          ))}
+        </div>
+
+        {/* DragOverlay renders the card at the pointer during a drag so
+            the actual column cell can collapse without visual jank. */}
+        <DragOverlay>
+          {activeCard ? (
+            <div className="pointer-events-none w-72 rounded-sm border border-border bg-background p-3 shadow-lg opacity-95">
+              <div className="flex items-start justify-between gap-2">
+                <GripVertical className="size-4 text-muted-foreground" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate font-semibold text-sm leading-tight">{activeCard.name}</h3>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {[activeCard.city, activeCard.state].filter(Boolean).join(", ") || "—"}
+                    {activeCard.mc ? ` · MC ${activeCard.mc}` : ""}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </div>
   )
 }
@@ -162,7 +245,6 @@ function Column({
   hint,
   cards,
   loading,
-  onDropCard,
   onCardEdit,
 }: {
   columnKey: ColumnKey
@@ -170,32 +252,12 @@ function Column({
   hint: string
   cards: BoardCard[]
   loading: boolean
-  onDropCard: (leadId: string, from: ColumnKey, to: ColumnKey) => void
   onCardEdit: (leadId: string, patch: { note?: string | null; next_touch?: string | null }) => void
 }) {
-  const [over, setOver] = useState(false)
+  const { setNodeRef, isOver } = useDroppable({ id: columnKey })
 
   return (
-    <div
-      onDragOver={(ev) => {
-        // preventDefault is what tells the browser "yes, this is a valid
-        // drop target"; without it the drop event never fires.
-        ev.preventDefault()
-        ev.dataTransfer.dropEffect = "move"
-        if (!over) setOver(true)
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(ev) => {
-        ev.preventDefault()
-        setOver(false)
-        const payload = ev.dataTransfer.getData(DRAG_MIME)
-        if (!payload) return
-        const [fromCol, leadId] = payload.split("|")
-        if (!leadId || !fromCol) return
-        onDropCard(leadId, fromCol as ColumnKey, columnKey)
-      }}
-      className={over ? "rounded-sm ring-2 ring-safety/60" : ""}
-    >
+    <div ref={setNodeRef} className={isOver ? "rounded-sm ring-2 ring-safety/60" : ""}>
       <Panel title={`${label} (${cards.length})`} description={hint} bodyClassName="flex flex-col gap-3">
         {loading ? (
           <p className="text-xs text-muted-foreground">Loading…</p>
@@ -225,28 +287,24 @@ function Card({
   fromColumn: ColumnKey
   onCardEdit: (leadId: string, patch: { note?: string | null; next_touch?: string | null }) => void
 }) {
-  const [dragging, setDragging] = useState(false)
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: makeDragId(fromColumn, card.lead_id),
+  })
 
   return (
     <article
+      ref={setNodeRef}
       className={`flex flex-col gap-2 rounded-sm border border-border bg-background p-3 ${
-        dragging ? "opacity-50" : ""
+        isDragging ? "opacity-30" : ""
       }`}
     >
       <header className="flex items-start justify-between gap-2">
+        {/* Only the grip is the handle — spread listeners here, not on the
+            article — so the textarea + date input remain text-selectable. */}
         <div
-          // The drag handle is the ONLY draggable surface — this keeps the
-          // note textarea and the date input fully text-selectable. HTML5
-          // DnD on an ancestor otherwise swallows text-selection drags
-          // inside its descendants on some browsers.
-          draggable
-          onDragStart={(ev) => {
-            ev.dataTransfer.setData(DRAG_MIME, `${fromColumn}|${card.lead_id}`)
-            ev.dataTransfer.effectAllowed = "move"
-            setDragging(true)
-          }}
-          onDragEnd={() => setDragging(false)}
-          className="shrink-0 cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          {...listeners}
+          {...attributes}
+          className="shrink-0 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
           aria-label="Drag card between columns"
           title="Drag between columns"
         >
