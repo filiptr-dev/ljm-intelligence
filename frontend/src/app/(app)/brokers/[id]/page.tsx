@@ -4,13 +4,13 @@
  * Broker detail — /brokers/[id]  (restored v2)
  *
  * Rewires the real-data v1 page to also carry the sections that commit
- * `ba15198` silently dropped from the pre-rewire page: Recommended next
- * step, inline Draft email (reusing `SingleEmailBuilder` + the real-send
- * adapter), Email timeline, Main lane, Why they said no. KPIs are
- * promoted into the right rail.
+ * `ba15198` silently dropped from the pre-rewire page: one AI panel
+ * (summary + risks + AI next step + always-visible Draft email, reusing
+ * `SingleEmailBuilder` + the real-send adapter), Email timeline, Main lane,
+ * Why they said no. KPIs are promoted into the right rail.
  *
- * Honest-by-design: a missing field renders as "—" with no source badge.
- * Hidden-by-default when a section has no data. We never fake anything.
+ * Honest-by-design: a missing field renders as "—" / "no data yet". Sections
+ * are never hidden for lack of data. We never fake anything.
  */
 
 import * as React from "react"
@@ -19,13 +19,10 @@ import { useParams } from "next/navigation"
 import { toast } from "sonner"
 import {
   ArrowLeft,
-  Ban,
   ExternalLink,
   Mail,
   MapPin,
   Phone,
-  PhoneForwarded,
-  Send,
 } from "lucide-react"
 import { Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
@@ -35,7 +32,7 @@ import { SingleEmailBuilder } from "@/components/app/single-email-builder"
 import { singleSendAdapter } from "@/lib/api/email-send"
 import { InboxCards } from "./inbox-cards"
 import { BrokerKpis } from "./broker-kpis"
-import { BrokerOverviewSections } from "./overview-sections"
+import { AiSummaryCard, BrokerOverviewSections, BrokerStatTiles } from "./overview-sections"
 import {
   getBroker,
   getBrokerActivity,
@@ -189,93 +186,18 @@ function ActivityRow({ e }: { e: ActivityEvent }) {
 }
 
 /**
- * Recommended next step — the primary CTA card the pre-ba15198 page
- * carried. Fed by the server-computed `broker.next_action` so the
- * frontend never re-infers which action is next. Button targets:
- *   call       → tel: link (v1; logging a call-outcome shell is deferred)
- *   email      → scrolls to the inline Draft email section
- *   follow_up  → disabled with the reason tooltip
- *   wait       → disabled with the reason tooltip
+ * Main lane — origin → destination summary. Always rendered; with no lane
+ * on file it says "—" / "no data yet" instead of disappearing.
  */
-function RecommendedNextStep({
-  broker,
-}: {
-  broker: BrokerDetail["broker"]
-}) {
-  const na = broker.next_action
-  const label = ACTION_LABEL[na.kind]
-  const phone = broker.phone.value
-  const email = broker.primary_email.value
-
-  let button: React.ReactNode = null
-  if (na.kind === "call" && phone) {
-    button = (
-      <a
-        href={`tel:${phone}`}
-        className="inline-flex h-10 items-center gap-1.5 rounded-sm bg-safety px-4 text-sm font-semibold text-asphalt hover:opacity-90"
-      >
-        <PhoneForwarded className="size-4" />
-        Call {phone}
-      </a>
-    )
-  } else if (na.kind === "email" && email) {
-    button = (
-      <a
-        href={`#${DRAFT_ANCHOR}`}
-        className="inline-flex h-10 items-center gap-1.5 rounded-sm bg-chart-2 px-4 text-sm font-semibold text-white hover:opacity-90"
-      >
-        <Send className="size-4" />
-        Draft email
-      </a>
-    )
-  } else {
-    button = (
-      <span className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-sm bg-muted px-4 text-sm font-medium text-muted-foreground">
-        <Ban className="size-4" />
-        {label}
-      </span>
+function MainLaneCard({ lane }: { lane: BrokerDetail["broker"]["main_lane"] | null }) {
+  const dash = <span className="text-muted-foreground">—</span>
+  if (!lane) {
+    return (
+      <Panel title="Main lane">
+        <p className="text-sm text-muted-foreground">— · no data yet</p>
+      </Panel>
     )
   }
-
-  return (
-    <Panel
-      title={
-        <span className="flex items-center gap-2">
-          Recommended next step
-          <span
-            className={cn(
-              "inline-flex items-center rounded-[3px] px-2 py-0.5 text-[0.68rem] font-bold tracking-wider uppercase",
-              ACTION_STYLE[na.kind],
-            )}
-          >
-            {label}
-          </span>
-        </span>
-      }
-    >
-      <div className="flex flex-wrap items-center gap-3 rounded-sm border-l-4 border-safety bg-accent px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="font-semibold">{label}</div>
-          <div className="text-sm text-muted-foreground">{na.reason}</div>
-          {na.due_at ? (
-            <div className="mt-0.5 text-[0.68rem] text-muted-foreground">
-              due {new Date(na.due_at).toLocaleDateString()}
-            </div>
-          ) : null}
-        </div>
-        {button}
-      </div>
-    </Panel>
-  )
-}
-
-/**
- * Main lane — origin → destination summary. Hidden entirely when the
- * backend returns null (we never render dead air; the pre-rewire page
- * only had this card when the demo store knew a lane).
- */
-function MainLaneCard({ lane }: { lane: NonNullable<BrokerDetail["broker"]["main_lane"]> }) {
-  const dash = <span className="text-muted-foreground">—</span>
   return (
     <Panel title="Main lane">
       <div className="flex flex-wrap items-baseline gap-2 text-base font-semibold">
@@ -344,11 +266,17 @@ function EmailTimeline({ emails }: { emails: ActivityEvent[] }) {
 }
 
 /**
- * Why they said no — only shown when the backend has at least one item.
+ * Why they said no — always shown; empty state says so honestly.
  * Reads `/brokers/{id}/objections`.
  */
 function WhyTheySaidNo({ items }: { items: ObjectionItem[] }) {
-  if (items.length === 0) return null
+  if (items.length === 0) {
+    return (
+      <Panel title="Why they said no" description="0 on file">
+        <p className="text-sm text-muted-foreground">No rejections yet.</p>
+      </Panel>
+    )
+  }
   return (
     <Panel title="Why they said no" description={`${items.length} on file`}>
       <ul className="space-y-2">
@@ -379,8 +307,11 @@ function WhyTheySaidNo({ items }: { items: ObjectionItem[] }) {
  * header rather than forking the component — same seam `/emails/compose`
  * uses when `?to=<email>` is passed in.
  */
-function buildInitialRecipient(b: BrokerDetail["broker"]): ContactOption | undefined {
-  const email = b.primary_email.value
+function buildInitialRecipient(
+  b: BrokerDetail["broker"],
+  emailOverride?: string | null,
+): ContactOption | undefined {
+  const email = emailOverride || b.primary_email.value
   if (!email) return undefined
   const contactName = b.contacts[0]?.name.value ?? b.name
   return {
@@ -408,6 +339,9 @@ export default function BrokerDetailPage() {
   const [moreLoading, setMoreLoading] = React.useState(false)
   const [extraActivity, setExtraActivity] = React.useState<ActivityEvent[]>([])
   const [objections, setObjections] = React.useState<ObjectionItem[]>([])
+  // Address the operator asked to draft to (one click on the AI panel's
+  // Draft email button). null = builder closed.
+  const [draftTo, setDraftTo] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     let cancelled = false
@@ -483,10 +417,15 @@ export default function BrokerDetailPage() {
   const b = data.broker
   const activityAll = [...data.activity, ...extraActivity]
   const emailOnly = activityAll.filter((e) => e.kind === "email_sent")
-  const initialRecipient = buildInitialRecipient(b)
+  const initialRecipient = buildInitialRecipient(b, draftTo)
   // Email is the suggested purpose only when the server picked `email` as
   // the next action; otherwise let the builder's own heuristic choose.
   const initialPurpose = b.next_action.kind === "email" ? ("intro" as const) : undefined
+  const openDraft = (addr: string) => {
+    setDraftTo(addr)
+    // The section mounts on the next render; scroll after it exists.
+    setTimeout(() => document.getElementById(DRAFT_ANCHOR)?.scrollIntoView({ behavior: "smooth" }), 50)
+  }
 
   return (
     <>
@@ -583,7 +522,14 @@ export default function BrokerDetailPage() {
       <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         {/* ---- main column ---- */}
         <div className="space-y-5">
-          <RecommendedNextStep broker={b} />
+          <AiSummaryCard
+            brokerId={b.id}
+            email={b.primary_email.value ?? null}
+            fallbackStep={{ label: ACTION_LABEL[b.next_action.kind], detail: b.next_action.reason }}
+            onDraft={openDraft}
+          />
+
+          <BrokerStatTiles om={data.overview_metrics ?? null} />
 
           <Panel
             title="Contact block"
@@ -623,23 +569,24 @@ export default function BrokerDetailPage() {
             )}
           </Panel>
 
-          {/* Draft email — SingleEmailBuilder mounted inline against the
-              real-send adapter. Same component used by /emails/compose
-              and the thread reply surface; no fork. */}
-          <section
-            id={DRAFT_ANCHOR}
-            aria-label="Draft email"
-            className="rounded-sm border border-border bg-card"
-          >
-            <header className="border-b border-border px-4 py-2.5">
-              <h2 className="text-sm font-semibold">Draft email</h2>
-              <p className="text-xs text-muted-foreground">
-                Composes to {b.primary_email.value ?? "this broker"} via the real send path.
-              </p>
-            </header>
-            <div className="p-3">
-              {initialRecipient ? (
+          {/* Draft email — opened by the AI panel's button. SingleEmailBuilder
+              auto-drafts on mount against the real-send adapter (one click →
+              generated email). Same component used by /emails/compose. */}
+          {draftTo !== null && initialRecipient ? (
+            <section
+              id={DRAFT_ANCHOR}
+              aria-label="Draft email"
+              className="rounded-sm border border-border bg-card"
+            >
+              <header className="border-b border-border px-4 py-2.5">
+                <h2 className="text-sm font-semibold">Draft email</h2>
+                <p className="text-xs text-muted-foreground">
+                  Composes to {initialRecipient.email} via the real send path.
+                </p>
+              </header>
+              <div className="p-3">
                 <SingleEmailBuilder
+                  key={initialRecipient.email}
                   contacts={[]}
                   backHref={`/brokers/${b.id}`}
                   backLabel={`Back to ${b.name}`}
@@ -648,13 +595,9 @@ export default function BrokerDetailPage() {
                   initialPurpose={initialPurpose}
                   onSend={singleSendAdapter}
                 />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No email on file — add one on the Named contacts list to enable drafting.
-                </p>
-              )}
-            </div>
-          </section>
+              </div>
+            </section>
+          ) : null}
 
           <EmailTimeline emails={emailOnly} />
 
@@ -676,10 +619,10 @@ export default function BrokerDetailPage() {
 
         {/* ---- right rail ---- */}
         <div className="space-y-4">
-          {b.main_lane ? <MainLaneCard lane={b.main_lane} /> : null}
+          <MainLaneCard lane={b.main_lane ?? null} />
 
-          {/* Restored (ba15198^): health gauge, 6-tile stats, 12-month chart. */}
-          <BrokerOverviewSections metrics={data.overview_metrics ?? null} brokerId={b.id} />
+          {/* Restored (ba15198^): health gauge + 12-month chart; never hidden. */}
+          <BrokerOverviewSections metrics={data.overview_metrics ?? null} />
 
           <BrokerKpis brokerId={b.id} />
 

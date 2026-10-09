@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -45,6 +46,36 @@ class LeadSummaryResult:
     generated_at: datetime | None = None
     cached: bool = False
     email_count: int = 0
+    risks: list[str] | None = None
+    next_step: dict[str, str] | None = None  # {"label": ..., "detail": ...}
+
+
+MAX_RISKS = 4
+
+
+def _parse_output(text: str) -> tuple[str, list[str], dict[str, str] | None]:
+    """Split the model reply into (summary, risks, next_step).
+
+    The prompt asks for JSON; a model that answers in plain prose still yields a
+    usable summary (risks empty, no next step) rather than an error.
+    """
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`").removeprefix("json").strip()
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        return text.strip(), [], None
+    if not isinstance(obj, dict) or not str(obj.get("summary") or "").strip():
+        return text.strip(), [], None
+    summary = str(obj["summary"]).strip()
+    risks_in = obj.get("risks")
+    risks = [str(r).strip() for r in risks_in if str(r).strip()][:MAX_RISKS] if isinstance(risks_in, list) else []
+    ns = obj.get("next_step")
+    next_step: dict[str, str] | None = None
+    if isinstance(ns, dict) and str(ns.get("label") or "").strip():
+        next_step = {"label": str(ns["label"]).strip()[:120], "detail": str(ns.get("detail") or "").strip()[:400]}
+    return summary, risks, next_step
 
 
 def _build_prompt(msgs: list[MailMessage], insights: dict[tuple[str, str], MessageInsight]) -> str:
@@ -64,9 +95,14 @@ def _build_prompt(msgs: list[MailMessage], insights: dict[tuple[str, str], Messa
         lines.append(f"- {m.sent_at:%Y-%m-%d} from={frm} subject={subj!r}{meta}\n  {body}")
     return (
         "You are summarising a freight carrier's relationship with one broker. "
-        "Write 3-4 sentences, facts only, using ONLY the emails and extracted "
-        "insights below. Say nothing about anything that is not in the data; "
-        "if something is unknown, omit it.\n\n"
+        "Using ONLY the emails and extracted insights below, reply with a single "
+        "JSON object and nothing else: "
+        '{"summary": "3-4 sentences, facts only", '
+        '"risks": ["0-3 short concrete risks seen in the data, e.g. payment issues, going quiet"], '
+        '"next_step": {"label": "short imperative, e.g. Send a rate follow-up", '
+        '"detail": "one sentence on why, grounded in the data"}}. '
+        "Say nothing about anything that is not in the data; if something is "
+        "unknown, omit it (empty risks list is fine).\n\n"
         + security_instruction("summarise")
         + "\n\n"
         + FENCE_OPEN
@@ -139,11 +175,18 @@ async def get_lead_summary(
         await session.execute(select(LeadAiSummary).where(LeadAiSummary.lead_id == lead_id))
     ).scalar_one_or_none()
     now = datetime.now(UTC)
-    if row is not None and not refresh and row.input_hash == input_hash:
+    if row is not None and not refresh and row.input_hash == input_hash and row.risks is not None:
         created = row.created_at if row.created_at.tzinfo else row.created_at.replace(tzinfo=UTC)
         if now - created < CACHE_TTL:
             return LeadSummaryResult(
-                status="ok", summary=row.summary, ai_used=True, generated_at=created, cached=True, email_count=n
+                status="ok",
+                summary=row.summary,
+                ai_used=True,
+                generated_at=created,
+                cached=True,
+                email_count=n,
+                risks=row.risks or [],
+                next_step=row.next_step,
             )
 
     def unavailable(err: str) -> LeadSummaryResult:
@@ -174,10 +217,24 @@ async def get_lead_summary(
     if status != "ok" or not text:
         return unavailable(f"empty_response:{status}")
 
+    summary, risks, next_step = _parse_output(text)
     model = (getattr(call, "model", None) or getattr(provider, "model", "") or "")[:64]
     if row is None:
-        session.add(LeadAiSummary(lead_id=lead_id, summary=text, input_hash=input_hash, model=model))
+        session.add(
+            LeadAiSummary(
+                lead_id=lead_id, summary=summary, input_hash=input_hash, model=model, risks=risks, next_step=next_step
+            )
+        )
     else:
-        row.summary, row.input_hash, row.model, row.created_at = text, input_hash, model, now
+        row.summary, row.input_hash, row.model, row.created_at = summary, input_hash, model, now
+        row.risks, row.next_step = risks, next_step
     await session.commit()
-    return LeadSummaryResult(status="ok", summary=text, ai_used=True, generated_at=now, email_count=n)
+    return LeadSummaryResult(
+        status="ok",
+        summary=summary,
+        ai_used=True,
+        generated_at=now,
+        email_count=n,
+        risks=risks,
+        next_step=next_step,
+    )

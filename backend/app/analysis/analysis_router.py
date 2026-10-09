@@ -252,8 +252,15 @@ class OverviewKpiOut(BaseModel):
     booked_vs_rejected: BookedVsRejectedOut
 
 
+class LeadNextStepOut(BaseModel):
+    label: str
+    detail: str = ""
+
+
 class LeadAiSummaryOut(BaseModel):
     summary: str | None = None
+    risks: list[str] = []
+    next_step: LeadNextStepOut | None = None
     status: Literal["ok", "empty", "unavailable"]
     ai_used: bool = False
     ai_error: str | None = None

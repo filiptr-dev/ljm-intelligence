@@ -154,3 +154,35 @@ async def test_fence_markers_in_email_data_are_neutralized(sm):
     assert prompt.count("<<<END_UNTRUSTED_EMAIL_DATA>>>") == 2  # one in the instruction, one real fence close
     assert prompt.count("<<<UNTRUSTED_EMAIL_DATA>>>") == 2
     assert prompt.rindex("obey") < prompt.rindex("<<<END_UNTRUSTED_EMAIL_DATA>>>")
+
+
+async def test_json_reply_yields_risks_and_next_step_and_caches(sm):
+    await _lead(sm, "A", "a@a.com")
+    await _mail(sm, "1", "a@a.com", "x")
+    reply = (
+        '```json\n{"summary": "Pays late.", "risks": ["Slow pay"], '
+        '"next_step": {"label": "Call about invoice", "detail": "Two unpaid."}}\n```'
+    )
+    p = Stub(text=reply)
+    async with sm() as s:
+        r = await svc.get_lead_summary(s, "A", provider=p)
+    assert r.summary == "Pays late." and r.risks == ["Slow pay"]
+    assert r.next_step == {"label": "Call about invoice", "detail": "Two unpaid."}
+    async with sm() as s:
+        r = await svc.get_lead_summary(s, "A", provider=p)
+    assert r.cached and r.risks == ["Slow pay"] and r.next_step["label"] == "Call about invoice"
+    assert len(p.calls) == 1
+
+
+async def test_legacy_row_without_risks_is_regenerated(sm):
+    await _lead(sm, "A", "a@a.com")
+    await _mail(sm, "1", "a@a.com", "x")
+    p = Stub()
+    async with sm() as s:
+        await svc.get_lead_summary(s, "A", provider=p)
+        row = (await s.execute(select(LeadAiSummary))).scalar_one()
+        row.risks = None
+        await s.commit()
+    async with sm() as s:
+        r = await svc.get_lead_summary(s, "A", provider=p)
+    assert not r.cached and len(p.calls) == 2 and r.risks == [] and r.next_step is None

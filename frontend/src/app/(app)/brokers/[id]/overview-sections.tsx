@@ -9,15 +9,18 @@
  *      underlying count is below 5.
  *   3. 12-month activity chart — booked + rejected stacked bars + sent line.
  *
- * All three read from the same ``overview_metrics`` block the list page uses
- * (one aggregate, two surfaces). Sections hide when their data is null/thin.
- * The AI summary card reads GET /analysis/lead/{id} (real emails only).
+ * All read from the same ``overview_metrics`` block the list page uses
+ * (one aggregate, two surfaces). Sections NEVER hide: no data renders as
+ * "—" / "no data yet" so the layout matches the pre-ba15198 page 1:1.
+ * The single AI panel (summary + risks + AI next step + Draft email) reads
+ * GET /analysis/lead/{id} (real emails only).
  */
 
 import * as React from "react"
-import { Panel } from "@/components/app/ui"
+import { Sparkles, TriangleAlert } from "lucide-react"
+import { Panel, StatTile } from "@/components/app/ui"
 import { cn } from "@/lib/utils"
-import { pct } from "@/lib/format"
+import { pct, timeAgo } from "@/lib/format"
 import Link from "next/link"
 import type { OverviewMetrics } from "@/lib/api/brokers"
 import * as analysis from "@/lib/api/analysis"
@@ -29,7 +32,14 @@ const COMPONENT_LABEL: Record<string, string> = {
   volume: "Volume",
 }
 
-export function HealthGaugeCard({ om }: { om: OverviewMetrics }) {
+export function HealthGaugeCard({ om }: { om: OverviewMetrics | null }) {
+  if (!om) {
+    return (
+      <Panel title="Relationship health" description="Recency + win rate + tone + volume (30/30/20/20).">
+        <p className="text-sm text-muted-foreground">— · no data yet</p>
+      </Panel>
+    )
+  }
   const tone = om.health_score >= 70 ? "stroke-good" : om.health_score >= 45 ? "stroke-chart-2" : "stroke-bad"
   const r = 42
   const circ = 2 * Math.PI * r
@@ -88,44 +98,49 @@ export function HealthGaugeCard({ om }: { om: OverviewMetrics }) {
   )
 }
 
-export function StatTilesRow({ om }: { om: OverviewMetrics }) {
-  const tiles: Array<{ label: string; value: string; thin?: boolean }> = [
-    { label: "Sent · 30d", value: String(om.sent_30d), thin: om.sent_30d < 5 },
-    { label: "Replied · 30d", value: String(om.replied_30d) },
-    {
-      label: "Reply rate",
-      value: om.reply_rate !== null && om.reply_rate !== undefined ? pct(om.reply_rate) : "—",
-      thin: om.sent_30d < 5,
-    },
-    {
-      label: "Avg reply · hrs",
-      value: om.avg_reply_hours !== null && om.avg_reply_hours !== undefined
-        ? om.avg_reply_hours.toFixed(1)
-        : "—",
-    },
-    { label: "Booked · 12m", value: String(om.booked_12m), thin: om.win_rate_thin },
-    { label: "Rejected · 12m", value: String(om.rejected_12m), thin: om.win_rate_thin },
-    { label: "Revenue · booked", value: `$${Math.round(om.revenue_usd ?? 0).toLocaleString("en-US")}` },
-  ]
+/**
+ * The original six tiles (pre-ba15198). Every value is real or "—":
+ * there is no stored avg-booked-rate yet, so that tile stays "—".
+ */
+export function BrokerStatTiles({ om }: { om: OverviewMetrics | null }) {
+  const decided = om ? om.booked_12m + om.rejected_12m : 0
+  const winRate = om && decided > 0 && om.win_rate != null ? pct(om.win_rate) : "—"
+  const lastContact = om?.last_contact_at ? timeAgo(om.last_contact_at) : "—"
   return (
-    <Panel title="Outreach stats" description="Real numbers from sent_log + call_outcomes.">
-      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {tiles.map((t) => (
-          <li key={t.label} className="rounded-sm border border-border bg-background p-2">
-            <div className="flex items-center justify-between text-[0.65rem] uppercase tracking-wider text-muted-foreground">
-              <span>{t.label}</span>
-              {t.thin ? <span className="rounded-[2px] bg-muted px-1 font-semibold">thin</span> : null}
-            </div>
-            <div className="mt-1 font-mono text-lg font-semibold">{t.value}</div>
-          </li>
-        ))}
-      </ul>
-    </Panel>
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+      <StatTile
+        label="Loads booked"
+        value={om ? om.booked_12m : "—"}
+        sub={om ? "Last 12 months" : "no data yet"}
+      />
+      <StatTile
+        label="Win rate"
+        value={winRate}
+        sub={decided > 0 ? `${decided} decided${om?.win_rate_thin ? " · thin" : ""}` : "no data yet"}
+      />
+      <StatTile
+        label="Revenue"
+        value={om && om.revenue_usd > 0 ? `$${Math.round(om.revenue_usd).toLocaleString("en-US")}` : "—"}
+        sub={om && om.revenue_usd > 0 ? "All booked loads" : "no data yet"}
+      />
+      <StatTile label="Avg booked rate" value="—" sub="no data yet" />
+      <StatTile
+        label="Your reply time"
+        value={om?.avg_reply_hours != null ? `${om.avg_reply_hours.toFixed(1)} h` : "—"}
+        sub={om?.avg_reply_hours != null ? "Average" : "no data yet"}
+      />
+      <StatTile
+        label="Last contact"
+        value={lastContact}
+        sub={om?.last_contact_at ? new Date(om.last_contact_at).toLocaleDateString() : "no data yet"}
+      />
+    </div>
   )
 }
 
-export function ActivityChart12m({ om }: { om: OverviewMetrics }) {
-  const series = om.monthly_series
+export function ActivityChart12m({ om }: { om: OverviewMetrics | null }) {
+  const series = om?.monthly_series ?? []
+  const empty = !series.some((p) => p.sent + p.booked + p.rejected > 0)
   // Chart primitive: compact, legible without a library. Booked (bottom) +
   // rejected (top) stacked bars; sent as a line overlay.
   const max = Math.max(
@@ -141,6 +156,7 @@ export function ActivityChart12m({ om }: { om: OverviewMetrics }) {
       title="12-month activity"
       description="Booked + rejected per month, with sent as the overlay line."
     >
+      {empty ? <p className="mb-2 text-sm text-muted-foreground">— · no data yet</p> : null}
       <div className="overflow-x-auto">
         <svg viewBox={`0 0 ${chartW} ${h + 20}`} className="w-full min-w-[320px]" height={h + 20}>
           {series.map((p, i) => {
@@ -204,11 +220,32 @@ export function ActivityChart12m({ om }: { om: OverviewMetrics }) {
   )
 }
 
-export function AiSummaryCard({ brokerId }: { brokerId: string }) {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+export type NextStepFallback = { label: string; detail: string }
+
+/**
+ * The single AI panel: summary + risks + AI-written recommended next step +
+ * an always-visible Draft email button. With an email on file the button
+ * opens the generated draft in one click; without one an inline address
+ * field replaces the (never disabled) button.
+ */
+export function AiSummaryCard({
+  brokerId,
+  email,
+  fallbackStep,
+  onDraft,
+}: {
+  brokerId: string
+  email: string | null
+  fallbackStep: NextStepFallback
+  onDraft: (email: string) => void
+}) {
   const [data, setData] = React.useState<analysis.LeadAiSummary | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [failed, setFailed] = React.useState(false)
   const [tick, setTick] = React.useState(0)
+  const [addr, setAddr] = React.useState("")
   const refreshRef = React.useRef(false)
 
   React.useEffect(() => {
@@ -238,9 +275,17 @@ export function AiSummaryCard({ brokerId }: { brokerId: string }) {
     setTick((t) => t + 1)
   }
 
+  const ok = !loading && !failed && data?.status === "ok"
+  const step = ok && data?.next_step ? data.next_step : null
+  const risks = ok ? (data?.risks ?? []) : []
+
   return (
     <Panel
-      title="AI summary"
+      title={
+        <span className="flex items-center gap-2">
+          <Sparkles className="size-4 text-chart-2" /> AI summary
+        </span>
+      }
       description="Written from this broker's real emails only."
       action={
         <button
@@ -284,7 +329,16 @@ export function AiSummaryCard({ brokerId }: { brokerId: string }) {
         </p>
       ) : (
         <div className="space-y-2">
-          <p className="text-sm leading-relaxed">{data.summary}</p>
+          <p className="text-[0.95rem] leading-relaxed">{data.summary}</p>
+          {risks.length > 0 ? (
+            <ul className="mt-3 space-y-1.5">
+              {risks.map((r) => (
+                <li key={r} className="flex items-start gap-2 text-sm">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" /> {r}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <div className="flex items-center gap-2 text-[0.68rem] text-muted-foreground">
             <span className="rounded-[2px] bg-muted px-1 font-semibold">AI-generated</span>
             <span>{data.email_count} emails</span>
@@ -292,30 +346,60 @@ export function AiSummaryCard({ brokerId }: { brokerId: string }) {
           </div>
         </div>
       )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-sm border-l-4 border-safety bg-accent px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="eyebrow text-foreground">Recommended next step</div>
+          <div className="font-semibold">{step ? step.label : fallbackStep.label}</div>
+          <div className="text-sm text-muted-foreground">{step ? step.detail : fallbackStep.detail}</div>
+          {step ? null : (
+            <div className="mt-0.5 text-[0.68rem] text-muted-foreground">rule-based · AI step not available</div>
+          )}
+        </div>
+        {email ? (
+          <button
+            type="button"
+            onClick={() => onDraft(email)}
+            className="inline-flex h-9 items-center rounded-sm border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+          >
+            Draft email
+          </button>
+        ) : (
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (EMAIL_RE.test(addr.trim())) onDraft(addr.trim())
+            }}
+          >
+            <input
+              type="email"
+              value={addr}
+              onChange={(e) => setAddr(e.target.value)}
+              placeholder="No email on file — enter address"
+              aria-label="Broker email address"
+              className="h-9 w-56 rounded-sm border border-border bg-background px-2 text-sm"
+            />
+            <button
+              type="submit"
+              className="inline-flex h-9 items-center rounded-sm border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+            >
+              Draft email
+            </button>
+          </form>
+        )}
+      </div>
     </Panel>
   )
 }
 
-export function BrokerOverviewSections({
-  metrics,
-  brokerId,
-}: {
-  metrics: OverviewMetrics | null | undefined
-  brokerId: string
-}) {
-  // The summary is independent of the metrics guard: it has its own empty state.
-  if (!metrics) return <AiSummaryCard brokerId={brokerId} />
-  const hasAnyActivity =
-    metrics.booked_12m + metrics.rejected_12m + metrics.sent_30d > 0 ||
-    metrics.monthly_series.some((p) => p.sent + p.booked + p.rejected > 0)
-  // Fully-thin + no activity → nothing meaningful to render.
-  if (metrics.health_thin && !hasAnyActivity) return <AiSummaryCard brokerId={brokerId} />
+/** Right-rail sections: always rendered, honest empties when there's no data. */
+export function BrokerOverviewSections({ metrics }: { metrics: OverviewMetrics | null | undefined }) {
+  const om = metrics ?? null
   return (
     <div className="space-y-4">
-      <AiSummaryCard brokerId={brokerId} />
-      <HealthGaugeCard om={metrics} />
-      <StatTilesRow om={metrics} />
-      {hasAnyActivity ? <ActivityChart12m om={metrics} /> : null}
+      <HealthGaugeCard om={om} />
+      <ActivityChart12m om={om} />
     </div>
   )
 }

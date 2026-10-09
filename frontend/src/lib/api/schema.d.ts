@@ -1315,10 +1315,11 @@ export interface paths {
         put?: never;
         /**
          * Ask Endpoint
-         * @description Translate the operator's natural-language question in the Inbox
-         *     "Ask" bar into a filter hint. Reuses the ``inbox_draft_reply`` AI
-         *     feature slot. Never 500s — provider errors collapse to the identity
-         *     fallback (all fields null/empty).
+         * @description Answer the operator's natural-language question against the real
+         *     inbox via Gemini. Reuses the ``inbox_draft_reply`` AI feature slot.
+         *     Never 500s — provider resolve/timeout/parse errors come back as
+         *     ``ok=false`` with ``error`` naming the reason and ``answer`` a
+         *     human-readable message, so the UI can always say *why*.
          */
         post: operations["ask_endpoint_inbox_ask_post"];
         delete?: never;
@@ -2295,6 +2296,23 @@ export interface components {
             /** Ai Error */
             ai_error?: string | null;
         };
+        /** AskCitationModel */
+        AskCitationModel: {
+            /** Thread Id */
+            thread_id: string;
+            /** Subject */
+            subject: string;
+            /** Snippet */
+            snippet: string;
+            /** Sent At */
+            sent_at: string;
+            /** From Addr */
+            from_addr: string;
+            /** Intent */
+            intent?: string | null;
+            /** Sentiment */
+            sentiment?: number | null;
+        };
         /** AskIn */
         AskIn: {
             /** Question */
@@ -2316,6 +2334,23 @@ export interface components {
              * @default
              */
             summary: string;
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /**
+             * Citations
+             * @default []
+             */
+            citations: components["schemas"]["AskCitationModel"][];
+            /**
+             * Ok
+             * @default false
+             */
+            ok: boolean;
+            /** Error */
+            error?: string | null;
         };
         /** AuthorityOut */
         AuthorityOut: {
@@ -3637,6 +3672,12 @@ export interface components {
             /** Summary */
             summary?: string | null;
             /**
+             * Risks
+             * @default []
+             */
+            risks: string[];
+            next_step?: components["schemas"]["LeadNextStepOut"] | null;
+            /**
              * Status
              * @enum {string}
              */
@@ -3721,6 +3762,16 @@ export interface components {
             score?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** LeadNextStepOut */
+        LeadNextStepOut: {
+            /** Label */
+            label: string;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
         };
         /** LeadOut */
         LeadOut: {

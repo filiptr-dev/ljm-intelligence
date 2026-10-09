@@ -200,5 +200,8 @@ class LeadAiSummary(TenantMixin, Base):
     input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     model: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Migration 0033. NULL risks = legacy row written before risks/next_step existed.
+    risks: Mapped[list | None] = mapped_column(JSONType, nullable=True)
+    next_step: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
     __table_args__ = (UniqueConstraint("tenant_id", "lead_id", name="uq_lead_ai_summaries_tenant_lead"),)
