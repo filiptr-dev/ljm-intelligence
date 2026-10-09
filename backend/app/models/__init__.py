@@ -20,6 +20,7 @@ from app.analysis.models import (
     ObjectionCluster,
     PredictionRun,
 )
+from app.fleet.models import Truck, TruckDefect, TruckDocument, TruckInspection, TruckMaintenance
 from app.followups.models import FollowupNote
 from app.identity.models import (
     Organization,
@@ -39,7 +40,6 @@ from app.outreach.models import (
     SentLog,
     Suppression,
 )
-from app.rates.models import DieselPrice
 from app.prospecting.models import (
     AgentRun,
     CrawlRun,
@@ -53,6 +53,7 @@ from app.prospecting.models import (
     Score,
     ShipperCandidate,
 )
+from app.rates.models import DieselPrice
 
 __all__ = [
     "AgentRun",
@@ -94,5 +95,10 @@ __all__ = [
     "TenantCredential",
     "TenantFeatureFlag",
     "TenantSettings",
+    "Truck",
+    "TruckDefect",
+    "TruckDocument",
+    "TruckInspection",
+    "TruckMaintenance",
     "User",
 ]

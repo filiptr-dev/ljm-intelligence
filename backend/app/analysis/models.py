@@ -243,10 +243,16 @@ class FreightRun(TenantMixin, Base):
     cost_driver_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     cost_load_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     cost_dispatch_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    # Which unit hauled it (0038). Nullable on purpose: history that predates the
+    # fleet, or loads run on a partner carrier, simply have no truck.
+    truck_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), ForeignKey("trucks.id", ondelete="SET NULL")
+    )
     raw: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict, server_default=text("'{}'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
+        Index("ix_freight_runs_truck_id", "truck_id", "pickup_at"),
         Index("ix_freight_runs_tenant_pickup", "tenant_id", "pickup_at"),
         Index("ix_freight_runs_tenant_states", "tenant_id", "origin_state", "dest_state"),
         Index("ix_freight_runs_tenant_source", "tenant_id", "source"),
