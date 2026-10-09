@@ -44,6 +44,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.outreach.models import CallOutcome, CapacityPost
 from app.prospecting.models import Lead
@@ -51,6 +52,10 @@ from app.prospecting.models import Lead
 # Slice 3 will read this default in the date picker; kept here so the ranker + the UI
 # never disagree on cadence.
 CALLBACK_DEFAULT_OFFSET_DAYS: int = 2
+
+# `today` handed to the ranker is the operator's ET day (call_list_service.today_et),
+# so logged_at must be bucketed into the same ET day.
+_ET = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +92,9 @@ def _parse_fmcsa_add_date(lead: Lead) -> date | None:
 
 def _as_date(dt: object) -> date | None:
     if isinstance(dt, datetime):
-        return dt.date()
+        # Aware timestamps (Postgres timestamptz) -> ET calendar day. Naive ones
+        # (SQLite) carry no zone, keep their own date.
+        return dt.astimezone(_ET).date() if dt.tzinfo is not None else dt.date()
     if isinstance(dt, date):
         return dt
     return None

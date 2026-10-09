@@ -129,6 +129,8 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
   )
   const [history, setHistory] = React.useState<HistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = React.useState(false)
+  // Bumped after a log/undo so the timeline refetches even when the same lead stays selected.
+  const [historyTick, setHistoryTick] = React.useState(0)
   const [postingOutcome, setPostingOutcome] = React.useState<OutcomeKind | null>(null)
   const [note, setNote] = React.useState("")
   const [callbackAt, setCallbackAt] = React.useState<string>(plusDaysISO(2))
@@ -209,7 +211,7 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
     return () => {
       cancelled = true
     }
-  }, [selectedId])
+  }, [selectedId, historyTick])
 
   const logOutcome = async (kind: OutcomeKind) => {
     if (!selected) return
@@ -228,6 +230,7 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
       const stillThere = j.items.some((x) => x.lead_id === selected.lead_id)
       setSelectedId(stillThere ? selected.lead_id : (j.items[0]?.lead_id ?? null))
       setNote("")
+      setHistoryTick((t) => t + 1)
       // Undo action — if the backend handed us the row id, offer a one-click
       // undo that calls DELETE /outcome/{id}. If the undo fails (already gone,
       // etc.) we toast an error and leave the list as-is; the user can refresh.
@@ -247,6 +250,7 @@ export default function CallListClient({ initial }: { initial: CallListEnvelope 
                   })
                   if (!res.response.ok || !res.data) throw new Error(`undo ${res.response.status}`)
                   setEnvelope(res.data as unknown as CallListEnvelope)
+                  setHistoryTick((t) => t + 1)
                   toast.success("Undone")
                 } catch (e) {
                   toast.error("Couldn't undo", { description: String(e) })

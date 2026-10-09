@@ -54,7 +54,8 @@ def _post(**kw) -> CapacityPost:
 
 
 def _outcome(lead_id: str, outcome: str, *, days_ago: int = 0, callback_at: date | None = None) -> CallOutcome:
-    logged = datetime.combine(TODAY - timedelta(days=days_ago), datetime.min.time(), tzinfo=UTC)
+    # Noon UTC is the same calendar day in ET (the ranker buckets logged_at by ET day).
+    logged = datetime.combine(TODAY - timedelta(days=days_ago), datetime.min.time(), tzinfo=UTC).replace(hour=12)
     return CallOutcome(
         lead_id=lead_id,
         outcome=outcome,
