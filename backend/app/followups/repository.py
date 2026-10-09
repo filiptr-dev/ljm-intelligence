@@ -142,6 +142,13 @@ async def read_note(s: AsyncSession, lead_id: str) -> FollowupNote | None:
 async def upsert_note(
     s: AsyncSession, *, lead_id: str, note: str, next_touch: date | None
 ) -> FollowupNote:
+    """Write only the note + next_touch columns.
+
+    Must leave ``stage_override`` / ``stage_override_at`` untouched — those
+    are owned by :func:`upsert_stage_override`, and the two upserts can
+    race against the same row. On insert, the stage columns default to
+    NULL (no override), which is correct.
+    """
     existing = await read_note(s, lead_id)
     now = datetime.now(UTC)
     if existing is None:
@@ -157,6 +164,39 @@ async def upsert_note(
         return row
     existing.note = note
     existing.next_touch = next_touch
+    existing.updated_at = now
+    await s.commit()
+    await s.refresh(existing)
+    return existing
+
+
+async def upsert_stage_override(
+    s: AsyncSession, *, lead_id: str, stage: str
+) -> FollowupNote:
+    """Write only the stage_override + stage_override_at columns.
+
+    Mirror of :func:`upsert_note` for the stage side of the row. Leaves
+    ``note`` / ``next_touch`` untouched on an existing row; creates a
+    fresh row with ``note=""`` (the server default) if nothing is there
+    yet.
+    """
+    existing = await read_note(s, lead_id)
+    now = datetime.now(UTC)
+    if existing is None:
+        row = FollowupNote(
+            lead_id=lead_id,
+            note="",
+            next_touch=None,
+            stage_override=stage,
+            stage_override_at=now,
+            updated_at=now,
+        )
+        s.add(row)
+        await s.commit()
+        await s.refresh(row)
+        return row
+    existing.stage_override = stage
+    existing.stage_override_at = now
     existing.updated_at = now
     await s.commit()
     await s.refresh(existing)

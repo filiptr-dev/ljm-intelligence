@@ -146,3 +146,128 @@ async def test_save_note_upserts(client: AsyncClient):
 async def test_save_note_404_on_unknown_lead(client: AsyncClient):
     r = await client.post("/followups/MC-ghost/note", json={"note": "x"})
     assert r.status_code == 404
+
+
+async def test_set_stage_persists_override(client: AsyncClient):
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _lead(sm, id="MC-DRAG")
+
+    # Starts in NEW (no touches).
+    r = await client.get("/followups")
+    assert [c["lead_id"] for c in r.json()["new"]] == ["MC-DRAG"]
+
+    # Drag to Replied.
+    r = await client.patch("/followups/MC-DRAG/stage", json={"stage": "replied"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "lead_id": "MC-DRAG", "stage": "replied"}
+
+    r2 = await client.get("/followups")
+    body = r2.json()
+    assert [c["lead_id"] for c in body["replied"]] == ["MC-DRAG"]
+    assert body["new"] == []
+
+
+async def test_set_stage_422_on_bad_value(client: AsyncClient):
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _lead(sm, id="MC-BAD")
+    r = await client.patch("/followups/MC-BAD/stage", json={"stage": "nope"})
+    assert r.status_code == 422
+
+
+async def test_set_stage_404_on_unknown_lead(client: AsyncClient):
+    r = await client.patch("/followups/MC-ghost/stage", json={"stage": "replied"})
+    assert r.status_code == 404
+
+
+async def test_newer_event_wins_over_override(client: AsyncClient):
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _lead(sm, id="MC-NEWER", fit_score=80)
+
+    # Override to replied in the past, then a booked call arrives now.
+    # The override's timestamp will be "now" (service stamps UTC); we need
+    # the booked event to be strictly newer, so push override_at into the
+    # past by hand after the PATCH.
+    r = await client.patch("/followups/MC-NEWER/stage", json={"stage": "replied"})
+    assert r.status_code == 200
+
+    # Back-date the override so the booked event we add next clearly wins.
+    from datetime import timedelta
+    from sqlalchemy import update
+    from app.followups.models import FollowupNote
+    async with sm() as s:
+        await s.execute(
+            update(FollowupNote)
+            .where(FollowupNote.lead_id == "MC-NEWER")
+            .values(stage_override_at=datetime.now(UTC) - timedelta(hours=1))
+        )
+        await s.commit()
+
+    await _send(sm, lead_id="MC-NEWER", replied=True)
+    await _call(sm, lead_id="MC-NEWER", outcome="booked")
+
+    r2 = await client.get("/followups")
+    body = r2.json()
+    assert [c["lead_id"] for c in body["booked"]] == ["MC-NEWER"]
+    assert body["replied"] == []
+
+
+async def test_note_and_stage_upserts_do_not_clobber_each_other(client: AsyncClient):
+    """Standing rule: note upsert and stage upsert share a row; each must
+    only write its own columns.
+    """
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _lead(sm, id="MC-SHARED")
+
+    # Note first, then stage, then note again — each write must preserve
+    # whatever the other wrote.
+    r1 = await client.post(
+        "/followups/MC-SHARED/note",
+        json={"note": "first", "next_touch": "2026-12-01"},
+    )
+    assert r1.status_code == 200
+
+    r2 = await client.patch(
+        "/followups/MC-SHARED/stage", json={"stage": "contacted"}
+    )
+    assert r2.status_code == 200
+
+    # Board shows contacted (override) + original note.
+    board_body = (await client.get("/followups")).json()
+    contacted = board_body["contacted"]
+    assert [c["lead_id"] for c in contacted] == ["MC-SHARED"]
+    assert contacted[0]["note"] == "first"
+    assert contacted[0]["next_touch"] == "2026-12-01"
+
+    # Overwrite note — override must survive.
+    r3 = await client.post(
+        "/followups/MC-SHARED/note",
+        json={"note": "second", "next_touch": None},
+    )
+    assert r3.status_code == 200
+    board_body = (await client.get("/followups")).json()
+    contacted = board_body["contacted"]
+    assert [c["lead_id"] for c in contacted] == ["MC-SHARED"]
+    assert contacted[0]["note"] == "second"
+    assert contacted[0]["next_touch"] is None
+
+    # Overwrite stage — note must survive.
+    r4 = await client.patch(
+        "/followups/MC-SHARED/stage", json={"stage": "booked"}
+    )
+    assert r4.status_code == 200
+    board_body = (await client.get("/followups")).json()
+    booked = board_body["booked"]
+    assert [c["lead_id"] for c in booked] == ["MC-SHARED"]
+    assert booked[0]["note"] == "second"
+
+
+async def test_stage_upsert_creates_row_when_absent(client: AsyncClient):
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _lead(sm, id="MC-FRESH")
+
+    r = await client.patch("/followups/MC-FRESH/stage", json={"stage": "booked"})
+    assert r.status_code == 200
+    body = (await client.get("/followups")).json()
+    assert [c["lead_id"] for c in body["booked"]] == ["MC-FRESH"]
+    # Note stays empty (server default) — no accidental "None" stringification.
+    assert body["booked"][0]["note"] in (None, "")

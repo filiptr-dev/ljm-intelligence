@@ -12,8 +12,8 @@ in any channel.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Any
+from datetime import UTC, date, datetime
+from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -21,9 +21,24 @@ from app.followups import repository as repo
 from app.followups.models import FollowupNote
 from app.prospecting.models import Lead
 
+Stage = Literal["new", "contacted", "replied", "booked"]
+
 
 class LeadNotFoundError(Exception):
     pass
+
+
+def _as_aware(ts: datetime | None) -> datetime | None:
+    """SQLite returns naive datetimes; stamp UTC so comparisons never crash.
+
+    Postgres already hands back ``timestamptz`` (aware). This keeps the
+    same comparison legal in both dialects.
+    """
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=UTC)
+    return ts
 
 
 @dataclass
@@ -167,12 +182,77 @@ async def board(sessionmaker: async_sessionmaker, *, limit: int = 50) -> Board:
             )
         )
 
+    buckets: dict[str, list[dict[str, Any]]] = {
+        "new": new_cards,
+        "contacted": contacted_cards,
+        "replied": replied_cards,
+        "booked": booked_cards,
+    }
+
+    # Manual-stage override pass.
+    #
+    # Rule: an override wins until a real event is newer than it. The
+    # derived bucket already reflects real events, so we compare each
+    # card's ``last_activity_at`` to ``stage_override_at``. A card from
+    # the derived-new bucket has ``last_activity_at = lead.last_seen_at``,
+    # which crawls bump; it would otherwise always look "newer" than any
+    # recent override, so we treat its timestamp as not-applicable and
+    # the override wins unconditionally.
+    override_at_by_lead: dict[str, datetime] = {}
+    override_stage_by_lead: dict[str, str] = {}
+    for lead_id, note in notes.items():
+        if note.stage_override and note.stage_override_at is not None:
+            override_at_by_lead[lead_id] = _as_aware(note.stage_override_at)  # type: ignore[assignment]
+            override_stage_by_lead[lead_id] = note.stage_override
+
+    if override_stage_by_lead:
+        moves: list[tuple[str, str, dict[str, Any]]] = []  # (from, to, card)
+        for from_col, cards in buckets.items():
+            for card in cards:
+                lead_id = card["lead_id"]
+                target = override_stage_by_lead.get(lead_id)
+                if target is None or target == from_col:
+                    continue
+                override_at = override_at_by_lead[lead_id]
+                last_act_iso = card.get("last_activity_at")
+                # Derived-new cards' last_activity_at is just lead.last_seen_at
+                # (crawls refresh it); treat as not-applicable.
+                if from_col == "new" or last_act_iso is None:
+                    moves.append((from_col, target, card))
+                    continue
+                try:
+                    last_act = datetime.fromisoformat(last_act_iso)
+                except ValueError:
+                    moves.append((from_col, target, card))
+                    continue
+                last_act = _as_aware(last_act)
+                if last_act is None or last_act <= override_at:
+                    moves.append((from_col, target, card))
+
+        for from_col, to_col, card in moves:
+            buckets[from_col] = [c for c in buckets[from_col] if c["lead_id"] != card["lead_id"]]
+            # Avoid duplicates if the target already (somehow) carries it.
+            if not any(c["lead_id"] == card["lead_id"] for c in buckets[to_col]):
+                buckets[to_col].append(card)
+
     return Board(
-        new=new_cards,
-        contacted=contacted_cards,
-        replied=replied_cards,
-        booked=booked_cards,
+        new=buckets["new"],
+        contacted=buckets["contacted"],
+        replied=buckets["replied"],
+        booked=buckets["booked"],
     )
+
+
+async def set_stage(
+    sessionmaker: async_sessionmaker,
+    *,
+    lead_id: str,
+    stage: Stage,
+) -> FollowupNote:
+    async with sessionmaker() as s:
+        if not await repo.lead_exists(s, lead_id):
+            raise LeadNotFoundError(lead_id)
+        return await repo.upsert_stage_override(s, lead_id=lead_id, stage=stage)
 
 
 async def save_note(

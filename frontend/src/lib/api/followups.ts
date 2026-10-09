@@ -1,8 +1,10 @@
 /**
- * Follow-ups domain — board read + per-lead note upsert.
+ * Follow-ups domain — board read, per-lead note upsert, manual stage move.
  *
- * Stage is derived server-side; no column-move endpoint exists on purpose
- * (see plan: "Pipeline stage is derived, not stored.").
+ * Stage is still derived server-side, but a manual override now wins over
+ * the derived bucket until a real event (reply, booked call) with a newer
+ * timestamp arrives. The override is persisted via PATCH; drag-and-drop
+ * on /pipeline calls `setStage` and optimistically moves the card.
  */
 
 import { api, ApiRequestError } from "./client"
@@ -13,6 +15,9 @@ export type BoardCard = components["schemas"]["BoardCardOut"]
 export type NextActionPill = components["schemas"]["NextActionPill"]
 export type SaveNoteIn = components["schemas"]["SaveNoteIn"]
 export type SaveNoteOut = components["schemas"]["SaveNoteOut"]
+export type SetStageIn = components["schemas"]["SetStageIn"]
+export type SetStageOut = components["schemas"]["SetStageOut"]
+export type Stage = SetStageIn["stage"]
 
 function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path: string): T {
   if (res.data !== undefined) return res.data
@@ -33,4 +38,15 @@ export async function saveNote(
     body,
   })
   return unwrap(res, `/followups/${leadId}/note`)
+}
+
+export async function setStage(
+  leadId: string,
+  stage: Stage,
+): Promise<SetStageOut> {
+  const res = await api.PATCH("/followups/{lead_id}/stage", {
+    params: { path: { lead_id: leadId } },
+    body: { stage },
+  })
+  return unwrap(res, `/followups/${leadId}/stage`)
 }

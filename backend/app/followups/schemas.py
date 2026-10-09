@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+Stage = Literal["new", "contacted", "replied", "booked"]
 
 
 class NextActionPill(BaseModel):
@@ -44,3 +47,15 @@ class SaveNoteOut(BaseModel):
     ok: bool = True
     lead_id: str
     updated_at: str
+
+
+class SetStageIn(BaseModel):
+    # Literal gives us a free 422 on anything outside the four values —
+    # no hand-rolled validation needed, the OpenAPI schema reflects it too.
+    stage: Stage
+
+
+class SetStageOut(BaseModel):
+    ok: bool = True
+    lead_id: str
+    stage: Stage

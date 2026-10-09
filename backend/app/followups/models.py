@@ -23,6 +23,13 @@ class FollowupNote(TenantMixin, Base):
     )
     note: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     next_touch: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    # Manual pipeline-stage override — wins over the derived bucket until a
+    # real event lands with a timestamp newer than ``stage_override_at``.
+    # Nullable: null = no override.
+    stage_override: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    stage_override_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

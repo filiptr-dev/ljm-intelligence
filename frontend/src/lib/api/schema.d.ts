@@ -2337,6 +2337,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/followups/{lead_id}/stage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Stage */
+        patch: operations["patch_stage_followups__lead_id__stage_patch"];
+        trace?: never;
+    };
     "/fleet/trucks": {
         parameters: {
             query?: never;
@@ -5757,6 +5774,29 @@ export interface components {
             present: boolean;
             /** Saved At */
             saved_at?: string | null;
+        };
+        /** SetStageIn */
+        SetStageIn: {
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "new" | "contacted" | "replied" | "booked";
+        };
+        /** SetStageOut */
+        SetStageOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Lead Id */
+            lead_id: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "new" | "contacted" | "replied" | "booked";
         };
         /** SettingsOut */
         SettingsOut: {
@@ -11173,6 +11213,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveNoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_stage_followups__lead_id__stage_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                lead_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetStageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetStageOut"];
                 };
             };
             /** @description Validation Error */

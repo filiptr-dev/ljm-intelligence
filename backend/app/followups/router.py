@@ -9,8 +9,10 @@ from app.followups.schemas import (
     NextActionPill,
     SaveNoteIn,
     SaveNoteOut,
+    SetStageIn,
+    SetStageOut,
 )
-from app.followups.service import LeadNotFoundError, board, save_note
+from app.followups.service import LeadNotFoundError, board, save_note, set_stage
 
 router = APIRouter(prefix="/followups", tags=["followups"])
 
@@ -66,3 +68,20 @@ async def post_note(
         lead_id=row.lead_id,
         updated_at=row.updated_at.isoformat(),
     )
+
+
+@router.patch("/{lead_id}/stage", response_model=SetStageOut)
+async def patch_stage(
+    request: Request,
+    body: SetStageIn,
+    lead_id: str = Path(..., min_length=1, max_length=64),
+) -> SetStageOut:
+    try:
+        row = await set_stage(
+            request.app.state.sessionmaker,
+            lead_id=lead_id,
+            stage=body.stage,
+        )
+    except LeadNotFoundError as exc:
+        raise HTTPException(404, "unknown lead") from exc
+    return SetStageOut(ok=True, lead_id=row.lead_id, stage=body.stage)

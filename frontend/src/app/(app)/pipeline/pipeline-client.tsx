@@ -14,15 +14,24 @@
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, Mail, Phone } from "lucide-react"
+import { AlertCircle, GripVertical, Mail, Phone } from "lucide-react"
 
 import { PageHeader, Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { getBoard, saveNote, type Board, type BoardCard } from "@/lib/api/followups"
+import {
+  getBoard,
+  saveNote,
+  setStage,
+  type Board,
+  type BoardCard,
+  type Stage,
+} from "@/lib/api/followups"
 
 type ColumnKey = keyof Board
+
+const DRAG_MIME = "application/x-ljm-leadcard"
 
 const COLUMNS: { key: ColumnKey; label: string; hint: string }[] = [
   { key: "new", label: "New", hint: "Leads we have not touched yet." },
@@ -49,6 +58,42 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
     }
   }, [])
 
+  // Optimistic column move. Snapshots prior state so we can revert on
+  // PATCH failure; `setStage` is the only backend hop.
+  const moveCard = useCallback(
+    async (leadId: string, from: ColumnKey, to: ColumnKey) => {
+      if (from === to) return
+      setBoard((prev) => {
+        if (!prev) return prev
+        const card = prev[from].find((c) => c.lead_id === leadId)
+        if (!card) return prev
+        return {
+          ...prev,
+          [from]: prev[from].filter((c) => c.lead_id !== leadId),
+          [to]: [card, ...prev[to].filter((c) => c.lead_id !== leadId)],
+        }
+      })
+      try {
+        await setStage(leadId, to as Stage)
+        setError(null)
+      } catch (e) {
+        // Revert.
+        setBoard((prev) => {
+          if (!prev) return prev
+          const card = prev[to].find((c) => c.lead_id === leadId)
+          if (!card) return prev
+          return {
+            ...prev,
+            [to]: prev[to].filter((c) => c.lead_id !== leadId),
+            [from]: [card, ...prev[from].filter((c) => c.lead_id !== leadId)],
+          }
+        })
+        setError(e instanceof Error ? e.message : "Could not move card.")
+      }
+    },
+    [],
+  )
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -72,10 +117,12 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
         {COLUMNS.map((col) => (
           <Column
             key={col.key}
+            columnKey={col.key}
             label={col.label}
             hint={col.hint}
             cards={board ? board[col.key] : []}
             loading={loading && !board}
+            onDropCard={moveCard}
           />
         ))}
       </div>
@@ -84,34 +131,85 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
 }
 
 function Column({
+  columnKey,
   label,
   hint,
   cards,
   loading,
+  onDropCard,
 }: {
+  columnKey: ColumnKey
   label: string
   hint: string
   cards: BoardCard[]
   loading: boolean
+  onDropCard: (leadId: string, from: ColumnKey, to: ColumnKey) => void
 }) {
+  const [over, setOver] = useState(false)
+
   return (
-    <Panel title={`${label} (${cards.length})`} description={hint} bodyClassName="flex flex-col gap-3">
-      {loading ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      ) : cards.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Nothing here yet.</p>
-      ) : (
-        cards.map((card) => <Card key={card.lead_id} card={card} />)
-      )}
-    </Panel>
+    <div
+      onDragOver={(ev) => {
+        // preventDefault is what tells the browser "yes, this is a valid
+        // drop target"; without it the drop event never fires.
+        ev.preventDefault()
+        ev.dataTransfer.dropEffect = "move"
+        if (!over) setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(ev) => {
+        ev.preventDefault()
+        setOver(false)
+        const payload = ev.dataTransfer.getData(DRAG_MIME)
+        if (!payload) return
+        const [fromCol, leadId] = payload.split("|")
+        if (!leadId || !fromCol) return
+        onDropCard(leadId, fromCol as ColumnKey, columnKey)
+      }}
+      className={over ? "rounded-sm ring-2 ring-safety/60" : ""}
+    >
+      <Panel title={`${label} (${cards.length})`} description={hint} bodyClassName="flex flex-col gap-3">
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : cards.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nothing here yet.</p>
+        ) : (
+          cards.map((card) => <Card key={card.lead_id} card={card} fromColumn={columnKey} />)
+        )}
+      </Panel>
+    </div>
   )
 }
 
-function Card({ card }: { card: BoardCard }) {
+function Card({ card, fromColumn }: { card: BoardCard; fromColumn: ColumnKey }) {
+  const [dragging, setDragging] = useState(false)
+
   return (
-    <article className="flex flex-col gap-2 rounded-sm border border-border bg-background p-3">
+    <article
+      className={`flex flex-col gap-2 rounded-sm border border-border bg-background p-3 ${
+        dragging ? "opacity-50" : ""
+      }`}
+    >
       <header className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <div
+          // The drag handle is the ONLY draggable surface — this keeps the
+          // note textarea and the date input fully text-selectable. HTML5
+          // DnD on an ancestor otherwise swallows text-selection drags
+          // inside its descendants on some browsers.
+          draggable
+          onDragStart={(ev) => {
+            ev.dataTransfer.setData(DRAG_MIME, `${fromColumn}|${card.lead_id}`)
+            ev.dataTransfer.effectAllowed = "move"
+            setDragging(true)
+          }}
+          onDragEnd={() => setDragging(false)}
+          className="shrink-0 cursor-grab text-muted-foreground hover:text-foreground active:cursor-grabbing"
+          aria-label="Drag card between columns"
+          title="Drag between columns"
+        >
+          <GripVertical className="size-4" aria-hidden />
+        </div>
+        <div className="min-w-0 flex-1">
           <h3 className="truncate font-semibold text-sm leading-tight">{card.name}</h3>
           <p className="truncate text-xs text-muted-foreground">
             {[card.city, card.state].filter(Boolean).join(", ") || "—"}
