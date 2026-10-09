@@ -46,6 +46,14 @@ async def mail_backfill(
     engine = create_engine(settings)
     try:
         sm = create_sessionmaker(engine)
+        # The procrastinate worker process never runs FastAPI's lifespan, so
+        # the vault SA cache that ``get_mailbox_source`` reads was never
+        # primed here. Without this, every ``MAILBOX_SOURCE=gmail`` worker
+        # job falls through to ``SimulatedMailbox(messages={})`` → 0 reads,
+        # no Gmail call, 0.1s "done" (see 2026-10-09 viktor@ 0/1596 bug).
+        # Idempotent — a cheap no-op once primed.
+        from app.integrations.adapters.email.credentials import ensure_vault_primed
+        await ensure_vault_primed(sm)
         stats = await svc_backfill(
             sm, settings, mailbox=mailbox, months=months, days=days, hours=hours,
         )
@@ -83,6 +91,9 @@ async def mail_incremental(tenant_id: str, mailbox: str | None = None) -> None:
     engine = create_engine(settings)
     try:
         sm = create_sessionmaker(engine)
+        # Same reason as mail_backfill — worker process never primes vault.
+        from app.integrations.adapters.email.credentials import ensure_vault_primed
+        await ensure_vault_primed(sm)
         result = await svc_incremental(sm, settings, mailbox=mailbox)
         log.info("mail_incremental: done", extra={"items": len(result.items)})
     finally:

@@ -57,6 +57,25 @@ def vault_sa() -> dict[str, Any] | None:
     return _vault_sa_cache
 
 
+async def ensure_vault_primed(sessionmaker: Any) -> None:
+    """Prime the vault cache if the running process has never done so.
+
+    The FastAPI app primes at lifespan startup, but the procrastinate worker
+    (``python -m procrastinate … worker``) never goes through that lifespan
+    — so without this lazy prime the worker's ``_vault_sa_cache`` stays
+    ``None``, ``get_mailbox_source`` falls through to
+    ``SimulatedMailbox(messages={})``, and every queued ``mail_backfill`` /
+    ``mail_incremental`` returns 0 messages while silently never calling
+    Gmail. Call this from every job that reads mail.
+
+    Idempotent — once the cache has been populated by any path (lifespan,
+    connect route, previous prime), this is a cheap no-op.
+    """
+    if _vault_sa_cache is not None or _vault_inbox_source_cache is not None:
+        return
+    await prime_from_vault(sessionmaker)
+
+
 def vault_impersonate() -> str | None:
     return _vault_impersonate_cache
 
