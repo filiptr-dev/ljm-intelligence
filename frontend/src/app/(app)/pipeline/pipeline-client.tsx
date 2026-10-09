@@ -202,7 +202,14 @@ export default function PipelineClient({ initial }: { initial: Board | null }) {
       ) : null}
 
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveCard(null)}>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {/* `items-stretch` + h-full on the droppable wrapper is what makes
+            the drop target span the FULL column height, not just the
+            rendered cards. In production the New column packs ~50 cards
+            while Replied/Booked are often empty: a user dragging the 25th
+            New card sideways would otherwise land in dead space below the
+            short panel and the drop would silently no-op. Stretching the
+            droppable to the tallest column fixes that. */}
+        <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4">
           {COLUMNS.map((col) => (
             <Column
               key={col.key}
@@ -257,8 +264,18 @@ function Column({
   const { setNodeRef, isOver } = useDroppable({ id: columnKey })
 
   return (
-    <div ref={setNodeRef} className={isOver ? "rounded-sm ring-2 ring-safety/60" : ""}>
-      <Panel title={`${label} (${cards.length})`} description={hint} bodyClassName="flex flex-col gap-3">
+    <div
+      ref={setNodeRef}
+      className={`flex h-full min-h-[32rem] flex-col rounded-sm ${
+        isOver ? "ring-2 ring-safety/60" : ""
+      }`}
+    >
+      <Panel
+        title={`${label} (${cards.length})`}
+        description={hint}
+        className="flex-1"
+        bodyClassName="flex flex-1 flex-col gap-3"
+      >
         {loading ? (
           <p className="text-xs text-muted-foreground">Loading…</p>
         ) : cards.length === 0 ? (
