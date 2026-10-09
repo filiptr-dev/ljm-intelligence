@@ -186,3 +186,23 @@ async def test_legacy_row_without_risks_is_regenerated(sm):
     async with sm() as s:
         r = await svc.get_lead_summary(s, "A", provider=p)
     assert not r.cached and len(p.calls) == 2 and r.risks == [] and r.next_step is None
+
+
+async def test_truncated_json_never_leaks_raw_and_is_salvaged(sm):
+    await _lead(sm, "A", "a@a.com")
+    await _mail(sm, "1", "a@a.com", "x")
+    async with sm() as s:
+        r = await svc.get_lead_summary(s, "A", provider=Stub('{"summary": "Solid payer, quick repl'))
+    assert r.status == "ok" and r.summary == "Solid payer, quick repl" and "{" not in r.summary
+    async with sm() as s:
+        r = await svc.get_lead_summary(s, "A", provider=Stub('{"risks": ["late pay'), refresh=True)
+    assert r.status == "unavailable" and r.ai_error == "unparseable_response" and r.summary is None
+
+
+async def test_null_and_blank_risks_are_filtered(sm):
+    await _lead(sm, "A", "a@a.com")
+    await _mail(sm, "1", "a@a.com", "x")
+    reply = '{"summary": "Fine.", "risks": [null, "", 5, "Slow payer"]}'
+    async with sm() as s:
+        r = await svc.get_lead_summary(s, "A", provider=Stub(reply))
+    assert r.risks == ["Slow payer"]

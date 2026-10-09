@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -53,24 +54,54 @@ class LeadSummaryResult:
 MAX_RISKS = 4
 
 
-def _parse_output(text: str) -> tuple[str, list[str], dict[str, str] | None]:
+_SUMMARY_RE = re.compile(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)')
+
+
+def _salvage_summary(raw: str) -> str | None:
+    """Pull the "summary" string out of JSON that failed to parse (e.g. truncated)."""
+    m = _SUMMARY_RE.search(raw)
+    if m is None:
+        return None
+    body = m.group(1)
+    for candidate in (body, body.rstrip("\\")):
+        try:
+            out = json.loads(f'"{candidate}"')
+        except ValueError:
+            continue
+        return out.strip() or None
+    return None
+
+
+def _parse_output(text: str) -> tuple[str, list[str], dict[str, str] | None] | None:
     """Split the model reply into (summary, risks, next_step).
 
     The prompt asks for JSON; a model that answers in plain prose still yields a
-    usable summary (risks empty, no next step) rather than an error.
+    usable summary (risks empty, no next step) rather than an error. Output that
+    looks like JSON but cannot be parsed never reaches the user raw: we salvage
+    the "summary" string, or return None so the caller treats it as an AI failure.
     """
     raw = text.strip()
     if raw.startswith("```"):
         raw = raw.strip("`").removeprefix("json").strip()
+    looks_json = raw.startswith("{")
     try:
         obj = json.loads(raw)
     except ValueError:
-        return text.strip(), [], None
+        if not looks_json:
+            return text.strip(), [], None
+        salvaged = _salvage_summary(raw)
+        return (salvaged, [], None) if salvaged else None
     if not isinstance(obj, dict) or not str(obj.get("summary") or "").strip():
+        if looks_json:
+            return None
         return text.strip(), [], None
     summary = str(obj["summary"]).strip()
     risks_in = obj.get("risks")
-    risks = [str(r).strip() for r in risks_in if str(r).strip()][:MAX_RISKS] if isinstance(risks_in, list) else []
+    risks = (
+        [r.strip() for r in risks_in if isinstance(r, str) and r.strip()][:MAX_RISKS]
+        if isinstance(risks_in, list)
+        else []
+    )
     ns = obj.get("next_step")
     next_step: dict[str, str] | None = None
     if isinstance(ns, dict) and str(ns.get("label") or "").strip():
@@ -217,7 +248,10 @@ async def get_lead_summary(
     if status != "ok" or not text:
         return unavailable(f"empty_response:{status}")
 
-    summary, risks, next_step = _parse_output(text)
+    parsed = _parse_output(text)
+    if parsed is None:
+        return unavailable("unparseable_response")
+    summary, risks, next_step = parsed
     model = (getattr(call, "model", None) or getattr(provider, "model", "") or "")[:64]
     if row is None:
         session.add(

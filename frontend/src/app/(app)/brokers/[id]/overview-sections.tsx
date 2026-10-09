@@ -332,8 +332,8 @@ export function AiSummaryCard({
           <p className="text-[0.95rem] leading-relaxed">{data.summary}</p>
           {risks.length > 0 ? (
             <ul className="mt-3 space-y-1.5">
-              {risks.map((r) => (
-                <li key={r} className="flex items-start gap-2 text-sm">
+              {risks.map((r, i) => (
+                <li key={`${i}-${r}`} className="flex items-start gap-2 text-sm">
                   <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" /> {r}
                 </li>
               ))}
