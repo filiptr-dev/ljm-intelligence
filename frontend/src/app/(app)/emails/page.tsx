@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Search, Sparkles } from "lucide-react"
+import { AlertCircle, Search, Sparkles } from "lucide-react"
 import { INTENT_META, IntentBadge, SentimentDot } from "@/components/app/intent"
 import { BarList, PageHeader, Panel, StackBar } from "@/components/app/ui"
 import { buttonVariants } from "@/components/ui/button"
@@ -7,8 +7,16 @@ import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { Intent } from "@/lib/ai/types"
 import * as inbox from "@/lib/api/inbox"
+import type { AskOut } from "@/lib/api/inbox"
 import { dateTime, money, pct } from "@/lib/format"
 import { cn } from "@/lib/utils"
+
+/** Three canned prompts that run the exact same real AI path as a free-text ask. */
+const ASK_EXAMPLES = [
+  "Why do we lose loads on price?",
+  "Overdue invoices",
+  "Late delivery complaints",
+] as const
 
 /**
  * Emails — real inbox view, backed by `/inbox/emails`.
@@ -45,19 +53,27 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const intent = typeof sp.intent === "string" ? sp.intent : undefined
   const page = Math.max(1, Number(sp.page) || 1)
 
-  // When the operator submits a question, hand it to the AI first so we
-  // can map natural language ("brokers who complained about late delivery")
-  // onto the structured filters the list query already understands.
-  // Identity fallback: if the AI is unavailable the ask() call returns
-  // all-nulls and the original substring behaviour is preserved.
-  let aiSummary = ""
+  // When the operator submits a question, hand it to the AI first. The
+  // server runs Gemini over a bounded slice of real mail and returns
+  // a natural-language answer, cited threads, AND the structured filter
+  // hint we still use to narrow the list below. On AI failure or empty
+  // inbox the response carries ok=false + an error reason so the UI
+  // can always explain *why* there is no answer.
+  let ask: AskOut | null = null
   let effectiveIntent = intent
   let effectiveQ: string | undefined = q || undefined
   if (q && !intent) {
-    const ask = await inbox.ask(q)
-    aiSummary = ask.summary
-    if (ask.intent) effectiveIntent = ask.intent
-    if (ask.keywords.length > 0) effectiveQ = ask.keywords[0]
+    try {
+      ask = await inbox.ask(q)
+    } catch {
+      ask = {
+        intent: null, keywords: [], sentiment: null, summary: "",
+        answer: "The server couldn't reach the AI service. Please try again.",
+        citations: [], ok: false, error: "ai_error",
+      }
+    }
+    if (ask?.intent) effectiveIntent = ask.intent
+    if (ask && ask.keywords.length > 0) effectiveQ = ask.keywords[0]
   }
 
   const data = await inbox.listEmails({ intent: effectiveIntent, q: effectiveQ, page, page_size: PAGE })
@@ -98,7 +114,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         description={`${total.toLocaleString("en-US")} emails read by the AI. Each one gets an intent, a sentiment score and extracted rates, lanes and reasons.`}
       />
 
-      <form action="/emails" className="mb-5 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
+      <form action="/emails" className="mb-3 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
         <Sparkles className="hidden size-5 shrink-0 text-chart-2 sm:block" />
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground sm:hidden" />
@@ -110,14 +126,69 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
             className="h-10 border-0 bg-transparent pl-8 text-base shadow-none focus-visible:ring-0 sm:pl-0"
           />
         </div>
+        <div className="flex flex-wrap gap-1.5">
+          {ASK_EXAMPLES.map((ex) => (
+            <Link
+              key={ex}
+              href={`/emails?q=${encodeURIComponent(ex)}`}
+              className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
+            >
+              {ex}
+            </Link>
+          ))}
+        </div>
         <button className={cn(buttonVariants(), "font-semibold")}>Ask</button>
       </form>
 
-      {aiSummary ? (
-        <p className="mb-5 -mt-3 flex items-start gap-2 px-1 text-sm text-muted-foreground">
-          <Sparkles className="mt-0.5 size-3.5 shrink-0 text-chart-2" />
-          <span><span className="font-medium text-foreground">AI understood:</span> {aiSummary}</span>
-        </p>
+      {ask ? (
+        <div
+          className={cn(
+            "mb-5 rounded-sm border p-4",
+            ask.ok
+              ? "border-chart-2/40 bg-chart-2/5"
+              : "border-destructive/40 bg-destructive/5",
+          )}
+        >
+          <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+            {ask.ok ? (
+              <>
+                <Sparkles className="size-3.5 text-chart-2" />
+                <span className="text-chart-2">AI answer</span>
+              </>
+            ) : (
+              <>
+                <AlertCircle className="size-3.5 text-destructive" />
+                <span className="text-destructive">
+                  No AI answer{ask.error ? ` · ${ask.error.replace(/_/g, " ")}` : ""}
+                </span>
+              </>
+            )}
+          </div>
+          <p className="text-sm leading-relaxed text-foreground">{ask.answer}</p>
+          {ask.ok && ask.summary ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Interpreted as:</span> {ask.summary}
+            </p>
+          ) : null}
+          {ask.ok && ask.citations.length > 0 ? (
+            <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
+              {ask.citations.map((c) => (
+                <li key={c.thread_id} className="text-xs">
+                  <Link
+                    href={`/emails/${encodeURIComponent(c.thread_id)}`}
+                    className="font-medium hover:underline"
+                  >
+                    {c.subject || "(no subject)"}
+                  </Link>
+                  <span className="ml-1 text-muted-foreground">
+                    — {c.from_addr}
+                    {c.sent_at ? ` · ${c.sent_at.slice(0, 10)}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="mb-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

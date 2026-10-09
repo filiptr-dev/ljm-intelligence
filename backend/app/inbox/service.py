@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app.shared.db import AsyncSession
-
 from app.inbox.models import MailMessage, NoReplyTracker
 from app.inbox.repository import (
     count_all_messages,
@@ -34,6 +32,7 @@ from app.inbox.repository import (
     find_contact_id_by_email,
     get_settings_row as _repo_get_settings_row,
 )
+from app.shared.db import AsyncSession
 
 # ---- shapes ---------------------------------------------------------------
 
@@ -621,9 +620,7 @@ async def ai_draft_reply(
 
     ai_body: str | None = None
     ai_error: str | None = None
-    if provider is None:
-        ai_error = "provider_null"
-    elif getattr(provider, "kind", None) == "null":
+    if provider is None or getattr(provider, "kind", None) == "null":
         ai_error = "provider_null"
     else:
         prompt = _ai_draft_prompt(broker, intent, lane_from, lane_to, rate, last_in.body_text or "")
@@ -830,18 +827,43 @@ async def ai_rewrite(
 
 
 @dataclass
+class AskCitation:
+    """One cited email the AI answer leans on."""
+
+    thread_id: str
+    subject: str
+    snippet: str
+    sent_at: str  # ISO-8601 for the wire
+    from_addr: str
+    intent: str | None
+    sentiment: float | None
+
+
+@dataclass
 class AskOut:
     """Shape returned by :func:`ask_question`.
 
-    Filters distilled from a natural-language question in the /emails
-    "Ask" bar. All fields default to the identity-fallback values so the
-    caller can treat a provider error the same way as "no useful hint".
+    The AI answers the operator's natural-language inbox question using a
+    bounded slice of their real mail (subjects, snippets, intents,
+    sentiment, loss reasons). ``intent`` / ``keywords`` / ``sentiment`` /
+    ``summary`` keep the pre-existing filter-hint contract so the /emails
+    list still narrows down to the matching rows. ``ok`` is False whenever
+    we did not produce a real AI-grounded answer — then ``error`` names
+    the reason and ``answer`` carries a human-readable message.
     """
 
     intent: str | None
     keywords: list[str]
     sentiment: str | None  # 'positive' | 'negative' | None
     summary: str
+    answer: str = ""
+    citations: list[AskCitation] = None  # type: ignore[assignment]
+    ok: bool = False
+    error: str | None = None  # 'no_question' | 'no_data' | 'ai_unavailable' | 'ai_timeout' | 'ai_error' | 'ai_parse'
+
+    def __post_init__(self) -> None:
+        if self.citations is None:
+            self.citations = []
 
 
 # Narrow allow-lists so the AI can't push garbage into the DB filters.
@@ -852,29 +874,165 @@ _ASK_INTENTS = {
 }
 _ASK_SENTIMENTS = {"positive", "negative"}
 
+# Upper bounds for the context slice we feed Gemini. These keep the prompt
+# well under any model limit even on a chatty mailbox.
+_ASK_CTX_ROWS = 40
+_ASK_CTX_DAYS = 120
+_ASK_SNIPPET_CHARS = 220
+
+
+async def _fetch_ask_context(
+    session: AsyncSession, *, keywords: list[str]
+) -> list[dict[str, Any]]:
+    """Pull a bounded slice of recent mail+insights for the AI prompt.
+
+    Prefers inbound messages (broker -> us) because the question is almost
+    always about what *they* said. If any keywords are supplied we try to
+    bias toward subjects/bodies containing them; otherwise we fall back
+    to the most recent window.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import and_, func, or_, select
+
+    from app.inbox.models import MailMessage, MessageInsight
+
+    m = MailMessage.__table__.c
+    j = MessageInsight.__table__.c
+    cutoff = datetime.now(UTC) - timedelta(days=_ASK_CTX_DAYS)
+
+    stmt = (
+        select(
+            m.thread_id, m.subject, m.body_text, m.sent_at, m.from_addr,
+            j.intent, j.sentiment, j.evidence, j.lane_from, j.lane_to, j.rate_usd,
+        )
+        .select_from(
+            MailMessage.__table__.outerjoin(
+                MessageInsight.__table__,
+                and_(
+                    j.mailbox == m.mailbox,
+                    j.message_id == m.message_id,
+                    j.tenant_id == m.tenant_id,
+                ),
+            )
+        )
+        .where(m.sent_at >= cutoff)
+        .where(m.from_addr != m.mailbox)  # inbound only
+        .order_by(m.sent_at.desc())
+        .limit(_ASK_CTX_ROWS * 3)  # over-fetch, then filter in Python
+    )
+
+    if keywords:
+        clauses = []
+        for kw in keywords[:3]:
+            like = f"%{kw.lower()}%"
+            clauses.append(func.lower(m.subject).like(like))
+            clauses.append(func.lower(m.body_text).like(like))
+        stmt = stmt.where(or_(*clauses))
+
+    rows = list((await session.execute(stmt)).all())
+    # If the keyword filter zeroed the result, drop it and retry — a blank
+    # context is worse than a loosely-related one.
+    if not rows and keywords:
+        rows = list((await session.execute(
+            select(
+                m.thread_id, m.subject, m.body_text, m.sent_at, m.from_addr,
+                j.intent, j.sentiment, j.evidence, j.lane_from, j.lane_to, j.rate_usd,
+            )
+            .select_from(
+                MailMessage.__table__.outerjoin(
+                    MessageInsight.__table__,
+                    and_(
+                        j.mailbox == m.mailbox,
+                        j.message_id == m.message_id,
+                        j.tenant_id == m.tenant_id,
+                    ),
+                )
+            )
+            .where(m.sent_at >= cutoff)
+            .where(m.from_addr != m.mailbox)
+            .order_by(m.sent_at.desc())
+            .limit(_ASK_CTX_ROWS)
+        )).all())
+
+    out: list[dict[str, Any]] = []
+    for r in rows[:_ASK_CTX_ROWS]:
+        body = (r.body_text or "").strip().replace("\n", " ")
+        snippet = body[:_ASK_SNIPPET_CHARS]
+        out.append({
+            "thread_id": r.thread_id,
+            "subject": (r.subject or "").strip()[:160],
+            "snippet": snippet,
+            "sent_at": r.sent_at.isoformat() if r.sent_at else "",
+            "from_addr": r.from_addr or "",
+            "intent": r.intent,
+            "sentiment": float(r.sentiment) if r.sentiment is not None else None,
+            "evidence": (r.evidence or "")[:160] if r.evidence else "",
+            "lane_from": r.lane_from,
+            "lane_to": r.lane_to,
+            "rate_usd": float(r.rate_usd) if r.rate_usd is not None else None,
+        })
+    return out
+
+
+def _naive_keywords(q: str) -> list[str]:
+    """Cheap keyword extraction used only to narrow the mail context slice.
+
+    Gemini still gets to rewrite ``keywords`` in the final JSON — this is
+    just a pre-filter so a question like "why do we lose loads on price?"
+    doesn't drown in unrelated routine mail before the AI ever sees it.
+    """
+    import re
+    stop = {
+        "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for",
+        "with", "about", "we", "us", "our", "you", "your", "do", "does", "is",
+        "are", "was", "were", "be", "been", "being", "it", "that", "this",
+        "these", "those", "which", "what", "why", "how", "when", "where",
+        "who", "whom", "any", "all", "some", "there", "here", "not", "no",
+        "lose", "lost", "losing",
+    }
+    toks = re.findall(r"[a-z]{3,}", q.lower())
+    out: list[str] = []
+    for t in toks:
+        if t in stop or t in out:
+            continue
+        out.append(t)
+        if len(out) >= 3:
+            break
+    return out
+
 
 async def ask_question(
     *,
     question: str,
+    session: AsyncSession | None = None,
     provider: Any | None = None,
 ) -> AskOut:
-    """Translate a natural-language inbox question into a filter hint.
+    """Answer a natural-language inbox question with real AI over real mail.
 
-    Reuses the ``inbox_draft_reply`` feature slot — same AI matrix row
-    as ``ai_rewrite`` / ``ai_draft_compose`` (plan-gate: one slot for
-    the inbox AI flows). Never raises. On provider resolve/timeout/parse
-    error returns the identity-fallback: all filters null, empty summary.
+    The question + a bounded slice of recent mail (subjects, snippets,
+    intents, sentiment, extracted lane/rate/evidence) go to the
+    ``inbox_draft_reply`` AI feature slot. Gemini returns JSON with a
+    plain-English answer, cited example threads, and the structured
+    filter hint (intent/keywords/sentiment/summary) the /emails list
+    still uses to narrow down. Never raises — on resolve/timeout/parse
+    error ``ok=False`` + ``error`` tells the UI exactly why.
     """
     import asyncio
     import json
     import logging as _log
 
     _l = _log.getLogger(__name__)
-    fallback = AskOut(intent=None, keywords=[], sentiment=None, summary="")
+
+    def _fail(error: str, answer: str) -> AskOut:
+        return AskOut(
+            intent=None, keywords=[], sentiment=None, summary="",
+            answer=answer, citations=[], ok=False, error=error,
+        )
 
     q = (question or "").strip()
     if not q:
-        return fallback
+        return _fail("no_question", "Type a question first.")
 
     if provider is None:
         try:
@@ -887,20 +1045,76 @@ async def ask_question(
             provider = None
 
     if provider is None or getattr(provider, "kind", None) == "null":
-        return fallback
+        return _fail(
+            "ai_unavailable",
+            "The AI provider isn't configured. Add a Gemini API key in Settings to get real answers.",
+        )
+
+    # Pull real mail to ground the answer. With no session we skip the
+    # DB read — the AI still runs, but on question-only context.
+    context_rows: list[dict[str, Any]] = []
+    if session is not None:
+        try:
+            context_rows = await _fetch_ask_context(
+                session, keywords=_naive_keywords(q)
+            )
+        except Exception as exc:  # noqa: BLE001
+            _l.info("ask_question: context fetch failed: %s", type(exc).__name__)
+            context_rows = []
+
+    if session is not None and not context_rows:
+        return _fail(
+            "no_data",
+            "There are no emails in the inbox yet. Connect Gmail in Settings and ingest "
+            "mail — then we can answer this against the real data.",
+        )
+
+    # Build the compact context block. Each row is one short line keyed by
+    # a short id (E1..EN) so Gemini can cite them without re-emitting the
+    # whole thread_id in free text.
+    ctx_lines: list[str] = []
+    id_to_row: dict[str, dict[str, Any]] = {}
+    for i, row in enumerate(context_rows, start=1):
+        cid = f"E{i}"
+        id_to_row[cid] = row
+        parts = [
+            f"intent={row['intent'] or 'unknown'}",
+            f"sent={row['sent_at'][:10]}",
+            f"from={row['from_addr']}",
+            f"sentiment={row['sentiment']:.2f}" if row['sentiment'] is not None else "sentiment=na",
+        ]
+        if row.get("lane_from") or row.get("lane_to"):
+            parts.append(f"lane={row.get('lane_from') or '?'}->{row.get('lane_to') or '?'}")
+        if row.get("rate_usd") is not None:
+            parts.append(f"rate_usd={row['rate_usd']:.0f}")
+        if row.get("evidence"):
+            parts.append(f"evidence={row['evidence']}")
+        header = " | ".join(parts)
+        ctx_lines.append(
+            f"{cid}: {header}\n   subject: {row['subject']}\n   body: {row['snippet']}"
+        )
+    context_block = "\n".join(ctx_lines) if ctx_lines else "(no mail available)"
 
     allowed_intents = sorted(_ASK_INTENTS)
     prompt = (
-        "You translate an operator's question about their freight-brokerage "
-        "inbox into a strict JSON filter. The inbox has these intents: "
-        f"{', '.join(allowed_intents)}. Sentiment is one of "
-        "'positive','negative', or null. Return ONLY valid minified JSON "
-        "with exactly these keys: intent (one of the listed intents or null), "
-        "keywords (array of 0-3 short lowercase search terms, no stopwords), "
-        "sentiment ('positive','negative', or null), summary (one short "
-        "English sentence stating how you understood the question). "
-        "Do not wrap in markdown fences.\n\n"
-        f"Question: {q[:500]}\n"
+        "You are the operator's inbox analyst for a freight brokerage. Answer "
+        "their question using ONLY the real emails provided below (do not "
+        "invent brokers, rates, or dates). Be concrete: name patterns, cite "
+        "evidence, and quote short phrases when it helps. If the data truly "
+        "doesn't speak to the question, say so plainly.\n\n"
+        "Return ONLY minified JSON with EXACTLY these keys (no markdown "
+        "fences): "
+        "answer (2-5 sentence natural-language reply, ≤700 chars), "
+        "citations (array of 0-5 of the Ex ids above, most relevant first), "
+        f"intent (one of [{', '.join(allowed_intents)}] or null — pick the "
+        "intent that best narrows a follow-up email list for this question), "
+        "keywords (0-3 short lowercase search terms, no stopwords, for "
+        "narrowing the email list), "
+        "sentiment ('positive','negative', or null), "
+        "summary (one short sentence stating how you understood the "
+        "question, ≤180 chars).\n\n"
+        f"Question: {q[:500]}\n\n"
+        f"Emails ({len(ctx_lines)} most relevant):\n{context_block}\n"
     )
 
     try:
@@ -908,18 +1122,25 @@ async def ask_question(
             provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
         )
     except TimeoutError:
-        _l.info("ask_question: provider timeout → identity fallback")
-        return fallback
+        _l.info("ask_question: provider timeout")
+        return _fail(
+            "ai_timeout",
+            f"The AI didn't respond within {AI_DRAFT_TIMEOUT_S:g}s. Try again in a moment.",
+        )
     except Exception as exc:  # noqa: BLE001
-        _l.info("ask_question: provider error %s → identity fallback", type(exc).__name__)
-        return fallback
+        _l.info("ask_question: provider error %s", type(exc).__name__)
+        return _fail(
+            "ai_error",
+            "The AI service returned an error. Check the Gemini key in Settings and try again.",
+        )
 
     if getattr(call, "status", None) != "ok":
-        return fallback
+        err = getattr(call, "error", None) or getattr(call, "status", "error")
+        return _fail("ai_error", f"The AI service is unavailable ({err}).")
+
     text = (getattr(call, "text", "") or "").strip()
     if not text:
-        return fallback
-    # Some providers wrap JSON in ```json fences — strip defensively.
+        return _fail("ai_parse", "The AI returned an empty response. Try again.")
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
@@ -927,10 +1148,13 @@ async def ask_question(
     try:
         data = json.loads(text)
     except Exception:  # noqa: BLE001
-        _l.info("ask_question: provider returned non-JSON → identity fallback")
-        return fallback
+        _l.info("ask_question: provider returned non-JSON")
+        return _fail(
+            "ai_parse",
+            "The AI response wasn't in the expected shape. Try rewording the question.",
+        )
     if not isinstance(data, dict):
-        return fallback
+        return _fail("ai_parse", "The AI response wasn't in the expected shape.")
 
     raw_intent = data.get("intent")
     intent = raw_intent if isinstance(raw_intent, str) and raw_intent in _ASK_INTENTS else None
@@ -948,7 +1172,34 @@ async def ask_question(
     raw_summary = data.get("summary")
     summary = raw_summary.strip()[:240] if isinstance(raw_summary, str) else ""
 
-    return AskOut(intent=intent, keywords=keywords, sentiment=sentiment, summary=summary)
+    raw_answer = data.get("answer")
+    answer = raw_answer.strip()[:1200] if isinstance(raw_answer, str) else ""
+    if not answer:
+        return _fail("ai_parse", "The AI didn't produce an answer. Try again.")
+
+    raw_cites = data.get("citations") or []
+    citations: list[AskCitation] = []
+    if isinstance(raw_cites, list):
+        for cid in raw_cites[:5]:
+            if not isinstance(cid, str):
+                continue
+            row = id_to_row.get(cid.strip().upper())
+            if not row:
+                continue
+            citations.append(AskCitation(
+                thread_id=row["thread_id"],
+                subject=row["subject"],
+                snippet=row["snippet"][:200],
+                sent_at=row["sent_at"],
+                from_addr=row["from_addr"],
+                intent=row["intent"],
+                sentiment=row["sentiment"],
+            ))
+
+    return AskOut(
+        intent=intent, keywords=keywords, sentiment=sentiment, summary=summary,
+        answer=answer, citations=citations, ok=True, error=None,
+    )
 
 
 async def _render_and_wrap(

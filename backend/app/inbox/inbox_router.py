@@ -398,23 +398,41 @@ class AskIn(BaseModel):
     question: constr(min_length=1, max_length=500)
 
 
+class AskCitationModel(BaseModel):
+    thread_id: str
+    subject: str
+    snippet: str
+    sent_at: str
+    from_addr: str
+    intent: str | None = None
+    sentiment: float | None = None
+
+
 class AskOutModel(BaseModel):
     intent: str | None = None
     keywords: list[str] = []
     sentiment: str | None = None
     summary: str = ""
+    answer: str = ""
+    citations: list[AskCitationModel] = []
+    ok: bool = False
+    error: str | None = None
 
 
 @router.post("/ask", response_model=AskOutModel)
-async def ask_endpoint(payload: AskIn) -> AskOutModel:
-    """Translate the operator's natural-language question in the Inbox
-    "Ask" bar into a filter hint. Reuses the ``inbox_draft_reply`` AI
-    feature slot. Never 500s — provider errors collapse to the identity
-    fallback (all fields null/empty)."""
-    out = await svc.ask_question(question=payload.question)
+async def ask_endpoint(session: Session, payload: AskIn) -> AskOutModel:
+    """Answer the operator's natural-language question against the real
+    inbox via Gemini. Reuses the ``inbox_draft_reply`` AI feature slot.
+    Never 500s — provider resolve/timeout/parse errors come back as
+    ``ok=false`` with ``error`` naming the reason and ``answer`` a
+    human-readable message, so the UI can always say *why*."""
+    out = await svc.ask_question(session=session, question=payload.question)
     return AskOutModel(
         intent=out.intent, keywords=out.keywords,
         sentiment=out.sentiment, summary=out.summary,
+        answer=out.answer,
+        citations=[AskCitationModel(**c.__dict__) for c in out.citations],
+        ok=out.ok, error=out.error,
     )
 
 

@@ -168,18 +168,42 @@ export async function rewrite(
   return unwrap(res as never, "/inbox/rewrite")
 }
 
-/** Shape returned by `POST /inbox/ask` — AI-distilled filter hint. */
+/** One cited email the AI answer leans on. */
+export type AskCitation = {
+  thread_id: string
+  subject: string
+  snippet: string
+  sent_at: string
+  from_addr: string
+  intent: string | null
+  sentiment: number | null
+}
+
+/** Shape returned by `POST /inbox/ask` — real AI answer + filter hint. */
 export type AskOut = {
   intent: string | null
   keywords: string[]
   sentiment: "positive" | "negative" | null
   summary: string
+  answer: string
+  citations: AskCitation[]
+  ok: boolean
+  error:
+    | "no_question"
+    | "no_data"
+    | "ai_unavailable"
+    | "ai_timeout"
+    | "ai_error"
+    | "ai_parse"
+    | null
 }
 
 /**
- * Translate a natural-language question in the /emails "Ask" bar into
- * a filter hint. Server-side AI call; never 500s — on provider error
- * the identity fallback is returned so the caller can keep rendering.
+ * Ask a natural-language question against the real inbox. The server
+ * runs Gemini over a bounded slice of recent mail and returns a plain
+ * answer with citations plus the structured filter hint the /emails
+ * list uses to narrow down. Never 500s — ``ok=false`` + ``error``
+ * tells the UI exactly why we don't have a real answer.
  */
 export async function ask(question: string, signal?: AbortSignal): Promise<AskOut> {
   const res = await api.POST("/inbox/ask" as never, {

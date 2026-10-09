@@ -1,41 +1,170 @@
-"""Scoped test for the Inbox /ask endpoint — AC4 of the inbox-ask-ai-fix plan.
+"""Scoped tests for :func:`app.inbox.service.ask_question`.
 
-Verifies the identity-fallback contract: when the AI provider is null
-(no key wired), ``POST /inbox/ask`` returns 200 with all-null fields
-and never 500s. The provider-hit path is covered by the shared
-``inbox_draft_reply`` feature slot's existing tests.
+Three paths covered with a fake AI provider so the test never touches the
+real Gemini key:
+
+* answer path   — provider returns well-formed JSON over a non-empty
+                  mail-context slice; the function must emit ok=True with
+                  the parsed answer and resolved citations.
+* no-data path  — with a session but zero mail rows the function must
+                  short-circuit to ok=False / error="no_data" and never
+                  call the AI.
+* ai-failure path — provider raises; the function must return
+                  ok=False / error="ai_error" with a human message.
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+
+
+# A ProviderCall-shaped stub (service.py only reads .status / .text).
+@dataclass
+class _FakeCall:
+    status: str
+    text: str
+    error: str | None = None
+
+
+class _FakeProvider:
+    """Deterministic stand-in for Gemini. ``kind`` != "null" so the gate
+    inside ``ask_question`` lets it through to generate_text()."""
+
+    kind: str = "gemini"
+
+    def __init__(self, *, payload: dict | None = None, raise_exc: BaseException | None = None) -> None:
+        self._payload = payload
+        self._raise = raise_exc
+        self.calls: list[str] = []
+
+    async def generate_text(self, prompt: str) -> _FakeCall:
+        self.calls.append(prompt)
+        if self._raise is not None:
+            raise self._raise
+        assert self._payload is not None
+        return _FakeCall(status="ok", text=json.dumps(self._payload))
+
+
+class _FakeSession:
+    """Placeholder — ``_fetch_ask_context`` is monkeypatched, so the
+    session is only used as an identity marker."""
+
+
+_SAMPLE_CTX = [
+    {
+        "thread_id": "t-1",
+        "subject": "Rate too high — passing",
+        "snippet": "Your 2.60/mi is 20c above the next bid, going with another carrier.",
+        "sent_at": "2026-09-30T10:00:00+00:00",
+        "from_addr": "ops@acme-logistics.com",
+        "intent": "rate_request",
+        "sentiment": -0.4,
+        "evidence": "price gap",
+        "lane_from": "Chicago, IL",
+        "lane_to": "Dallas, TX",
+        "rate_usd": 2200.0,
+    },
+    {
+        "thread_id": "t-2",
+        "subject": "Need better pricing",
+        "snippet": "We'd love to use you but the quote keeps coming in high.",
+        "sent_at": "2026-09-28T09:00:00+00:00",
+        "from_addr": "dispatch@bravo-brokers.com",
+        "intent": "rate_request",
+        "sentiment": -0.2,
+        "evidence": "price objection",
+        "lane_from": None,
+        "lane_to": None,
+        "rate_usd": None,
+    },
+]
 
 
 @pytest.mark.asyncio
-async def test_ask_endpoint_fallback() -> None:
-    from app.main import create_app
+async def test_ask_question_answer_path() -> None:
+    """Fake provider returns a valid JSON answer; function must surface it."""
+    from app.inbox import service
 
-    app = create_app()
-    # Force the identity-fallback path by making the provider resolve to
-    # ``None`` — exactly what happens on prod when no key is wired or on
-    # transient resolve failure. The endpoint must still 200 with all-null.
-    async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            with patch("app.integrations.adapters.ai.provider.get_for", return_value=None):
-                r = await c.post(
-                    "/inbox/ask",
-                    json={"question": "which brokers complained about late delivery?"},
-                )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    # Shape round-trips exactly.
-    assert set(body) == {"intent", "keywords", "sentiment", "summary"}
-    # Identity fallback: no provider wired → all-null hint.
-    assert body["intent"] is None
-    assert body["keywords"] == []
-    assert body["sentiment"] is None
-    assert body["summary"] == ""
+    payload = {
+        "answer": "You're being outbid on price: Acme flagged a 20c/mi gap and Bravo keeps asking for better pricing. Both are rate-sensitive lanes.",
+        "citations": ["E1", "E2"],
+        "intent": "rate_request",
+        "keywords": ["price", "rate"],
+        "sentiment": "negative",
+        "summary": "Why we lose loads on price.",
+    }
+    provider = _FakeProvider(payload=payload)
+
+    async def _fake_ctx(session, *, keywords):
+        return _SAMPLE_CTX
+
+    with patch.object(service, "_fetch_ask_context", _fake_ctx):
+        out = await service.ask_question(
+            session=_FakeSession(),  # type: ignore[arg-type]
+            question="Why do we lose loads on price?",
+            provider=provider,
+        )
+
+    assert out.ok is True, out
+    assert out.error is None
+    assert "outbid" in out.answer.lower() or "price" in out.answer.lower()
+    assert out.intent == "rate_request"
+    assert out.keywords == ["price", "rate"]
+    assert out.sentiment == "negative"
+    assert len(out.citations) == 2
+    assert out.citations[0].thread_id == "t-1"
+    assert out.citations[1].thread_id == "t-2"
+    # The real mail context was pushed into the prompt.
+    assert len(provider.calls) == 1
+    assert "Acme" in provider.calls[0] or "acme" in provider.calls[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_ask_question_no_data_path() -> None:
+    """Empty inbox must short-circuit with error=no_data and no AI call."""
+    from app.inbox import service
+
+    provider = _FakeProvider(payload={"answer": "should never be called"})
+
+    async def _fake_ctx(session, *, keywords):
+        return []
+
+    with patch.object(service, "_fetch_ask_context", _fake_ctx):
+        out = await service.ask_question(
+            session=_FakeSession(),  # type: ignore[arg-type]
+            question="Why do we lose loads on price?",
+            provider=provider,
+        )
+
+    assert out.ok is False
+    assert out.error == "no_data"
+    assert "no emails" in out.answer.lower()
+    # Guard: the AI must not be hit when there is nothing to ground on.
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ask_question_ai_failure_path() -> None:
+    """Provider raising must surface error=ai_error, never a 500."""
+    from app.inbox import service
+
+    provider = _FakeProvider(raise_exc=RuntimeError("boom"))
+
+    async def _fake_ctx(session, *, keywords):
+        return _SAMPLE_CTX
+
+    with patch.object(service, "_fetch_ask_context", _fake_ctx):
+        out = await service.ask_question(
+            session=_FakeSession(),  # type: ignore[arg-type]
+            question="Why do we lose loads on price?",
+            provider=provider,
+        )
+
+    assert out.ok is False
+    assert out.error == "ai_error"
+    assert out.answer  # non-empty human message
+    assert out.citations == []
