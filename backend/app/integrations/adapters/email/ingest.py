@@ -92,9 +92,23 @@ async def _update_cursor(session: AsyncSession, mailbox: str, history_id: str, t
             cur.backfilled_through_at = through_at
 
 
-async def ingest_backfill(session: AsyncSession, source: MailboxSource, mailbox: str, months: int = 12) -> IngestStats:
+async def ingest_backfill(
+    session: AsyncSession,
+    source: MailboxSource,
+    mailbox: str,
+    months: int = 12,
+    days: int | None = None,
+) -> IngestStats:
+    """Backfill a mailbox since ``months`` ago, or ``days`` if provided.
+
+    ``days`` wins when non-None — lets the owner start a "last 7 days" sync
+    from the UI without touching months of unused mail.
+    """
     stats = IngestStats(mailbox=mailbox)
-    since = datetime.now(UTC) - timedelta(days=30 * months)
+    if days is not None and days > 0:
+        since = datetime.now(UTC) - timedelta(days=days)
+    else:
+        since = datetime.now(UTC) - timedelta(days=30 * months)
     try:
         async for msg in source.backfill(mailbox, since):
             stats.read += 1

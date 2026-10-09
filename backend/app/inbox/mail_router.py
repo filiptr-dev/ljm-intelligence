@@ -85,6 +85,12 @@ class TestSendOut(BaseModel):
 class BackfillIn(BaseModel):
     mailbox: EmailStr
     months: int = Field(default=12, ge=1, le=120)
+    # Finer-grained override: when set, defines the Gmail query window in
+    # days instead of months. Lets the owner kick off a "last 7 days" sync
+    # from the UI without wasting cycles on months of unused mail. ``months``
+    # is still accepted (default behaviour unchanged) and only used when
+    # ``days`` is omitted.
+    days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class IncrementalIn(BaseModel):
@@ -168,6 +174,7 @@ async def backfill(
         tenant_id=LJM_TENANT_ID,
         mailbox=str(payload.mailbox),
         months=payload.months,
+        days=payload.days,
     )
     if job_id is not None:
         from app.integrations.jobs_router import kick_in_process_drain
@@ -185,6 +192,7 @@ async def backfill(
         settings,
         mailbox=str(payload.mailbox),
         months=payload.months,
+        days=payload.days,
     )
     return IngestStatsOut(**row.__dict__)
 

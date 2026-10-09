@@ -223,6 +223,15 @@ async def connect_gmail(payload: GmailConnectorIn, request: Request) -> GmailCon
         )
         await _set_flag(s, "inbox.source", {"value": "gmail"})
         await s.commit()
+    # Refresh the in-process credential + inbox-source cache so /mail/status
+    # flips to sa_configured=true + mailbox_source=gmail without a restart.
+    # The sync factory functions can't open a DB session.
+    from app.integrations.adapters.email.credentials import (
+        set_vault_cache,
+        set_vault_inbox_source_cache,
+    )
+    set_vault_cache(payload.sa_json, payload.impersonate)
+    set_vault_inbox_source_cache("gmail")
     import hashlib
     fp = hashlib.sha256(str(info.get("client_email", "")).encode()).hexdigest()[-12:]
     return GmailConnectorOut(ok=True, fingerprint=fp)
@@ -242,6 +251,14 @@ async def revoke_gmail(request: Request) -> GmailConnectorOut:
         await _set_flag(s, "inbox.source", {"value": "simulated"})
         await _set_flag(s, "inbox.send_via_gmail", {"enabled": False})
         await s.commit()
+    # Flip the in-process caches in lockstep so /mail/status reports simulated
+    # immediately — no restart.
+    from app.integrations.adapters.email.credentials import (
+        reset_vault_cache,
+        set_vault_inbox_source_cache,
+    )
+    reset_vault_cache()
+    set_vault_inbox_source_cache("simulated")
     return GmailConnectorOut(ok=True)
 
 
@@ -267,6 +284,10 @@ async def inbox_source_switch(payload: OwnerSwitchIn, request: Request) -> Owner
     async with request.app.state.sessionmaker() as s:
         await _set_flag(s, "inbox.source", {"value": "gmail" if payload.enabled else "simulated"})
         await s.commit()
+    from app.integrations.adapters.email.credentials import (
+        set_vault_inbox_source_cache,
+    )
+    set_vault_inbox_source_cache("gmail" if payload.enabled else "simulated")
     return OwnerSwitchOut(ok=True, flag="inbox.source", value=payload.enabled)
 
 

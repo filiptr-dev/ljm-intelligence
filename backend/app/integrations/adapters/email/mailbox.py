@@ -30,7 +30,9 @@ from app.config import Settings
 from app.integrations.adapters.email.credentials import (
     build_delegated_credentials,
     resolve_impersonate,
+    resolve_mailbox_source,
     resolve_sa_info,
+    vault_impersonate,
 )
 from app.integrations.adapters.email.ratelimit import MailboxLimiter
 
@@ -126,34 +128,84 @@ class GmailMailbox:
         self._sa = resolve_sa_info(settings)
 
     async def list_mailboxes(self) -> list[str]:
-        impersonate = resolve_impersonate(self._settings)
-        if self._sa is None or not impersonate:
-            return []
-        creds = build_delegated_credentials(
-            self._sa, impersonate, list(self._settings.gmail.scopes_admin)
-        )
-        if creds is None:
-            return []
+        """Enumerate the mailboxes to sync.
+
+        Preference order:
+          1. Admin Directory ``users.list`` impersonating ``admin_impersonate``
+             (requires a real Workspace admin + the admin.directory scope).
+          2. Fallback to ``[impersonate]`` — the mailbox the owner connected.
+             This is the realistic path when the Workspace only grants DWD on a
+             single mailbox (e.g. ``contact@``), which is not a Workspace admin
+             → Directory 403 → no mailboxes → nothing syncs. Verified live
+             2026-10-09.
+        """
+        # The admin subject (used only for the Directory API call) is the
+        # explicit env ``admin_impersonate``; falling back to the user mailbox
+        # here would just reproduce the 403.
+        admin_sub = ""
         try:
-            import anyio
-            from googleapiclient.discovery import build  # type: ignore[import-not-found]
+            admin_sub = (
+                getattr(self._settings.gmail, "admin_impersonate", "") or ""
+            ).strip()
+        except (AttributeError, ValueError):
+            admin_sub = ""
 
-            def _call():
-                svc = build("admin", "directory_v1", credentials=creds, cache_discovery=False)
-                mailboxes: list[str] = []
-                req = svc.users().list(customer="my_customer", maxResults=200)
-                while req is not None:
-                    resp = req.execute()
-                    for u in resp.get("users", []) or []:
-                        if u.get("primaryEmail"):
-                            mailboxes.append(u["primaryEmail"])
-                    req = svc.users().list_next(req, resp)
-                return mailboxes
-
-            return await anyio.to_thread.run_sync(_call)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("mail/gmail: list_mailboxes failed: %s", exc)
+        # The user mailbox we actually want to sync (vault wins — set by
+        # Settings → Connect Gmail — else the env default).
+        user_sub = (vault_impersonate() or "").strip()
+        if not user_sub:
+            try:
+                user_sub = (
+                    getattr(self._settings.gmail, "impersonate", "") or ""
+                ).strip()
+            except (AttributeError, ValueError):
+                user_sub = ""
+        # Historical: if neither user_sub nor admin_sub is available, nothing
+        # to list. ``resolve_impersonate`` kept for callers below in the module.
+        _ = resolve_impersonate
+        if self._sa is None or not (user_sub or admin_sub):
             return []
+
+        if admin_sub:
+            creds = build_delegated_credentials(
+                self._sa, admin_sub, list(self._settings.gmail.scopes_admin)
+            )
+            if creds is not None:
+                try:
+                    import anyio
+                    from googleapiclient.discovery import build  # type: ignore[import-not-found]
+
+                    def _call():
+                        svc = build(
+                            "admin", "directory_v1",
+                            credentials=creds, cache_discovery=False,
+                        )
+                        mailboxes: list[str] = []
+                        req = svc.users().list(customer="my_customer", maxResults=200)
+                        while req is not None:
+                            resp = req.execute()
+                            for u in resp.get("users", []) or []:
+                                if u.get("primaryEmail"):
+                                    mailboxes.append(u["primaryEmail"])
+                            req = svc.users().list_next(req, resp)
+                        return mailboxes
+
+                    mailboxes = await anyio.to_thread.run_sync(_call)
+                    if mailboxes:
+                        return mailboxes
+                    log.info(
+                        "mail/gmail: directory listing empty — falling back to [impersonate=%s]",
+                        user_sub or admin_sub,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "mail/gmail: directory list_mailboxes failed (%s) — "
+                        "falling back to [impersonate=%s]",
+                        exc, user_sub or admin_sub,
+                    )
+        # Single-mailbox fallback: the connected mailbox (contact@…) rather
+        # than the admin — the admin inbox is irrelevant to lead sync.
+        return [user_sub or admin_sub]
 
     def _service(self, mailbox: str):
         """Build a per-mailbox Gmail service with DWD impersonation."""
@@ -389,7 +441,10 @@ def _parse_gmail_message(raw: dict, mailbox: str) -> RawMessage | None:
 
 
 def get_mailbox_source(settings: Settings) -> MailboxSource:
-    if settings.mailbox_source != "gmail":
+    # Env wins; else the stored inbox.source flag / vault SA presence (both
+    # cached in-process, refreshed on connect). Lets Settings → Connect Gmail
+    # go live with no restart.
+    if resolve_mailbox_source(settings) != "gmail":
         return SimulatedMailbox()
     sa = resolve_sa_info(settings)
     if sa is None:

@@ -29,7 +29,9 @@ def _bind(tenant_id: str) -> None:
 
 
 @app.task(name="inbox.mail_backfill", queue="default", pass_context=False)
-async def mail_backfill(tenant_id: str, mailbox: str, months: int = 12) -> None:
+async def mail_backfill(
+    tenant_id: str, mailbox: str, months: int = 12, days: int | None = None,
+) -> None:
     _bind(tenant_id)
     from sqlalchemy import select
 
@@ -43,7 +45,7 @@ async def mail_backfill(tenant_id: str, mailbox: str, months: int = 12) -> None:
     engine = create_engine(settings)
     try:
         sm = create_sessionmaker(engine)
-        stats = await svc_backfill(sm, settings, mailbox=mailbox, months=months)
+        stats = await svc_backfill(sm, settings, mailbox=mailbox, months=months, days=days)
         log.info("mail_backfill: done", extra={"mailbox": mailbox, "upserted": stats.upserted})
 
         # First-backfill → one-shot analysis trigger. Gate on PredictionRun so a

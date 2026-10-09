@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.models import SettingsRow
 from app.inbox.models import MailCursor
-from app.integrations.adapters.email.credentials import load_sa_info, sa_fingerprint
+from app.integrations.adapters.email.credentials import (
+    load_sa_info,
+    resolve_mailbox_source,
+    resolve_sa_info,
+    sa_fingerprint,
+)
 from app.integrations.adapters.email.ingest import ingest_backfill, ingest_incremental
 from app.integrations.adapters.email.mailbox import get_mailbox_source
 from app.integrations.adapters.email.sender import get_mail_sender
@@ -95,10 +100,16 @@ async def effective_mode(session: AsyncSession, settings: Any) -> str:
 async def status(sessionmaker: Any, settings: Any) -> MailStatusRow:
     async with sessionmaker() as s:
         mode = await effective_mode(s, settings)
-    sa = load_sa_info(
+    # Vault-resolved SA counts the same as env-provided SA — so pasting creds
+    # in Settings flips sa_configured=true without a restart.
+    sa = resolve_sa_info(settings)
+    fingerprint = sa_fingerprint(sa) if sa else None
+    # Fallback to the raw env-only parse for the reason string below (so
+    # ``missing_env:GMAIL_SA_JSON`` still accurately reflects an env-only
+    # misconfiguration path when nothing is in the vault either).
+    env_sa = load_sa_info(
         settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None
     )
-    fingerprint = sa_fingerprint(sa) if sa else None
     async with sessionmaker() as s:
         today = datetime.now(UTC).date()
         sends_today = (
@@ -116,13 +127,14 @@ async def status(sessionmaker: Any, settings: Any) -> MailStatusRow:
         ).scalar()
     reason = None
     if mode == "gmail" and sa is None:
-        reason = "missing_env:GMAIL_SA_JSON"
+        reason = "missing_env:GMAIL_SA_JSON" if env_sa is None else None
     elif mode == "gmail" and not getattr(settings, "mail_owner_send_enabled", False):
         reason = "owner_switch_off:MAIL_OWNER_SEND_ENABLED"
     # Read-side mailbox count — informational only; a real list call happens
     # on `/mail/mailboxes` so this stays cheap.
+    mailbox_source_effective = resolve_mailbox_source(settings)
     read_mailboxes_count = 0
-    if settings.mailbox_source == "gmail" and sa is not None:
+    if mailbox_source_effective == "gmail" and sa is not None:
         try:
             from app.integrations.adapters.email.mailbox import GmailMailbox
             read_mailboxes_count = len(await GmailMailbox(settings).list_mailboxes())
@@ -142,7 +154,7 @@ async def status(sessionmaker: Any, settings: Any) -> MailStatusRow:
         last_message_id=last,
         reason=reason,
         owner_send_enabled=bool(getattr(settings, "mail_owner_send_enabled", False)),
-        mailbox_source=settings.mailbox_source,
+        mailbox_source=mailbox_source_effective,
         read_mailboxes_count=read_mailboxes_count,
     )
 
@@ -185,11 +197,11 @@ async def test_send(sessionmaker: Any, settings: Any, *, to: str) -> TestSendRow
 
 
 async def backfill(
-    sessionmaker: Any, settings: Any, *, mailbox: str, months: int
+    sessionmaker: Any, settings: Any, *, mailbox: str, months: int, days: int | None = None,
 ) -> IngestStatsRow:
     source = get_mailbox_source(settings)
     async with sessionmaker() as s:
-        stats = await ingest_backfill(s, source, mailbox, months=months)
+        stats = await ingest_backfill(s, source, mailbox, months=months, days=days)
     return IngestStatsRow(**stats.__dict__)
 
 

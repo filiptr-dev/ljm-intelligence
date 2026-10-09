@@ -70,7 +70,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             await prime_from_vault(app.state.sessionmaker)
         except Exception:  # pragma: no cover
-            log.debug("startup priming skipped", exc_info=True)
+            # Elevated to WARNING: when this silently fails on prod the Settings
+            # → Connect Gmail round-trip looks stuck ("sa_configured=false after
+            # restart"). We want it loud in Render logs.
+            log.warning("startup priming failed", exc_info=True)
         # Prime the per-source driver + agent-kill overlay from the settings
         # row so the registry can resolve env → DB → default without opening
         # a session on every ``/loads/sources`` call. Absent-safe: a missing
