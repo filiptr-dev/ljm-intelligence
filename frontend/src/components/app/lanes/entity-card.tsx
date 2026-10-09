@@ -93,3 +93,28 @@ export function EntityCard({
     </div>
   )
 }
+
+/**
+ * Hover card for a state that has no row in the data: either an operating state with no runs in
+ * the selected period, or a state outside the carrier's operating area. Same frame and the same
+ * zeroed headline numbers as a real state, so hovering anywhere on the map answers something.
+ */
+export function EmptyStateCard({ abbr, outside, className }: { abbr: string; outside: boolean; className?: string }) {
+  return (
+    <div className={cn("w-[21rem] max-w-[calc(100vw-2rem)] rounded-sm border border-border bg-popover p-3.5 text-popover-foreground shadow-lg", className)}>
+      <div className="mb-2 flex items-start gap-2">
+        <span className="mt-0.5 rounded-[3px] bg-asphalt px-1.5 py-0.5 font-mono text-[0.62rem] font-semibold text-white">State</span>
+        <h3 className="min-w-0 text-[0.95rem] leading-snug font-semibold">{STATE_NAMES[abbr] ?? abbr}</h3>
+      </div>
+      <dl className="grid grid-cols-3 gap-x-3 gap-y-2">
+        <Metric label="Runs" value={int(0)} />
+        <Metric label="Miles" value={int(0)} />
+        <Metric label="Revenue" value={usd(0)} />
+      </dl>
+      <p className="mt-3 border-t border-border pt-2 text-[0.8rem] leading-relaxed">
+        {outside ? "Outside operating area" : "No runs in this period"}
+      </p>
+      {outside ? <p className="mt-1 text-[0.7rem] text-muted-foreground">The carrier does not run freight here.</p> : null}
+    </div>
+  )
+}

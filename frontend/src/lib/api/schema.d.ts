@@ -3806,6 +3806,8 @@ export interface components {
             states: components["schemas"]["LaneEntity"][];
             /** Arcs */
             arcs: components["schemas"]["HeatArc"][];
+            /** Operating States */
+            operating_states: string[];
         };
         /** IncrementalIn */
         IncrementalIn: {

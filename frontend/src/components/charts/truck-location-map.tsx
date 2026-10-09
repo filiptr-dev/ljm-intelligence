@@ -9,15 +9,16 @@
 import "maplibre-gl/dist/maplibre-gl.css"
 import * as React from "react"
 import { Map as MapLibreMap, NavigationControl, type IControl } from "maplibre-gl"
-import { GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers"
+import { GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers"
 import { MapboxOverlay } from "@deck.gl/mapbox"
-import { hex, mix, readPalette, rgb, MAX_BOUNDS, STATES, US_BOUNDS, type Palette, type StateProps } from "./us-map-base"
+import { hex, mix, placeStateLabels, readPalette, rgb, MAX_BOUNDS, STATES, US_BOUNDS, type Palette, type StateLabel, type StateProps } from "./us-map-base"
 
 export default function TruckLocationMap({ lat, lng, label }: { lat: number; lng: number; label: string }) {
   const hostRef = React.useRef<HTMLDivElement>(null)
   const mapRef = React.useRef<MapLibreMap | null>(null)
   const overlayRef = React.useRef<MapboxOverlay | null>(null)
   const [palette] = React.useState<Palette>(() => readPalette())
+  const [zoom, setZoom] = React.useState(3.4)
 
   React.useEffect(() => {
     if (!hostRef.current || mapRef.current) return
@@ -39,6 +40,7 @@ export default function TruckLocationMap({ lat, lng, label }: { lat: number; lng
     map.addControl(new NavigationControl({ showCompass: false }), "top-right")
     const overlay = new MapboxOverlay({ interleaved: false, layers: [] })
     map.addControl(overlay as unknown as IControl)
+    map.on("zoom", () => setZoom(Math.round(map.getZoom() * 4) / 4))
     mapRef.current = map
     overlayRef.current = overlay
     // The host may be laid out while a drawer is still sliding in; re-measure as it settles.
@@ -63,6 +65,12 @@ export default function TruckLocationMap({ lat, lng, label }: { lat: number; lng
           id: "states", data: STATES, pickable: false, stroked: true, filled: true,
           getFillColor: rgb(mix(p.card, p.muted, 0.55)), getLineColor: rgb(p.border), getLineWidth: 0.8, lineWidthUnits: "pixels",
         }),
+        // light: abbreviations only, small, no outline weight to speak of
+        new TextLayer<StateLabel>({
+          id: "state-labels", data: placeStateLabels(zoom, { abbrOnly: true, fontPx: 10 }), pickable: false,
+          getPosition: (l) => l.position, getText: (l) => l.text, getSize: 10, sizeUnits: "pixels",
+          getColor: rgb(p.ink, 110), fontWeight: 600, getTextAnchor: "middle", getAlignmentBaseline: "center",
+        }),
         new ScatterplotLayer<{ p: [number, number] }>({
           id: "halo", data: [{ p: [lng, lat] }], getPosition: (d) => d.p, getRadius: 16, radiusUnits: "pixels",
           getFillColor: rgb(p.brand, 50), stroked: false,
@@ -73,9 +81,13 @@ export default function TruckLocationMap({ lat, lng, label }: { lat: number; lng
         }),
       ],
     })
-    // Zoom in on the unit a little, but keep the whole country readable around it.
+  }, [lat, lng, palette, zoom])
+
+  // Zoom in on the unit a little, but keep the whole country readable around it. Only when the unit
+  // moves: the layers effect above also re-runs on user zoom and must not snap the view back.
+  React.useEffect(() => {
     mapRef.current?.easeTo({ center: [lng, lat], zoom: 3.4, duration: 0 })
-  }, [lat, lng, palette])
+  }, [lat, lng])
 
   return (
     <div className="relative h-56 w-full overflow-hidden rounded-sm border border-border bg-background" data-testid="truck-location-map" role="img" aria-label={label}>

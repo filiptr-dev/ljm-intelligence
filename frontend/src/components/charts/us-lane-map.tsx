@@ -17,21 +17,25 @@
 import "maplibre-gl/dist/maplibre-gl.css"
 import * as React from "react"
 import { Map as MapLibreMap, NavigationControl, type IControl } from "maplibre-gl"
-import { ArcLayer, GeoJsonLayer, ScatterplotLayer } from "@deck.gl/layers"
+import { ArcLayer, GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers"
 import { HeatmapLayer } from "@deck.gl/aggregation-layers"
 import { MapboxOverlay } from "@deck.gl/mapbox"
 import type { PickingInfo } from "@deck.gl/core"
 import { RotateCcw } from "lucide-react"
-import { EntityCard } from "@/components/app/lanes/entity-card"
+import { EmptyStateCard, EntityCard } from "@/components/app/lanes/entity-card"
 import type { CityEntity, HeatArc, HeatmapData, LaneEntity } from "@/lib/api/lanes"
 import {
-  hex, mix, readPalette, rgb, MAX_BOUNDS, STATES, US_BOUNDS,
-  type Palette, type RGBA, type StateProps,
+  hex, mix, placeStateLabels, readPalette, rgb, MAX_BOUNDS, STATES, US_BOUNDS,
+  type Palette, type RGBA, type StateLabel, type StateProps,
 } from "./us-map-base"
 
 
 export type MapMode = "origin" | "dest" | "flows"
-type Hover = { entity: LaneEntity | CityEntity; x: number; y: number } | null
+type Hover =
+  | { entity: LaneEntity | CityEntity; empty?: undefined; x: number; y: number }
+  | { entity?: undefined; empty: { abbr: string; outside: boolean }; x: number; y: number }
+  | null
+type Hit = { entity: LaneEntity | CityEntity } | { empty: { abbr: string; outside: boolean } } | null
 
 export default function UsLaneMap({
   data, mode, selectedState, selectedLane, highlightLane, insights, aiUnavailable, onSelectState, onSelectLane,
@@ -53,12 +57,19 @@ export default function UsLaneMap({
   const [palette, setPalette] = React.useState<Palette>(() => readPalette())
   const [hover, setHover] = React.useState<Hover>(null)
   const [size, setSize] = React.useState({ w: 0, h: 0 })
+  const [zoom, setZoom] = React.useState(3)
 
   // Latest props for the long-lived deck callbacks.
-  const live = React.useRef({ onSelectState, onSelectLane })
-  React.useEffect(() => { live.current = { onSelectState, onSelectLane } })
+  const live = React.useRef({ onSelectState, onSelectLane, canSelect: (abbr: string): boolean => abbr.length > 0 })
+
+  // The carrier's operating area comes from the API (one list, app.analysis.operating_area).
+  const operating = React.useMemo(() => new Set(data.operating_states), [data.operating_states])
 
   const stateByAbbr = React.useMemo(() => new Map(data.states.map((s) => [s.label, s])), [data.states])
+  // Filtering by a state only makes sense for one the carrier runs (or has data for).
+  React.useEffect(() => {
+    live.current = { onSelectState, onSelectLane, canSelect: (abbr) => operating.has(abbr) || stateByAbbr.has(abbr) }
+  })
   const cityByKey = React.useMemo(() => new Map(data.cities.map((c) => [c.key, c])), [data.cities])
   const maxState = React.useMemo(() => {
     const val = (s: LaneEntity) => (mode === "origin" ? s.runs_as_origin : mode === "dest" ? s.runs_as_dest : s.metrics.runs) ?? 0
@@ -67,8 +78,8 @@ export default function UsLaneMap({
   const maxArc = React.useMemo(() => Math.max(1, ...data.arcs.map((a) => a.runs)), [data.arcs])
 
   // What the cursor is over -> an entity for the card (read by the long-lived deck callbacks).
-  const lookup = React.useRef({ cityByKey, stateByAbbr })
-  React.useEffect(() => { lookup.current = { cityByKey, stateByAbbr } })
+  const lookup = React.useRef({ cityByKey, stateByAbbr, operating })
+  React.useEffect(() => { lookup.current = { cityByKey, stateByAbbr, operating } })
 
   // palette (re-read when the theme class flips)
   React.useEffect(() => {
@@ -102,15 +113,21 @@ export default function UsLaneMap({
         const canvas = map.getCanvas()
         const hit = resolveEntity(info, lookup.current)
         canvas.style.cursor = hit ? "pointer" : ""
-        setHover(hit && info.x != null && info.y != null ? { entity: hit, x: info.x, y: info.y } : null)
+        setHover(hit && info.x != null && info.y != null ? { ...hit, x: info.x, y: info.y } : null)
       },
       onClick: (info: PickingInfo) => {
         const id = info.layer?.id
         if (id === "arcs" && info.object) live.current.onSelectLane((info.object as HeatArc).key)
-        else if (id === "states" && info.object) live.current.onSelectState((info.object as { properties: StateProps }).properties.abbr)
+        else if (id === "states" && info.object) {
+          const abbr = (info.object as { properties: StateProps }).properties.abbr
+          if (live.current.canSelect(abbr)) live.current.onSelectState(abbr)
+        }
       },
     })
     map.addControl(overlay as unknown as IControl)
+    const onZoom = () => setZoom(Math.round(map.getZoom() * 4) / 4)
+    map.on("zoom", onZoom)
+    onZoom()
     mapRef.current = map
     overlayRef.current = overlay
     const ro = new ResizeObserver(() => hostRef.current && setSize({ w: hostRef.current.clientWidth, h: hostRef.current.clientHeight }))
@@ -145,6 +162,7 @@ export default function UsLaneMap({
       return (mode === "origin" ? s.runs_as_origin : mode === "dest" ? s.runs_as_dest : s.metrics.runs) ?? 0
     }
     const cityPoints = data.cities.filter((c) => (mode === "origin" ? (c.runs_as_origin ?? 0) > 0 : mode === "dest" ? (c.runs_as_dest ?? 0) > 0 : true))
+    const labels = placeStateLabels(zoom)
     const heatSource = mode === "origin" ? data.origins : mode === "dest" ? data.dests : []
 
     const layers = [
@@ -155,16 +173,18 @@ export default function UsLaneMap({
         stroked: true,
         filled: true,
         getFillColor: (f) => {
-          const n = stateRuns(f.properties.abbr)
-          if (!n) return rgb(mix(p.bg, p.muted, 0.7), 255)
-          return rgb(mix(p.card, p.brand, 0.08 + 0.34 * Math.sqrt(n / maxState)), 255)
+          const abbr = f.properties.abbr
+          const n = stateRuns(abbr)
+          if (n) return rgb(mix(p.card, p.brand, 0.08 + 0.34 * Math.sqrt(n / maxState)), 255)
+          // distinct "no runs" (inside the area, quiet: pale card) vs "outside" (greyed out, darker)
+          return operating.has(abbr) ? rgb(mix(p.card, p.steel, 0.1), 255) : rgb(mix(p.bg, p.steel, 0.38), 255)
         },
         getLineColor: (f) => (f.properties.abbr === sel ? rgb(p.brand, 255) : rgb(p.border, 255)),
         getLineWidth: (f) => (f.properties.abbr === sel ? 2.5 : 0.8),
         lineWidthUnits: "pixels",
         autoHighlight: true,
         highlightColor: [...p.brand, 60] as RGBA,
-        updateTriggers: { getFillColor: [mode, maxState, data, p], getLineColor: [sel, p], getLineWidth: [sel] },
+        updateTriggers: { getFillColor: [mode, maxState, data, p, operating], getLineColor: [sel, p], getLineWidth: [sel] },
       }),
       new HeatmapLayer({
         id: "heat",
@@ -196,6 +216,23 @@ export default function UsLaneMap({
         highlightColor: rgb(p.ink, 255),
         updateTriggers: { getSourceColor: [lanePick, p], getTargetColor: [lanePick, p], getWidth: [maxArc] },
       }),
+      new TextLayer<StateLabel>({
+        id: "state-labels",
+        data: labels,
+        pickable: false,
+        getPosition: (l) => l.position,
+        getText: (l) => l.text,
+        getSize: 11,
+        sizeUnits: "pixels",
+        getColor: (l) => (operating.has(l.abbr) ? rgb(p.ink, 200) : rgb(p.ink, 95)),
+        fontWeight: 600,
+        fontSettings: { sdf: true },
+        outlineWidth: 2,
+        outlineColor: rgb(p.card, 220),
+        getTextAnchor: "middle",
+        getAlignmentBaseline: "center",
+        updateTriggers: { getColor: [p, operating] },
+      }),
       new ScatterplotLayer<CityEntity>({
         id: "cities",
         data: cityPoints,
@@ -214,7 +251,7 @@ export default function UsLaneMap({
       }),
     ]
     overlay.setProps({ layers })
-  }, [data, mode, palette, selectedState, selectedLane, highlightLane, stateByAbbr, maxState, maxArc])
+  }, [data, mode, palette, selectedState, selectedLane, highlightLane, stateByAbbr, maxState, maxArc, operating, zoom])
 
   const reset = () => mapRef.current?.fitBounds(US_BOUNDS, { padding: 16, duration: 600 })
 
@@ -243,6 +280,16 @@ export default function UsLaneMap({
           <span className="h-2 flex-1 rounded-[2px]" style={{ background: "linear-gradient(90deg, var(--card), var(--chart-1))" }} aria-hidden />
           more runs
         </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2.5 rounded-[2px] border border-border" style={{ background: "color-mix(in oklab, var(--card) 90%, var(--steel))" }} aria-hidden />
+            no runs
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-2.5 rounded-[2px] border border-border" style={{ background: "color-mix(in oklab, var(--background) 62%, var(--steel))" }} aria-hidden />
+            outside operating area
+          </span>
+        </div>
         {mode === "flows" ? (
           <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
             <span className="size-2 rounded-full bg-good" aria-hidden /> rate/mile up
@@ -254,7 +301,11 @@ export default function UsLaneMap({
       </div>
       {hover ? (
         <div className="pointer-events-none absolute z-20" style={{ left, top }}>
-          <EntityCard entity={hover.entity} suggestions={insights[hover.entity.key]} aiUnavailable={aiUnavailable} />
+          {hover.empty ? (
+            <EmptyStateCard abbr={hover.empty.abbr} outside={hover.empty.outside} />
+          ) : (
+            <EntityCard entity={hover.entity} suggestions={insights[hover.entity.key]} aiUnavailable={aiUnavailable} />
+          )}
         </div>
       ) : null}
     </div>
@@ -263,13 +314,22 @@ export default function UsLaneMap({
 
 function resolveEntity(
   info: PickingInfo,
-  { cityByKey, stateByAbbr }: { cityByKey: Map<string, CityEntity>; stateByAbbr: Map<string, LaneEntity> },
-): LaneEntity | CityEntity | null {
+  { cityByKey, stateByAbbr, operating }: { cityByKey: Map<string, CityEntity>; stateByAbbr: Map<string, LaneEntity>; operating: Set<string> },
+): Hit {
   if (!info.object) return null
   const id = info.layer?.id
-  if (id === "arcs") return (info.object as HeatArc).entity
-  if (id === "cities") return cityByKey.get((info.object as CityEntity).key) ?? null
-  if (id === "states") return stateByAbbr.get((info.object as { properties: StateProps }).properties.abbr) ?? null
+  if (id === "arcs") return { entity: (info.object as HeatArc).entity }
+  if (id === "cities") {
+    const c = cityByKey.get((info.object as CityEntity).key)
+    return c ? { entity: c } : null
+  }
+  if (id === "states") {
+    const abbr = (info.object as { properties: StateProps }).properties.abbr
+    const st = stateByAbbr.get(abbr)
+    if (st) return { entity: st }
+    // Every state answers a hover, even with no data: "no runs" inside the area, "outside" beyond it.
+    return { empty: { abbr, outside: !operating.has(abbr) } }
+  }
   return null
 }
 
