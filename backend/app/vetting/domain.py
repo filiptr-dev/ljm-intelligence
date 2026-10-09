@@ -19,6 +19,7 @@ class RedFlag(str, Enum):
     oos_recent = "oos_recent"
     name_mismatch_vs_dba = "name_mismatch_vs_dba"
     authority_revoked = "authority_revoked"
+    authority_unverified = "authority_unverified"
 
 
 class VerdictBand(str, Enum):
@@ -40,6 +41,10 @@ class BrokerSnapshot:
     oos_date: date | None  # most recent out-of-service date, if any
     phone: str | None
     email: str | None
+    # Provenance of this snapshot — one of 'fmcsa_live' / 'fmcsa_cache' /
+    # 'lead_record'. 'lead_record' means FMCSA never confirmed it; the UI and
+    # the verdict both treat it as unverified rather than as a pass.
+    source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +99,19 @@ def vet(
                 "FMCSA authority is revoked — do not haul.",
             )
         )
+    elif not status:
+        # No authority_status means FMCSA never confirmed this carrier for
+        # this lookup (lead-only fallback, or an upstream outage with no
+        # cache). "Unknown" is NOT "active" — route to caution so a dispatcher
+        # verifies manually before hauling. The 2026-10-09 audit found a
+        # fabricated status="A" slipping a lead-fallback snapshot into a
+        # "safe" verdict; this flag closes that false-safety hole.
+        flags.append(
+            FlagHit(
+                RedFlag.authority_unverified,
+                "FMCSA authority not verified for this lookup — treat as unverified.",
+            )
+        )
 
     oos_days = _days_since(snapshot.oos_date, today)
     if oos_days is not None and oos_days <= 180:
@@ -129,7 +147,7 @@ def vet(
     codes = {f.code for f in flags}
     if RedFlag.authority_revoked in codes or RedFlag.oos_recent in codes or suppressed:
         band = VerdictBand.avoid
-    elif codes & {RedFlag.new_authority_lt_180d, RedFlag.name_mismatch_vs_dba} or RedFlag.no_phone in codes and prior.booked_count == 0:
+    elif codes & {RedFlag.new_authority_lt_180d, RedFlag.name_mismatch_vs_dba, RedFlag.authority_unverified} or RedFlag.no_phone in codes and prior.booked_count == 0:
         band = VerdictBand.caution
     else:
         band = VerdictBand.safe

@@ -62,6 +62,7 @@ async def get_vet(
             add_date=report.snapshot.add_date.isoformat() if report.snapshot.add_date else None,
             age_days=age_days,
             oos_date=report.snapshot.oos_date.isoformat() if report.snapshot.oos_date else None,
+            source=report.snapshot.source,
         ),
         prior=PriorOut(
             last_sent_at=report.prior.last_sent_at.isoformat() if report.prior.last_sent_at else None,
@@ -72,4 +73,5 @@ async def get_vet(
         evidence_url=report.evidence_url,
         stale=report.stale,
         lead_id=report.lead_id,
+        snapshot_as_of=report.snapshot_as_of,
     )

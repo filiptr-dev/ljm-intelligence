@@ -232,6 +232,60 @@ async def test_get_vetting_503_when_truly_unknown(
     assert r.headers.get("Retry-After") == "30"
 
 
+def test_vet_caution_when_authority_status_is_unknown():
+    """Lead-fallback snapshots carry no authority_status; the rule table
+    must flag ``authority_unverified`` and route to caution — never safe.
+    Regression guard for the 2026-10-09 audit finding: a fabricated 'A'
+    status let an un-vetted lead ride through as a 'safe' verdict.
+    """
+    snap = BrokerSnapshot(
+        mc="55555",
+        dot=None,
+        legal_name="Lead-Only Carrier",
+        dba_name=None,
+        authority_status=None,  # explicit unknown — FMCSA never confirmed
+        add_date=None,
+        oos_date=None,
+        phone="5551110000",
+        email="ops@leadonly.example",
+        source="lead_record",
+    )
+    v = vet(snap, PriorContact(booked_count=3), suppressed=False, today=TODAY)
+    assert v.band is not VerdictBand.safe
+    assert v.band is VerdictBand.caution
+    assert RedFlag.authority_unverified in {f.code for f in v.red_flags}
+
+
+async def test_lead_fallback_does_not_produce_safe_verdict(
+    client: AsyncClient, monkeypatch
+):
+    """End-to-end: lead on file + FMCSA dead → stale lead_record snapshot
+    with verdict=caution and source='lead_record'. The response must NOT
+    claim authority is active just because enrichment once ingested it.
+    """
+    sm = client._test_sessionmaker  # type: ignore[attr-defined]
+    await _seed_lead(
+        sm, id="MC-66666", mc="66666", dot="8888888",
+        name="Unverified Fallback Co", phone="5557778888",
+        primary_email="ops@unverified.example",
+    )
+
+    async def _dead_live(dot):
+        return None
+
+    from app.vetting import repository as vrepo
+
+    monkeypatch.setattr(vrepo, "live_fmcsa_fetch", _dead_live)
+    r = await client.get("/vetting/MC-66666")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["verdict"] != "safe"
+    assert body["verdict"] == "caution"
+    assert body["authority"]["source"] == "lead_record"
+    assert body["authority"]["status"] is None
+    assert any(f["code"] == "authority_unverified" for f in body["red_flags"])
+
+
 async def test_mc_prefix_is_honoured_even_for_8_digit_numbers(
     client: AsyncClient, monkeypatch
 ):

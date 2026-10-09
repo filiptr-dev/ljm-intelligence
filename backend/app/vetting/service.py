@@ -5,7 +5,7 @@ fetcher it wants; tests inject fakes without touching the network.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -53,6 +53,11 @@ class VetReport:
     evidence_url: str | None
     stale: bool
     lead_id: str | None
+    # ISO-8601 timestamp of when the underlying data was captured.
+    # For 'fmcsa_live' this is now; for 'fmcsa_cache' it's the cache row's
+    # fetched_at; for 'lead_record' it's the lead's last_enriched_at /
+    # last_seen_at / first_seen_at (whichever is most recent and non-null).
+    snapshot_as_of: str | None = None
 
 
 SNAPSHOT_TTL_DAYS = 30
@@ -65,18 +70,22 @@ async def _lookup_snapshot(
     dot: str | None,
     fmcsa: FmcsaPort,
     lead: object | None = None,
-) -> tuple[BrokerSnapshot, str | None, bool, bool]:
-    """Resolve snapshot via cache-then-live. Returns (snapshot, evidence_url, stale, upstream_failed).
+) -> tuple[BrokerSnapshot, str | None, bool, datetime | None]:
+    """Resolve snapshot via cache-then-live. Returns (snapshot, evidence_url, stale, as_of).
 
-    * cache hit, fresh → fresh snapshot, stale=False, upstream_failed=False.
-    * cache miss → live fetch; on 200 cache and return fresh.
+    Every returned ``BrokerSnapshot`` carries a ``source`` tag so the UI and
+    the verdict rules can tell FMCSA-confirmed data from a lead-row fallback.
+
+    * cache hit, fresh → fresh snapshot, stale=False, source='fmcsa_cache'.
+    * cache miss → live fetch; on 200 cache and return fresh (source='fmcsa_live').
     * cache hit, STALE (>30d) → live fetch; on success refresh; on failure
-      return cached row with stale=True, upstream_failed=True.
+      return cached row with stale=True (source='fmcsa_cache').
     * cache miss AND live fails AND we have an on-file Lead → synthesise a
-      minimal snapshot from the lead row with stale=True, upstream_failed=True
-      so the router can emit 503 instead of 404.
+      minimal snapshot from the lead row with stale=True and source='lead_record'.
+      The snapshot carries NO authority_status so the verdict degrades to
+      caution via the ``authority_unverified`` red flag.
     * only truly unknown MC/DOT (no lead, no cache, live None) raises
-      ``FmcsaUnreachableError`` which the router maps to 404.
+      ``FmcsaUnreachableError`` which the router maps to 503.
     """
     # The cache is keyed on DOT. If the request is MC-only, try to resolve
     # DOT via the leads table; otherwise fall through to a live fetch which
@@ -100,7 +109,7 @@ async def _lookup_snapshot(
                 _snapshot_from_lead(lead, mc=mc, dot=dot),
                 None,
                 True,
-                False,
+                _lead_as_of(lead),
             )
         raise FmcsaUnreachableError("no DOT to look up (MC not in local leads)")
 
@@ -113,58 +122,60 @@ async def _lookup_snapshot(
         cached_at = cached_at.replace(tzinfo=UTC)
 
     if cached_payload and cached_at and cached_at >= fresh_cutoff:
-        return (
-            repo.extract_snapshot_fields(cached_payload, mc=mc, dot=dot),
-            evidence_url,
-            False,
-            False,
-        )
+        snap = repo.extract_snapshot_fields(cached_payload, mc=mc, dot=dot)
+        return (replace(snap, source="fmcsa_cache"), evidence_url, False, cached_at)
 
     live = await fmcsa.fetch(dot)
     if live:
         await repo.write_fmcsa_cache(s, dot, live)
-        return (
-            repo.extract_snapshot_fields(live, mc=mc, dot=dot),
-            evidence_url,
-            False,
-            False,
-        )
+        snap = repo.extract_snapshot_fields(live, mc=mc, dot=dot)
+        return (replace(snap, source="fmcsa_live"), evidence_url, False, now)
 
     if cached_payload:
-        return (
-            repo.extract_snapshot_fields(cached_payload, mc=mc, dot=dot),
-            evidence_url,
-            True,
-            True,
-        )
+        snap = repo.extract_snapshot_fields(cached_payload, mc=mc, dot=dot)
+        return (replace(snap, source="fmcsa_cache"), evidence_url, True, cached_at)
 
     if lead is not None:
         return (
             _snapshot_from_lead(lead, mc=mc, dot=dot),
             evidence_url,
             True,
-            True,
+            _lead_as_of(lead),
         )
 
     raise FmcsaUnreachableError("FMCSA snapshot unreachable and no cache row")
 
 
+def _lead_as_of(lead: object) -> datetime | None:
+    """Most-recent trustworthy timestamp on a lead row for the UI's 'as of' line."""
+    for attr in ("last_enriched_at", "last_seen_at", "first_seen_at"):
+        value = getattr(lead, attr, None)
+        if value is not None:
+            return value
+    return None
+
+
 def _snapshot_from_lead(lead: object, *, mc: str | None, dot: str | None) -> BrokerSnapshot:
     """Synthesise a minimal snapshot from an on-file lead row.
 
-    Enrichment only ingests active brokers, so authority_status='A' is a safe
-    default; add_date is unknown (no 'new authority' flag will fire).
+    The lead row proves the carrier exists in our universe — nothing more.
+    FMCSA was NOT consulted for this response, so authority/OOS/add-date are
+    left as None (unknown). ``vet()`` reads that None and raises the
+    ``authority_unverified`` red flag, which routes the verdict to caution.
+    Never fabricate authority_status='A' here — that produced a safe-looking
+    verdict on data FMCSA never confirmed (prod audit 2026-10-09).
     """
     return BrokerSnapshot(
         mc=mc or getattr(lead, "mc", None),
         dot=str(dot) if dot else (str(getattr(lead, "dot", "")) or None),
         legal_name=getattr(lead, "name", None),
         dba_name=None,
-        authority_status="A",
+        authority_status=None,
         add_date=None,
         oos_date=None,
         phone=getattr(lead, "phone", None),
         email=getattr(lead, "primary_email", None),
+        source="lead_record",
     )
 
 
@@ -204,7 +215,7 @@ async def vet_broker(
             mc = mc or lead.mc
             dot = dot or (str(lead.dot) if lead.dot else None)
 
-        snapshot, evidence_url, stale, upstream_failed = await _lookup_snapshot(
+        snapshot, evidence_url, stale, as_of = await _lookup_snapshot(
             s, mc=mc, dot=dot, fmcsa=port, lead=lead
         )
 
@@ -215,11 +226,6 @@ async def vet_broker(
         suppressed = await repo.is_suppressed(s, snapshot.email)
 
     verdict = vet(snapshot, prior, suppressed)
-    # ``upstream_failed`` is already surfaced to the client via ``stale=True``;
-    # the UI shows a 'Cached snapshot — FMCSA was unreachable' line. We don't
-    # fail the request when a fallback is available — only truly unknown
-    # MC/DOT bubble up as ``FmcsaUnreachableError`` from ``_lookup_snapshot``.
-    _ = upstream_failed
     return VetReport(
         key=raw_key,
         mc=mc,
@@ -231,4 +237,5 @@ async def vet_broker(
         evidence_url=evidence_url,
         stale=stale,
         lead_id=lead.id if lead is not None else None,
+        snapshot_as_of=as_of.isoformat() if as_of else None,
     )

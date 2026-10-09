@@ -11,6 +11,9 @@ class AuthorityOut(BaseModel):
     add_date: str | None = None
     age_days: int | None = None
     oos_date: str | None = None
+    # Where this snapshot came from — 'fmcsa_live' / 'fmcsa_cache' /
+    # 'lead_record'. The UI uses this to pick the right disclaimer.
+    source: str | None = None
 
 
 class PriorOut(BaseModel):
@@ -38,3 +41,4 @@ class VetReportOut(BaseModel):
     evidence_url: str | None = None
     stale: bool = False
     lead_id: str | None = None
+    snapshot_as_of: str | None = None

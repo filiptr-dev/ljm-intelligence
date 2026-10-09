@@ -141,8 +141,15 @@ function ReportView({ report }: { report: VetReport }) {
           </p>
           {report.stale ? (
             <p className="mt-1 text-xs opacity-80">
-              Cached snapshot — FMCSA was unreachable
-              {report.authority.add_date ? ` (as of ${report.authority.add_date})` : ""}.
+              {report.authority.source === "lead_record"
+                ? "FMCSA unavailable — showing what we have on file for this carrier; authority not verified"
+                : "Cached snapshot — FMCSA was unreachable"}
+              {report.snapshot_as_of
+                ? ` (as of ${new Date(report.snapshot_as_of).toLocaleDateString()})`
+                : report.authority.add_date
+                  ? ` (as of ${report.authority.add_date})`
+                  : ""}
+              .
             </p>
           ) : null}
         </div>

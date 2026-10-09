@@ -2610,6 +2610,8 @@ export interface components {
             age_days?: number | null;
             /** Oos Date */
             oos_date?: string | null;
+            /** Source */
+            source?: string | null;
         };
         /** AutoSendIn */
         AutoSendIn: {
@@ -6549,6 +6551,8 @@ export interface components {
             stale: boolean;
             /** Lead Id */
             lead_id?: string | null;
+            /** Snapshot As Of */
+            snapshot_as_of?: string | null;
         };
         /** WebsiteContactOut */
         WebsiteContactOut: {
