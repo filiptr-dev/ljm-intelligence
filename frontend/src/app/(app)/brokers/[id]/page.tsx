@@ -75,10 +75,12 @@ function FieldLine({
   icon,
   field,
   href,
+  onClick,
 }: {
   icon: React.ReactNode
   field: ContactField
   href?: string
+  onClick?: () => void
 }) {
   if (!field.value) {
     return (
@@ -97,7 +99,18 @@ function FieldLine({
   return (
     <div className="flex min-w-0 items-center gap-2 text-sm">
       {icon}
-      {href ? (
+      {onClick ? (
+        // Opens the in-app Draft email builder with this address preselected
+        // (BUG 2 — no mailto anywhere a broker is known). We keep the raw
+        // address visible as text so the operator can copy it if needed.
+        <button
+          type="button"
+          onClick={onClick}
+          className="min-w-0 flex-1 truncate text-left underline-offset-2 hover:underline"
+        >
+          {content}
+        </button>
+      ) : href ? (
         <a href={href} className="min-w-0 flex-1 truncate underline-offset-2 hover:underline">
           {content}
         </a>
@@ -108,7 +121,7 @@ function FieldLine({
   )
 }
 
-function NamedContactCard({ c }: { c: NamedContact }) {
+function NamedContactCard({ c, onDraft }: { c: NamedContact; onDraft?: (email: string) => void }) {
   return (
     <div className="rounded-sm border border-border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -128,7 +141,7 @@ function NamedContactCard({ c }: { c: NamedContact }) {
         <FieldLine
           icon={<Mail className="size-3.5" />}
           field={c.email}
-          href={c.email.value ? `mailto:${c.email.value}` : undefined}
+          onClick={c.email.value && onDraft ? () => onDraft(c.email.value as string) : undefined}
         />
         <FieldLine
           icon={<Phone className="size-3.5" />}
@@ -509,13 +522,16 @@ export default function BrokerDetailPage() {
             </a>
           ) : null}
           {b.primary_email.value ? (
-            <a
-              href={`mailto:${b.primary_email.value}`}
+            // Opens the in-app Draft email builder (BUG 2) — never a mail
+            // client — with the broker's primary address preselected.
+            <button
+              type="button"
+              onClick={() => openDraft(b.primary_email.value as string)}
               className="inline-flex h-10 items-center gap-1.5 rounded-sm border border-border px-3 text-sm hover:bg-muted"
             >
               <Mail className="size-4" />
               Email
-            </a>
+            </button>
           ) : null}
         </div>
       </div>
@@ -545,7 +561,7 @@ export default function BrokerDetailPage() {
               <FieldLine
                 icon={<Mail className="size-4" />}
                 field={b.primary_email}
-                href={b.primary_email.value ? `mailto:${b.primary_email.value}` : undefined}
+                onClick={b.primary_email.value ? () => openDraft(b.primary_email.value as string) : undefined}
               />
               <FieldLine icon={<MapPin className="size-4" />} field={b.address} />
             </div>
@@ -564,7 +580,7 @@ export default function BrokerDetailPage() {
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
                 {b.contacts.map((c) => (
-                  <NamedContactCard key={c.id} c={c} />
+                  <NamedContactCard key={c.id} c={c} onDraft={openDraft} />
                 ))}
               </div>
             )}

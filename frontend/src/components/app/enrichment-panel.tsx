@@ -102,7 +102,16 @@ export function EnrichmentPanel({
                     </a>
                   ) : null}
                   {d.email ? (
-                    <a href={`mailto:${d.email}`} className="underline">
+                    // In-app builder (BUG 2) — same deep-link the "Draft
+                    // email" button below uses; never opens a mail client.
+                    <a
+                      href={
+                        leadId
+                          ? `/emails/compose?broker=${encodeURIComponent(leadId)}`
+                          : `/emails/compose?to=${encodeURIComponent(d.email)}`
+                      }
+                      className="underline"
+                    >
                       {d.email}
                     </a>
                   ) : (
@@ -140,7 +149,14 @@ export function EnrichmentPanel({
                 <li key={c.id} className="flex flex-wrap items-center gap-2 rounded-sm bg-muted/40 p-1">
                   {c.name ? <span className="font-medium">{c.name}</span> : null}
                   {c.email ? (
-                    <a href={`mailto:${c.email}`} className="underline">
+                    <a
+                      href={
+                        leadId
+                          ? `/emails/compose?broker=${encodeURIComponent(leadId)}`
+                          : `/emails/compose?to=${encodeURIComponent(c.email)}`
+                      }
+                      className="underline"
+                    >
                       {c.email}
                     </a>
                   ) : null}
