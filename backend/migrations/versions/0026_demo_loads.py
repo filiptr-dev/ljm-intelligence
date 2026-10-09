@@ -27,7 +27,7 @@ import json
 import random
 import secrets
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 from alembic import op
@@ -105,7 +105,7 @@ def upgrade() -> None:
         return
 
     rng = random.Random(20261008)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Preload leads so broker_lead_id can be attached when the demo broker's
     # name+state matches an existing row. Pure best-effort; missing matches
@@ -118,7 +118,7 @@ def upgrade() -> None:
         ).fetchall()
         for r in rows:
             lead_lookup[(_norm(r[1]), _norm(r[2]))] = r[0]
-    except Exception:
+    except sa.exc.SQLAlchemyError:
         lead_lookup = {}
 
     insert_sql = sa.text(

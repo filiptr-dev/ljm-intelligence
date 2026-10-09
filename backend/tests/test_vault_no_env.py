@@ -6,20 +6,16 @@ into ``settings.cred_key`` and round-trip put/get cleanly.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.identity.credentials import (
     CredentialVault,
-    VaultNotFound,
     effective_vault_key,
     reset_vault_key_cache,
 )
 from app.models import SettingsRow
-from app.shared.tenant import TenantId
 
 pytestmark = pytest.mark.asyncio
 

@@ -15,8 +15,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app.shared.db import AsyncSession
-
 from app.analysis.models import (
     BrokerLookalike,
     BrokerPrediction,
@@ -38,6 +36,7 @@ from app.analysis.repository import (
     list_objections_rows,
     wipe_prediction_tables,
 )
+from app.shared.db import AsyncSession
 
 # ---- shapes ---------------------------------------------------------------
 

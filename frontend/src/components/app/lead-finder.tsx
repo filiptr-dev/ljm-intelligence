@@ -359,6 +359,7 @@ function LeadContactsPanel({ leadId, onDraftAI }: { leadId: string; onDraftAI: (
       setLoading(false)
     }
   }, [leadId, isReal])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; load() sets loading/items
   React.useEffect(() => { void load() }, [load])
   const refresh = async () => {
     if (!isReal) return

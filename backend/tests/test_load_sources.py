@@ -18,7 +18,6 @@ from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source,
 from app.integrations.adapters.loadboard.registry import all_sources, by_kind, enabled_sources
 from app.integrations.adapters.loadboard.truckstop import TruckstopSource, map_truckstop_row
 
-
 # Legacy flat kwargs → grouped sub-model, so existing call sites keep working
 # after the settings-grouping refactor without rewriting every assertion.
 _FLAT_TO_GROUP: dict[str, tuple[str, str]] = {

@@ -472,7 +472,7 @@ async def set_broker_page_urls(payload: BrokerPageUrlsIn, request: Request) -> L
         if not isinstance(raw, dict):
             continue
         url = str(raw.get("url") or "").strip()
-        if not url or not (url.startswith("http://") or url.startswith("https://")):
+        if not url or not url.startswith(("http://", "https://")):
             continue
         cleaned.append(
             {
@@ -533,9 +533,7 @@ def _env_overrides_active(settings) -> bool:
     for attr in _DRIVER_FIELDS.values():
         if str(getattr(settings, attr, "off") or "off") != "off":
             return True
-    if (getattr(settings, "loads_agent_kill", "") or "") == "1":
-        return True
-    return False
+    return (getattr(settings, "loads_agent_kill", "") or "") == "1"
 
 
 async def _load_driver_row(session) -> SettingsRow:

@@ -69,8 +69,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             from app.integrations.adapters.email.credentials import prime_from_vault
 
             await prime_from_vault(app.state.sessionmaker)
-        except Exception:  # noqa: BLE001  pragma: no cover
-            pass
+        except Exception:  # pragma: no cover
+            log.debug("startup priming skipped", exc_info=True)
         # Prime the per-source driver + agent-kill overlay from the settings
         # row so the registry can resolve env → DB → default without opening
         # a session on every ``/loads/sources`` call. Absent-safe: a missing
@@ -81,8 +81,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
             await prime_overlay_from_db(app.state.sessionmaker)
-        except Exception:  # noqa: BLE001  pragma: no cover
-            pass
+        except Exception:  # pragma: no cover
+            log.debug("startup priming skipped", exc_info=True)
         try:
             yield
         finally:

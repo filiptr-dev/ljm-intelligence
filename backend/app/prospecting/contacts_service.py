@@ -18,7 +18,6 @@ Rules (plan §Rules):
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -53,7 +52,7 @@ FREIGHT_TITLES: tuple[str, ...] = (
 # matches "Director — Logistics" because we test every title keyword
 # in isolation and require at least two keyword overlaps for multi-word
 # titles. "Accountant" is deliberately excluded.
-_TITLE_WORDS = tuple(set(w.lower() for t in FREIGHT_TITLES for w in t.split() if len(w) > 2))
+_TITLE_WORDS = tuple({w.lower() for t in FREIGHT_TITLES for w in t.split() if len(w) > 2})
 
 
 def is_freight_manager(title: str | None) -> bool:
@@ -88,9 +87,7 @@ def is_freight_manager(title: str | None) -> bool:
     # "VP Operations" / "Director of Operations" explicit allowance.
     if ("vp" in t.split() or t.startswith("vp ")) and "operations" in t:
         return True
-    if "director" in t and "operations" in t:
-        return True
-    return False
+    return "director" in t and "operations" in t
 
 
 # ---------------------------------------------------------------------------

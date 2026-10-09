@@ -49,13 +49,13 @@ def effective_ai_features(stored: dict | None) -> dict:
 def validate_ai_features(value: dict) -> dict:
     """Validator the router's pydantic model reuses. Raises ValueError on bad input."""
     if not isinstance(value, dict):
-        raise ValueError("ai_features must be an object")
+        raise ValueError("ai_features must be an object")  # noqa: TRY004 - callers/validators catch ValueError
     out: dict[str, dict[str, str]] = {}
     for feature, choice in value.items():
         if feature not in FEATURE_NAMES:
             raise ValueError(f"unknown ai feature: {feature}")
         if not isinstance(choice, dict):
-            raise ValueError(f"ai_features[{feature}] must be an object")
+            raise ValueError(f"ai_features[{feature}] must be an object")  # noqa: TRY004
         provider = str(choice.get("provider") or "")
         model = str(choice.get("model") or "")
         if provider not in ALLOWED_MODELS:

@@ -16,8 +16,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.shared.db import AsyncSession
-
 from app.prospecting.models import Lead
 from app.prospecting.repository import (
     count_leads,
@@ -29,6 +27,7 @@ from app.prospecting.repository import (
     list_leads_page,
     list_sources_for_lead,
 )
+from app.shared.db import AsyncSession
 
 
 @dataclass

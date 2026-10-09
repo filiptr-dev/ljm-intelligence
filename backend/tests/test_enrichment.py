@@ -60,6 +60,12 @@ async def _seed_template(sm, template_id: str = "tmpl-1") -> None:
             )
         )
         await s.commit()
+from app.integrations.adapters.ai.linkedin_search import (
+    _LINKEDIN_IN_RE,
+    CompanyRef,
+    _normalize_url,
+    find_decision_makers,
+)
 from app.integrations.adapters.ai.provider import GeminiProvider, NullProvider
 from app.prospecting.pipeline.enrichment import (
     ContactPayload,
@@ -71,12 +77,6 @@ from app.prospecting.pipeline.enrichment import (
 )
 from app.shared import robots as robots_mod
 from app.shared.fetcher import FetchResult, _js_only_heuristic
-from app.integrations.adapters.ai.linkedin_search import (
-    _LINKEDIN_IN_RE,
-    CompanyRef,
-    _normalize_url,
-    find_decision_makers,
-)
 
 # =========================================================================
 # Fixtures / mocks
@@ -357,8 +357,8 @@ async def test_enrich_happy_path(sm, monkeypatch):
     # ``site_scraper`` imports ``is_allowed`` into its own module namespace via
     # ``from app.shared.robots import is_allowed``, so patching only the
     # ``robots`` module no longer propagates — we patch both bindings.
-    from app.shared import robots as _robots
     from app.integrations.adapters.web import site_scraper as _ss
+    from app.shared import robots as _robots
 
     monkeypatch.setattr(_robots, "is_allowed", lambda url, ua: True)
     monkeypatch.setattr(_ss, "is_allowed", lambda url, ua: True)

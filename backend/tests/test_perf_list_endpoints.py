@@ -29,9 +29,7 @@ deliverable — the invoking agent / human captures the stdout.
 from __future__ import annotations
 
 import os
-import statistics
 import time
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -58,6 +56,7 @@ def _ulid(prefix: str, n: int) -> str:
 async def _seed_leads(sessionmaker, tenant_id: str, count: int) -> None:
     """Bulk-insert ``count`` leads via raw SQL for speed."""
     import psycopg
+
     from app.config import Settings
 
     # Direct psycopg for a COPY-style bulk insert — SQLAlchemy ORM at 25k rows
@@ -100,17 +99,18 @@ def _percentile(values: list[float], pct: float) -> float:
     if not values:
         return float("nan")
     s = sorted(values)
-    k = max(0, min(len(s) - 1, int(round(pct / 100 * (len(s) - 1)))))
+    k = max(0, min(len(s) - 1, round(pct / 100 * (len(s) - 1))))
     return s[k]
 
 
 async def test_perf_list_endpoints_25k_leads(auth_bypass):
     """Seed 25k leads for LJM and measure p50/p95 on the four list endpoints."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+
     from app.config import Settings
     from app.db import create_sessionmaker
     from app.main import create_app
     from app.shared.orm import LJM_TENANT_ID
-    from sqlalchemy.ext.asyncio import create_async_engine
 
     s = Settings()
     engine = create_async_engine(s.database_url)

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import httpx
 
-from app.shared.region import IN_REGION_STATES
 from app.integrations.adapters.enrichment import fmcsa as fmcsa_mod
 from app.integrations.adapters.enrichment.fmcsa import SODA_URL, fetch_fmcsa
+from app.shared.region import IN_REGION_STATES
 
 
 def _mock_client(handler) -> httpx.AsyncClient:

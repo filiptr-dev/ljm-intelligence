@@ -19,7 +19,6 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-
 pytestmark = pytest.mark.skipif(
     not os.environ.get("DATABASE_URL_TEST_PG"),
     reason="set DATABASE_URL_TEST_PG=postgresql://... to run the PG migration round-trip",

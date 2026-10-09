@@ -14,12 +14,11 @@ No real Google traffic; every service call goes through fakes.
 from __future__ import annotations
 
 import base64
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
-from app.integrations.adapters.email import mailbox as mod
 from app.integrations.adapters.email.mailbox import (
     GmailMailbox,
     _parse_gmail_message,
@@ -101,7 +100,7 @@ class _FakeMessages:
             return _FakeRequest({"messages": []})
         return _FakeRequest(self._pages[idx])
 
-    def get(self, *, userId: str, id: str, format: str) -> _FakeRequest:  # noqa: A002
+    def get(self, *, userId: str, id: str, format: str) -> _FakeRequest:
         if id in self._store:
             return _FakeRequest(self._store[id])
         return _FakeRequest(Exception(f"not found: {id}"))

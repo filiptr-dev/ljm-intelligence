@@ -13,13 +13,11 @@ Verifies the review's BLOCKER fix:
 
 from __future__ import annotations
 
-import importlib
 import os
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
-
 
 pytestmark = [
     pytest.mark.skipif(
@@ -47,7 +45,7 @@ async def pg_app(request):
     # path reads from `settings.auth_jwt_secret`.
     try:
         request.getfixturevalue("_pg_restore_seeds")
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     import app.db as db_mod
@@ -105,45 +103,44 @@ async def test_login_and_list_endpoints(pg_app):
 async def test_orm_insert_stamps_tenant_id(pg_app):
     """A Lead inserted without an explicit tenant_id gets LJM's id via TenantMixin."""
     from app.models import Lead
-    from app.shared.tenant import TenantId, set_tenant
     from app.shared.orm import LJM_TENANT_ID
+    from app.shared.tenant import TenantId, set_tenant
 
     sessionmaker = pg_app.state.sessionmaker
 
     # Simulate a request context: tenant bound to LJM.
     set_tenant(TenantId(LJM_TENANT_ID))
 
-    async with sessionmaker() as session:
-        async with session.begin():
-            # SET LOCAL via bound param — same path as the real request flow.
-            await session.execute(
-                text("SELECT set_config('app.tenant_id', :tid, true)"),
-                {"tid": LJM_TENANT_ID},
-            )
-            # Insert without specifying tenant_id — the mixin's before_insert
-            # listener must stamp it.
-            lead = Lead(
-                id="test_lead_tenant_stamp",
-                name="Tenancy Test Co",
-                kind="broker",
-                state="IL",
-            )
-            session.add(lead)
-            await session.flush()
+    async with sessionmaker() as session, session.begin():
+        # SET LOCAL via bound param — same path as the real request flow.
+        await session.execute(
+            text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": LJM_TENANT_ID},
+        )
+        # Insert without specifying tenant_id — the mixin's before_insert
+        # listener must stamp it.
+        lead = Lead(
+            id="test_lead_tenant_stamp",
+            name="Tenancy Test Co",
+            kind="broker",
+            state="IL",
+        )
+        session.add(lead)
+        await session.flush()
 
-            # Read it back and assert tenant_id matches LJM.
-            row = await session.execute(
-                text("SELECT tenant_id FROM leads WHERE id = :id"),
-                {"id": "test_lead_tenant_stamp"},
-            )
-            got = row.scalar_one()
-            assert got == LJM_TENANT_ID, f"expected LJM, got {got!r}"
+        # Read it back and assert tenant_id matches LJM.
+        row = await session.execute(
+            text("SELECT tenant_id FROM leads WHERE id = :id"),
+            {"id": "test_lead_tenant_stamp"},
+        )
+        got = row.scalar_one()
+        assert got == LJM_TENANT_ID, f"expected LJM, got {got!r}"
 
-            # Clean up.
-            await session.execute(
-                text("DELETE FROM leads WHERE id = :id"),
-                {"id": "test_lead_tenant_stamp"},
-            )
+        # Clean up.
+        await session.execute(
+            text("DELETE FROM leads WHERE id = :id"),
+            {"id": "test_lead_tenant_stamp"},
+        )
 
 
 async def test_raw_insert_hits_server_default_safety_net(pg_app):
@@ -151,17 +148,16 @@ async def test_raw_insert_hits_server_default_safety_net(pg_app):
     from app.shared.orm import LJM_TENANT_ID
 
     sessionmaker = pg_app.state.sessionmaker
-    async with sessionmaker() as session:
-        async with session.begin():
-            # No set_config → no context — proves the DB-level safety net.
-            await session.execute(
-                text(
-                    "INSERT INTO leads (id, name, kind, state) "
-                    "VALUES ('raw_safety_net', 'Raw Co', 'broker', 'IL')"
-                )
+    async with sessionmaker() as session, session.begin():
+        # No set_config → no context — proves the DB-level safety net.
+        await session.execute(
+            text(
+                "INSERT INTO leads (id, name, kind, state) "
+                "VALUES ('raw_safety_net', 'Raw Co', 'broker', 'IL')"
             )
-            row = await session.execute(
-                text("SELECT tenant_id FROM leads WHERE id = 'raw_safety_net'")
-            )
-            assert row.scalar_one() == LJM_TENANT_ID
-            await session.execute(text("DELETE FROM leads WHERE id = 'raw_safety_net'"))
+        )
+        row = await session.execute(
+            text("SELECT tenant_id FROM leads WHERE id = 'raw_safety_net'")
+        )
+        assert row.scalar_one() == LJM_TENANT_ID
+        await session.execute(text("DELETE FROM leads WHERE id = 'raw_safety_net'"))

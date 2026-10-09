@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -23,7 +23,7 @@ class _Msg:
     message_id: str = "m1"
     thread_id: str = "t1"
     subject: str = ""
-    sent_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    sent_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     raw: dict = field(default_factory=dict)
 
 

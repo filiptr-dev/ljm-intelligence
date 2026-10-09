@@ -46,7 +46,7 @@ async def default_detect(page: Any) -> None:
     """Common helper: ``raise LoginChallenge`` if the current page smells like one."""
     try:
         content = await page.content()
-    except Exception:
+    except Exception:  # noqa: BLE001 - any driver error means "no page text"; skip the challenge check
         return
     if looks_like_challenge(content):
         raise LoginChallenge("login_challenge_detected")

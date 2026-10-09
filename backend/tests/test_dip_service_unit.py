@@ -25,7 +25,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ---- inbox: response_time_stats -----------------------------------------
 
 

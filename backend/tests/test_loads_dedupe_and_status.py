@@ -24,7 +24,6 @@ from app.integrations.loads_service import (
 )
 from app.models import Load
 
-
 pytestmark = pytest.mark.asyncio
 
 

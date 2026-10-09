@@ -18,9 +18,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 
-from app.config import Settings
-from app.main import create_app
 from app.analysis.ai_usage_service import record
+from app.config import Settings
 from app.integrations.adapters.ai.provider import (
     ALLOWED_MODELS,
     DEFAULT_FEATURES,
@@ -31,6 +30,7 @@ from app.integrations.adapters.ai.provider import (
     ProviderCall,
     get_for,
 )
+from app.main import create_app
 
 # ----- get_for routing ------------------------------------------------------
 

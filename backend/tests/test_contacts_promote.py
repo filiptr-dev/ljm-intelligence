@@ -18,12 +18,9 @@ from app.prospecting.contacts_repository import (
     norm_name,
 )
 from app.prospecting.contacts_service import (
-    PromoteResult,
-    SourceAdapter,
     is_freight_manager,
     promote_from_sources,
 )
-
 
 # ---- fakes -----------------------------------------------------------------
 

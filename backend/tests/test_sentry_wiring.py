@@ -75,7 +75,7 @@ async def test_failing_route_reports_to_sentry(monkeypatch: pytest.MonkeyPatch) 
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 - any unhandled error surfaces here
             await c.get("/boom")
 
     assert len(captured) == 1

@@ -11,9 +11,8 @@ all lives in the service.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import logging
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -211,7 +210,7 @@ async def run_campaign(payload: CampaignIn, request: Request) -> CampaignOut:
         from procrastinate.exceptions import AlreadyEnqueued
 
         # One campaign per segment+tone per UTC day: a re-run can't double-queue.
-        campaign_key = f"{payload.segment}:{payload.tone}:{datetime.now(timezone.utc):%Y%m%d}"
+        campaign_key = f"{payload.segment}:{payload.tone}:{datetime.now(UTC):%Y%m%d}"
         for r in recipients:
             try:
                 jid = await dispatch(

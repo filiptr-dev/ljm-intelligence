@@ -8,6 +8,8 @@ insert — the dedupe backstop AC4 points at.
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -21,13 +23,14 @@ async def _ensure_schema(app):
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         # PG16 harness: tables already created by alembic; create_all is a no-op shim.
         pass
 
 
 async def _seed(sm, lead_id: str, name: str, title: str, email: str | None = None):
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.prospecting.models import Lead, LeadContact
 
     async with sm() as s:
@@ -41,7 +44,7 @@ async def _seed(sm, lead_id: str, name: str, title: str, email: str | None = Non
             email_norm=(email.lower() if email else None),
             name_norm=name.lower(),
             source="site-scrape",
-            discovered_at=datetime.now(timezone.utc),
+            discovered_at=datetime.now(UTC),
         ))
         await s.commit()
 
@@ -103,6 +106,7 @@ async def test_draft_rejects_both_lead_id_and_contact_id() -> None:
         sm = app.state.sessionmaker
         await _seed(sm, "MC-31", "Alice", "Logistics Manager", "a@a.com")
         from sqlalchemy import select
+
         from app.prospecting.models import LeadContact
         async with sm() as s:
             cid = (

@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 pytestmark = pytest.mark.skipif(
@@ -40,11 +39,10 @@ async def test_ac3_defer_on_rolls_back_with_business_tx() -> None:
         async with sm() as s:
             before = (await s.execute(text("SELECT COUNT(*) FROM procrastinate_jobs"))).scalar_one()
 
-        async with sm() as s:
-            async with s.begin():
-                await defer_on(s, "prospecting.crawl_leads", tenant_id="x", trigger="rollback-test")
-                # Force a rollback by raising inside the begin() block.
-                raise RuntimeError("intentional rollback")
+        async with sm() as s, s.begin():
+            await defer_on(s, "prospecting.crawl_leads", tenant_id="x", trigger="rollback-test")
+            # Force a rollback by raising inside the begin() block.
+            raise RuntimeError("intentional rollback")
     except RuntimeError:
         pass
 
@@ -53,10 +51,9 @@ async def test_ac3_defer_on_rolls_back_with_business_tx() -> None:
     assert after == before, "defer_on wrote a job row that outlived a rollback"
 
     # Positive path: a committed txn leaves exactly one new row.
-    async with sm() as s:
-        async with s.begin():
-            jid = await defer_on(s, "prospecting.crawl_leads", tenant_id="x", trigger="commit-test")
-            assert isinstance(jid, int) and jid > 0
+    async with sm() as s, s.begin():
+        jid = await defer_on(s, "prospecting.crawl_leads", tenant_id="x", trigger="commit-test")
+        assert isinstance(jid, int) and jid > 0
 
     async with sm() as s:
         found = (
@@ -132,7 +129,7 @@ async def test_ac2_worker_runs_a_dispatched_task_to_succeeded() -> None:
                     ),
                     timeout=15.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
         async with sm() as s:
@@ -212,18 +209,16 @@ async def test_ac4_tenant_bound_job_cannot_read_other_tenants() -> None:
         sm = async_sessionmaker(app_engine, expire_on_commit=False)
 
         try:
-            async with sm() as s:
-                async with s.begin():
-                    await s.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_a})
-                    rows = (await s.execute(text("SELECT mc FROM leads"))).all()
+            async with sm() as s, s.begin():
+                await s.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_a})
+                rows = (await s.execute(text("SELECT mc FROM leads"))).all()
             mcs_a = {r[0] for r in rows}
             assert "MC-ISO-A" in mcs_a
             assert "MC-ISO-B" not in mcs_a, "RLS leak: tenant A saw tenant B's rows"
 
-            async with sm() as s:
-                async with s.begin():
-                    await s.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_b})
-                    rows = (await s.execute(text("SELECT mc FROM leads"))).all()
+            async with sm() as s, s.begin():
+                await s.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_b})
+                rows = (await s.execute(text("SELECT mc FROM leads"))).all()
             mcs_b = {r[0] for r in rows}
             assert "MC-ISO-B" in mcs_b
             assert "MC-ISO-A" not in mcs_b, "RLS leak: tenant B saw tenant A's rows"

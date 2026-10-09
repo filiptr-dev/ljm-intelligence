@@ -48,7 +48,7 @@ class JsonFormatter(logging.Formatter):
             tid = _tenant_ctx.get()
             if tid:
                 payload["tenant_id"] = tid
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - a formatter must never raise or log recursively
             pass
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)

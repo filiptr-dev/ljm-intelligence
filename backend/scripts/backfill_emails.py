@@ -12,13 +12,13 @@ import asyncio
 import sys
 
 import httpx
+from app.sources.emails import add_contact_email, normalize_email
+from app.sources.fmcsa import SODA_URL
 from sqlalchemy import select, update
 
 from app.config import Settings
 from app.db import create_engine
 from app.models import Lead
-from app.sources.emails import add_contact_email, normalize_email
-from app.sources.fmcsa import SODA_URL
 
 BATCH = 50
 

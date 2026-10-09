@@ -8,7 +8,6 @@ import secrets
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 pytestmark = [
     pytest.mark.skipif(
         not os.environ.get("DATABASE_URL_TEST_PG"),

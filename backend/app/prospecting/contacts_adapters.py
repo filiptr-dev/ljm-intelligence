@@ -223,5 +223,5 @@ class InboxSignatureAdapter:
     changing callers.
     """
 
-    async def observations(self, lead: Any) -> list[SourceObservation]:  # noqa: ARG002
+    async def observations(self, lead: Any) -> list[SourceObservation]:
         return []

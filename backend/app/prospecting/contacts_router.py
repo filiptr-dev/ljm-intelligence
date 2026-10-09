@@ -13,6 +13,7 @@ repo. This router parses, calls, returns the DTO.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -60,6 +61,8 @@ async def refresh_lead_contacts(
     """
     sm = request.app.state.sessionmaker
     settings = request.app.state.settings
+    from sqlalchemy import select as _select
+
     from app.integrations.adapters.ai.provider import get_for
     from app.prospecting.contacts_adapters import (
         FmcsaSnapshotAdapter,
@@ -69,7 +72,6 @@ async def refresh_lead_contacts(
     )
     from app.prospecting.contacts_repository import SqlLeadContactRepo
     from app.prospecting.models import Lead
-    from sqlalchemy import select as _select
 
     sources = set(payload.sources or ["fmcsa", "gemini", "site", "inbox"])
 
@@ -79,7 +81,7 @@ async def refresh_lead_contacts(
             raise HTTPException(404, "lead not found")
 
         # Cache helpers for the FMCSA snapshot.
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.prospecting.models import FmcsaSnapshotCache
 
@@ -89,7 +91,7 @@ async def refresh_lead_contacts(
             ).scalar_one_or_none()
             if row is None:
                 return None
-            if row.fetched_at < datetime.now(timezone.utc) - timedelta(days=30):
+            if row.fetched_at < datetime.now(UTC) - timedelta(days=30):
                 return None
             return row.payload or {}
 
@@ -99,7 +101,7 @@ async def refresh_lead_contacts(
             ).scalar_one_or_none()
             if existing:
                 existing.payload = payload
-                existing.fetched_at = datetime.now(timezone.utc)
+                existing.fetched_at = datetime.now(UTC)
             else:
                 s.add(FmcsaSnapshotCache(dot=dot, payload=payload))
             await s.flush()
@@ -144,4 +146,4 @@ async def segment_feed(
     return ContactListOut(items=items, next_cursor=next_cursor)
 
 
-__all__ = ["router", "FREIGHT_TITLES"]
+__all__ = ["FREIGHT_TITLES", "router"]

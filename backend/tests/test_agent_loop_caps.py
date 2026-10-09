@@ -11,10 +11,8 @@ of this test is strictly the loop's safety rails:
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass
-from unittest.mock import patch
 
 import httpx
 import pytest

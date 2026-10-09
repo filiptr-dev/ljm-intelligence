@@ -27,11 +27,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
-from app.models import CrawlRun, Lead
-from app.prospecting.pipeline import gemini_stage as gemini_stage_mod
-from app.prospecting.pipeline import run as run_mod
-from app.prospecting.pipeline.run import run_crawl
 from app.integrations.adapters.enrichment.fmcsa import DiscoveredLead
+from app.models import CrawlRun, Lead
+from app.prospecting.pipeline import gemini_stage as gemini_stage_mod, run as run_mod
+from app.prospecting.pipeline.run import run_crawl
 
 # ---------- fixtures / helpers ------------------------------------------------
 

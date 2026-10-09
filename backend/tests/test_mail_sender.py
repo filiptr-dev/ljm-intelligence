@@ -17,7 +17,6 @@ from pydantic import SecretStr
 from app.config import GmailSettings, Settings
 from app.integrations.adapters.email.sender import GmailSender, SimulatedSender, get_mail_sender
 
-
 # Sentinel: `None` is a valid override value for `gmail_sa_json`, so we need a
 # distinct marker for "not provided" that doesn't collide.
 _UNSET = object()

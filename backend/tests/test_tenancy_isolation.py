@@ -47,7 +47,7 @@ def _nonsuperuser_url() -> str:
     base = os.environ["DATABASE_URL_TEST_PG"]
     # Swap credentials; keep host+db.
     _, after = base.split("://", 1)
-    creds, hostpath = after.split("@", 1)
+    _creds, hostpath = after.split("@", 1)
     return f"postgresql+psycopg://app_user:app@{hostpath}"
 
 

@@ -353,7 +353,7 @@ def _bare_row(c: ShipperCandidate) -> ShipperRow:
         phone=c.phone,
         primary_email=c.primary_email,
         score=0,
-        reasons=tuple(),
+        reasons=(),
         promoted_lead_id=c.promoted_lead_id,
         match_reason=c.match_reason,
     )

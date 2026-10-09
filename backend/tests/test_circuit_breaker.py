@@ -13,11 +13,11 @@ import pytest
 from pydantic import SecretStr
 
 from app.config import Settings
-from app.shared.circuit_breaker import CircuitBreaker
 from app.integrations.adapters.loadboard.chr import ChrSource
 from app.integrations.adapters.loadboard.dat import DatSource
 from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source
 from app.integrations.adapters.loadboard.truckstop import TruckstopSource
+from app.shared.circuit_breaker import CircuitBreaker
 
 
 def test_fresh_breaker_is_closed() -> None:

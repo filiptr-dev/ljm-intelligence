@@ -9,18 +9,17 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+# Ensure every ORM model is registered on Base.metadata before create_all —
+# otherwise a FK pointing at `email_templates` is unresolvable.
+import app.models  # noqa: F401
 from app.db import Base
+from app.identity.models import SettingsRow
 from app.integrations.adapters.loadboard.registry import (
     _DB_OVERLAY,
     _DriverSwitch,
     prime_overlay_from_db,
     set_db_overlay,
 )
-# Ensure every ORM model is registered on Base.metadata before create_all —
-# otherwise a FK pointing at `email_templates` is unresolvable.
-import app.models  # noqa: F401
-from app.identity.models import SettingsRow
-
 
 pytestmark = pytest.mark.asyncio
 

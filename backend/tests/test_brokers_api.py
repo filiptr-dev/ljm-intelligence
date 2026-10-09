@@ -8,9 +8,8 @@ style as other API tests in this repo).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 import os
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient

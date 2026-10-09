@@ -57,7 +57,7 @@ async def prime_from_vault(sessionmaker: Any) -> None:
         from app.identity.credentials import CredentialVault, VaultConfigError, VaultNotFound
         from app.shared.orm import LJM_TENANT_ID
         from app.shared.tenant import TenantId
-    except Exception as exc:  # pragma: no cover
+    except ImportError as exc:  # pragma: no cover
         log.debug("mail/credentials: vault prime skipped (%s)", exc)
         return
     try:
@@ -83,7 +83,7 @@ def resolve_sa_info(settings: Any) -> dict[str, Any] | None:
     env_sa = None
     try:
         env_sa = settings.gmail.sa_json.get_secret_value() if settings.gmail.sa_json else None
-    except Exception:
+    except (AttributeError, ValueError):
         env_sa = None
     if env_sa:
         parsed = load_sa_info(env_sa)
@@ -96,7 +96,7 @@ def resolve_impersonate(settings: Any) -> str:
     """Env wins, else vault cache. Returns the admin-impersonate email."""
     try:
         env_imp = (getattr(settings.gmail, "admin_impersonate", "") or "").strip()
-    except Exception:
+    except (AttributeError, ValueError):
         env_imp = ""
     if env_imp:
         return env_imp

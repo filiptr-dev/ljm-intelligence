@@ -10,10 +10,12 @@ import httpx
 from pydantic import SecretStr
 
 from app.config import ChrSettings, DatSettings, Lb123Settings, Settings, TruckstopSettings
-from app.integrations.adapters.loadboard import chr as chr_mod
-from app.integrations.adapters.loadboard import dat as dat_mod
-from app.integrations.adapters.loadboard import loadboard123 as lb_mod
-from app.integrations.adapters.loadboard import truckstop as ts_mod
+from app.integrations.adapters.loadboard import (
+    chr as chr_mod,
+    dat as dat_mod,
+    loadboard123 as lb_mod,
+    truckstop as ts_mod,
+)
 
 
 def _s(**grp_overrides) -> Settings:
