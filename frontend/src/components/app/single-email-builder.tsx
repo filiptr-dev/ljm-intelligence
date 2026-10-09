@@ -166,7 +166,10 @@ export function SingleEmailBuilder({
         const hasBody = body.trim().length > 0
         if (hasBody && !custom) {
           const r = await aiRewrite({ body_text: body, tone, brief: custom ? brief : undefined })
-          await streamInto(r.body_text, setBody)
+          // Resolve `{{first_name}}` / `{{company}}` / `{{lane}}` etc. from
+          // the AI's output just like the draft path — tags in the rewrite
+          // would otherwise reach the sent body raw.
+          await streamInto(renderTemplate(r.body_text, to), setBody)
         } else {
           const d = await aiDraftCompose({
             to: to.email, purpose, tone,

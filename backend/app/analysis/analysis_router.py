@@ -8,6 +8,7 @@ than page views.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Literal
 
@@ -292,12 +293,14 @@ async def lead_ai_summary_endpoint(
     except Exception as exc:  # noqa: BLE001
         # Belt-and-suspenders — the panel renders a Retry on every "unavailable"
         # status, so a surprise bug (e.g. legacy row shape, DB-level glitch) is
-        # recoverable UX rather than a hard 500. The service already handles
-        # the known failure modes; this is purely a backstop.
+        # recoverable UX rather than a hard 500. Log with traceback so prod
+        # failures still show up in Render logs instead of degrading silently.
+        logging.getLogger(__name__).exception("lead summary service failed for %s", lead_id)
         return LeadAiSummaryOut(status="unavailable", ai_error=f"server_error:{type(exc).__name__}")
     try:
         return LeadAiSummaryOut(**r.__dict__)
     except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).exception("lead summary response shape error for %s", lead_id)
         return LeadAiSummaryOut(status="unavailable", ai_error=f"shape_error:{type(exc).__name__}")
 
 

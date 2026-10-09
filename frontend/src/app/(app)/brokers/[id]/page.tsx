@@ -332,7 +332,9 @@ function buildInitialRecipient(
   // their real first name rather than the first word of the company.
   // Falls back to the first named contact, then to the company name.
   const matched = b.contacts.find((c) => (c.email.value ?? "").toLowerCase() === email.toLowerCase())
-  const contactName = matched?.name.value ?? b.contacts[0]?.name.value ?? b.name
+  // Empty when we have no real contact person — email-preview renders
+  // "there" for `{{first_name}}` rather than the company's first word.
+  const contactName = matched?.name.value ?? b.contacts[0]?.name.value ?? ""
   // Build a human lane label from the broker's main lane when both ends
   // are known, so `{{lane}}` substitutes a real "Dallas → Chicago" instead
   // of the generic "your lanes" fallback. Equipment stays unset — the

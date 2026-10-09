@@ -7,7 +7,11 @@ import { cn } from "@/lib/utils"
 import type { EmailDesign, Recipient } from "./engine"
 
 export function renderTemplate(tpl: string, r?: Recipient) {
-  const first = r?.contactName.split(" ")[0] ?? "there"
+  // Only use a real person's first name. When we don't know the contact
+  // (contactName empty), fall back to "there" — never use the company's
+  // first word as the person's name ("Hi Acme" reads like broken merge).
+  const firstRaw = r?.contactName?.trim().split(" ")[0] ?? ""
+  const first = firstRaw || "there"
   return tpl
     .replaceAll("{{first_name}}", first)
     .replaceAll("{{company}}", r?.name ?? "your company")

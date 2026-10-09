@@ -30,7 +30,9 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
       const b = detail.broker
       const email = b.primary_email?.value ?? ""
       // Contact names come back as ContactFieldOut; unwrap to a plain string.
-      const contactName = b.contacts?.[0]?.name?.value ?? b.name
+      // Empty when no real contact person — email-preview falls back to
+      // "there" rather than using the company's first word as a name.
+      const contactName = b.contacts?.[0]?.name?.value ?? ""
       // BUG 4 — populate lane from the broker's main lane so the builder's
       // `{{lane}}` tag renders real cities (e.g. "Dallas → Chicago") instead
       // of the "your lanes" fallback whenever we have real data.
