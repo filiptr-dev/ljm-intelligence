@@ -167,3 +167,30 @@ export async function putLoadboardDrivers(
   })
   return data ?? null
 }
+
+// ---- Agent-browser sidecar (migration 0041) --------------------------------
+export type AgentBrowserState = components["schemas"]["AgentBrowserOut"]
+export type AgentBrowserPatch = components["schemas"]["AgentBrowserIn"]
+export type AgentBrowserTestResult = components["schemas"]["AgentBrowserTestOut"]
+
+export async function getAgentBrowser(): Promise<AgentBrowserState | null> {
+  const { data } = await api.GET("/settings/connectors/agent-browser", {})
+  return data ?? null
+}
+
+export async function putAgentBrowser(
+  patch: AgentBrowserPatch,
+): Promise<AgentBrowserState | null> {
+  const { data } = await api.PUT("/settings/connectors/agent-browser", { body: patch })
+  return data ?? null
+}
+
+export async function clearAgentBrowser(): Promise<AgentBrowserState | null> {
+  const { data } = await api.DELETE("/settings/connectors/agent-browser", {})
+  return data ?? null
+}
+
+export async function testAgentBrowser(): Promise<AgentBrowserTestResult | null> {
+  const { data } = await api.POST("/settings/connectors/agent-browser/test", {})
+  return data ?? null
+}

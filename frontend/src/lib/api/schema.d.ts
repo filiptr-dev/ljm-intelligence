@@ -493,6 +493,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/connectors/agent-browser": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Browser
+         * @description Status read: effective URL + whether a token is configured.
+         */
+        get: operations["get_agent_browser_settings_connectors_agent_browser_get"];
+        /**
+         * Put Agent Browser
+         * @description Write URL (plain column) and/or token (vault). Fields omitted stay as-is.
+         */
+        put: operations["put_agent_browser_settings_connectors_agent_browser_put"];
+        post?: never;
+        /**
+         * Clear Agent Browser
+         * @description Clear URL + token. Env values (if set) still apply.
+         */
+        delete: operations["clear_agent_browser_settings_connectors_agent_browser_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/connectors/agent-browser/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Agent Browser
+         * @description Call the sidecar's /health through the backend to prove reachability.
+         */
+        post: operations["test_agent_browser_settings_connectors_agent_browser_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capacity/posts": {
         parameters: {
             query?: never;
@@ -2387,6 +2435,43 @@ export interface components {
             items: (components["schemas"]["ActivityCallOut"] | components["schemas"]["ActivityEmailOut"])[];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /** AgentBrowserIn */
+        AgentBrowserIn: {
+            /** Url */
+            url?: string | null;
+            /** Token */
+            token?: string | null;
+        };
+        /** AgentBrowserOut */
+        AgentBrowserOut: {
+            /** Url */
+            url: string;
+            /** Url Source */
+            url_source: string;
+            /** Token Set */
+            token_set: boolean;
+            /** Token Source */
+            token_source: string;
+            /** Env Url Override */
+            env_url_override: boolean;
+            /** Env Token Override */
+            env_token_override: boolean;
+        };
+        /** AgentBrowserTestOut */
+        AgentBrowserTestOut: {
+            /** Ok */
+            ok: boolean;
+            /** Status */
+            status?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** Tools */
+            tools?: string[] | null;
+            /** Auth */
+            auth?: string | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
         };
         /** AiDraftComposeIn */
         AiDraftComposeIn: {
@@ -7475,6 +7560,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EiaKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_browser_settings_connectors_agent_browser_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentBrowserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_agent_browser_settings_connectors_agent_browser_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentBrowserIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentBrowserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_agent_browser_settings_connectors_agent_browser_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentBrowserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_agent_browser_settings_connectors_agent_browser_test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentBrowserTestOut"];
                 };
             };
             /** @description Validation Error */

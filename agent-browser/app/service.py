@@ -1,27 +1,37 @@
 """Agent-browser sidecar — Playwright/Chromium exposed as 5 HTTP verbs.
 
-This is the deployable twin of
-``backend/app/integrations/adapters/loadboard/agent_browser/service.py`` —
-same tool names, same request/response shapes. The backend's agent loop
-talks here over ``AGENT_BROWSER_URL`` (set in Settings or env); nothing
-else. The sidecar has no DB, no vault, no outbound calls other than the
-browser's own navigation.
+Deployable twin of ``backend/.../agent_browser/service.py`` — same tool
+names, same request/response shapes. The backend's agent loop talks here
+over ``AGENT_BROWSER_URL`` (set in the Settings UI); the sidecar has no
+DB, no vault, no outbound calls other than the browser's own navigation.
 
 Closed verb set (news-crawler ADR 0004): ``navigate``, ``read_page``,
-``scroll``, ``wait``, ``finish``. If and only if ``AGENT_BROWSER_TOKEN``
-is set in the environment, every POST must carry a matching
-``X-Agent-Token`` header; a mismatch is ``401``. The backend reads the
-same value from ``settings.agent_browser_token`` (env > settings-row) and
-sends it on every call.
+``scroll``, ``wait``, ``finish``.
+
+**Default closed.** This service is a public Render URL that drives a
+real browser; running it without auth would turn it into an open SSRF
+proxy. So:
+
+- ``AGENT_BROWSER_TOKEN`` must be set in the env. Unset → every tool call
+  returns ``401`` with ``token_not_configured``. ``/health`` stays open
+  so Render's health check works.
+- Every POST must carry a matching ``X-Agent-Token`` header; mismatch
+  = ``401``.
+- ``/navigate`` blocks RFC 1918 / loopback / link-local / cloud-metadata
+  hosts (SSRF). ``http://localhost``, ``http://169.254.169.254``,
+  ``http://10.0.0.5`` etc. are refused with ``400 private_or_internal_host``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
+import socket
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -39,6 +49,14 @@ ALLOWED_TOOLS: frozenset[str] = frozenset(
 SESSION_IDLE_SECONDS = int(os.getenv("AGENT_BROWSER_IDLE_SECONDS", "600"))
 SWEEP_EVERY_SECONDS = int(os.getenv("AGENT_BROWSER_SWEEP_SECONDS", "60"))
 REQUIRED_TOKEN = os.getenv("AGENT_BROWSER_TOKEN", "") or ""
+# Escape hatch for local dev / the contract-test suite — allow open mode
+# only when deliberately opted in. Prod defaults to closed.
+ALLOW_OPEN = os.getenv("AGENT_BROWSER_ALLOW_OPEN", "") in {"1", "true", "yes"}
+
+# Hosts we never let the browser touch, even if DNS resolves them.
+_METADATA_HOSTS = frozenset(
+    {"metadata.google.internal", "metadata", "instance-data.ec2.internal"}
+)
 
 
 class NavigateIn(BaseModel):
@@ -84,11 +102,55 @@ _sweep_task: asyncio.Task | None = None
 
 
 def _check_token(x_agent_token: str | None) -> None:
-    """If a token is configured, every mutating POST must carry it."""
+    """Default-closed: no token on the sidecar = refuse every tool call.
+
+    ``AGENT_BROWSER_ALLOW_OPEN=1`` is the escape hatch for the offline
+    contract-test suite and local dev; prod must set a real token.
+    """
     if not REQUIRED_TOKEN:
-        return
+        if ALLOW_OPEN:
+            return
+        raise HTTPException(401, "token_not_configured")
     if (x_agent_token or "") != REQUIRED_TOKEN:
         raise HTTPException(401, "bad_token")
+
+
+def _is_private_or_internal(host: str) -> bool:
+    """True if ``host`` resolves to a loopback / private / link-local / metadata address.
+
+    Catches both literal-IP SSRF (``http://10.0.0.5``) and DNS-rebinding
+    attempts: we resolve the hostname and reject if **any** returned
+    address is private. The cost (one ``getaddrinfo``) is cheap vs. the
+    cost of a public browser proxying into the Render VPC.
+    """
+    if not host:
+        return True
+    normalized = host.strip().lower().rstrip(".")
+    if normalized in _METADATA_HOSTS:
+        return True
+    # Resolve both literal IPs and hostnames.
+    try:
+        infos = socket.getaddrinfo(normalized, None)
+    except socket.gaierror:
+        # Unresolvable → let Playwright 404 instead of us faking a 400.
+        return False
+    for info in infos:
+        sockaddr = info[4]
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return True
+    return False
 
 
 async def _ensure_browser() -> Any:
@@ -172,12 +234,23 @@ async def _shutdown() -> None:  # pragma: no cover - runtime
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    """Unauthenticated — Render's health check pings this without the token."""
+    """Unauthenticated — Render's health check pings this without the token.
+
+    ``auth`` is "token" when configured and "closed" when the token is unset
+    (default-closed; tool calls will 401). "open" only when the operator
+    deliberately enabled ``AGENT_BROWSER_ALLOW_OPEN``.
+    """
+    if REQUIRED_TOKEN:
+        auth = "token"
+    elif ALLOW_OPEN:
+        auth = "open"
+    else:
+        auth = "closed"
     return {
         "ok": True,
         "tools": sorted(ALLOWED_TOOLS),
         "sessions": len(_sessions),
-        "auth": "token" if REQUIRED_TOKEN else "open",
+        "auth": auth,
     }
 
 
@@ -186,6 +259,15 @@ async def navigate(
     body: NavigateIn, x_agent_token: str | None = Header(default=None)
 ) -> ToolOut:
     _check_token(x_agent_token)
+    try:
+        parsed = urlparse(body.url)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"bad_url:{exc}") from exc
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(400, "scheme_not_http_or_https")
+    if _is_private_or_internal(parsed.hostname or ""):
+        # SSRF guard: refuse to proxy a browser into a VPC / metadata host.
+        raise HTTPException(400, "private_or_internal_host")
     page = await _get_page(body.session_id)
     try:
         await page.goto(body.url, wait_until="domcontentloaded", timeout=20000)

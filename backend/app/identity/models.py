@@ -235,6 +235,12 @@ class SettingsRow(Base):
     loads_agent_kill: Mapped[str] = mapped_column(
         String(8), nullable=False, default="off", server_default=text("'off'")
     )
+    # Headless-browser sidecar URL (migration 0041). Env AGENT_BROWSER_URL
+    # still wins when set; otherwise this column drives the agent-loop.
+    # Shared secret lives in the vault (connector="agent_browser").
+    agent_browser_url: Mapped[str] = mapped_column(
+        String(500), nullable=False, default="", server_default=text("''")
+    )
 
 
 class User(TenantMixin, Base):

@@ -30,13 +30,25 @@ _DRIVER_ATTR = {
 # (``LOADS_<SRC>_DRIVER`` != "off"); otherwise the overlay wins; otherwise
 # the hard-coded default ("off"). Keeps the registry sync-friendly without
 # every ``_mode()`` lookup opening a DB session.
-_DB_OVERLAY: dict[str, str] = {}  # keys: dat/chr/loadboard123/truckstop/kill
+_DB_OVERLAY: dict[str, str] = {}  # keys: dat/chr/loadboard123/truckstop/kill/agent_browser_url
 
 
 def set_db_overlay(**values: str) -> None:
-    """Replace known keys on the overlay — called from the settings PUT."""
+    """Replace known keys on the overlay — called from the settings PUT.
+
+    Note: ``agent_browser_url`` is a free-form string (not a driver enum),
+    so we never coerce it to "off".
+    """
     for k, v in values.items():
-        _DB_OVERLAY[k] = str(v or "off")
+        if k == "agent_browser_url":
+            _DB_OVERLAY[k] = str(v or "")
+        else:
+            _DB_OVERLAY[k] = str(v or "off")
+
+
+def db_overlay_agent_browser_url() -> str:
+    """Sync accessor — the ``AiPageSource.enabled`` fast path reads this."""
+    return str(_DB_OVERLAY.get("agent_browser_url", "") or "")
 
 
 async def prime_overlay_from_db(sessionmaker) -> None:
@@ -63,6 +75,7 @@ async def prime_overlay_from_db(sessionmaker) -> None:
                 loadboard123=getattr(row, "loads_lb123_driver", "off") or "off",
                 truckstop=getattr(row, "loads_truckstop_driver", "off") or "off",
                 kill=getattr(row, "loads_agent_kill", "off") or "off",
+                agent_browser_url=getattr(row, "agent_browser_url", "") or "",
             )
     except Exception:  # noqa: BLE001  pragma: no cover
         # Boot must not fail — the overlay stays empty and env/default win.
@@ -72,10 +85,10 @@ async def prime_overlay_from_db(sessionmaker) -> None:
 class _DriverSwitch:
     """Composite that reads the per-source driver env and delegates."""
 
-    def __init__(self, kind: str, api_source: LoadSource, settings) -> None:
+    def __init__(self, kind: str, api_source: LoadSource, settings, sessionmaker=None) -> None:
         self.kind = kind
         self._api = api_source
-        self._agent = AgentSource(src=kind)
+        self._agent = AgentSource(src=kind, sessionmaker=sessionmaker)
         self._settings = settings
 
     def _mode(self) -> str:
@@ -133,24 +146,24 @@ class _DriverSwitch:
         return ConnectionTest(ok=False, reason=self.reason() or "driver=off")
 
 
-def all_sources(settings) -> list[LoadSource]:
+def all_sources(settings, sessionmaker=None) -> list[LoadSource]:
     return [
-        AiPageSource(settings),
-        BrokerPageSource(settings),
+        AiPageSource(settings, sessionmaker=sessionmaker),
+        BrokerPageSource(settings, sessionmaker=sessionmaker),
         PasteSource(),
-        _DriverSwitch("dat", DatSource(settings), settings),
-        _DriverSwitch("chr", ChrSource(settings), settings),
-        _DriverSwitch("loadboard123", LoadBoard123Source(settings), settings),
-        _DriverSwitch("truckstop", TruckstopSource(settings), settings),
+        _DriverSwitch("dat", DatSource(settings), settings, sessionmaker=sessionmaker),
+        _DriverSwitch("chr", ChrSource(settings), settings, sessionmaker=sessionmaker),
+        _DriverSwitch("loadboard123", LoadBoard123Source(settings), settings, sessionmaker=sessionmaker),
+        _DriverSwitch("truckstop", TruckstopSource(settings), settings, sessionmaker=sessionmaker),
     ]
 
 
-def enabled_sources(settings) -> list[LoadSource]:
-    return [s for s in all_sources(settings) if s.enabled]
+def enabled_sources(settings, sessionmaker=None) -> list[LoadSource]:
+    return [s for s in all_sources(settings, sessionmaker) if s.enabled]
 
 
-def by_kind(settings, kind: str) -> LoadSource | None:
-    for s in all_sources(settings):
+def by_kind(settings, kind: str, sessionmaker=None) -> LoadSource | None:
+    for s in all_sources(settings, sessionmaker):
         if s.kind == kind:
             return s
     return None
@@ -159,6 +172,7 @@ def by_kind(settings, kind: str) -> LoadSource | None:
 __all__ = [
     "all_sources",
     "by_kind",
+    "db_overlay_agent_browser_url",
     "enabled_sources",
     "prime_overlay_from_db",
     "set_db_overlay",

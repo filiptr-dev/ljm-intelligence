@@ -56,17 +56,19 @@ class _FakeBrowser:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    # Reload the module clean each test so the module-level `_sessions`
-    # dict doesn't leak across cases.
+    """Open-mode fixture — contract tests only (prod must set a token)."""
     for mod in [m for m in list(sys.modules) if m == "app.service"]:
         del sys.modules[mod]
     monkeypatch.delenv("AGENT_BROWSER_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_BROWSER_ALLOW_OPEN", "1")
     service = importlib.import_module("app.service")
 
     async def _fake_ensure_browser() -> _FakeBrowser:
         return _FakeBrowser()
 
     monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+    # Keep SSRF guard deterministic in the loop test — example.com is public.
+    monkeypatch.setattr(service, "_is_private_or_internal", lambda host: False)
     return TestClient(service.app)
 
 
@@ -121,12 +123,14 @@ def test_token_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     for mod in [m for m in list(sys.modules) if m == "app.service"]:
         del sys.modules[mod]
     monkeypatch.setenv("AGENT_BROWSER_TOKEN", "s3cret")
+    monkeypatch.delenv("AGENT_BROWSER_ALLOW_OPEN", raising=False)
     service = importlib.import_module("app.service")
 
     async def _fake_ensure_browser() -> _FakeBrowser:
         return _FakeBrowser()
 
     monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+    monkeypatch.setattr(service, "_is_private_or_internal", lambda host: False)
     c = TestClient(service.app)
 
     # No token → 401
@@ -145,3 +149,61 @@ def test_token_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     r = c.get("/health")
     assert r.status_code == 200
     assert r.json()["auth"] == "token"
+
+
+def test_default_closed_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No ``AGENT_BROWSER_TOKEN`` set → every tool call is refused."""
+    for mod in [m for m in list(sys.modules) if m == "app.service"]:
+        del sys.modules[mod]
+    monkeypatch.delenv("AGENT_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_BROWSER_ALLOW_OPEN", raising=False)
+    service = importlib.import_module("app.service")
+    c = TestClient(service.app)
+
+    r = c.post("/navigate", json={"url": "https://example.com/", "session_id": "x"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "token_not_configured"
+
+    # /health still responds (so Render's healthcheck works) and advertises closed.
+    r = c.get("/health")
+    assert r.status_code == 200
+    assert r.json()["auth"] == "closed"
+
+
+def test_ssrf_blocks_private_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RFC-1918 / loopback / link-local / metadata hosts → 400."""
+    for mod in [m for m in list(sys.modules) if m == "app.service"]:
+        del sys.modules[mod]
+    monkeypatch.setenv("AGENT_BROWSER_TOKEN", "s3cret")
+    monkeypatch.delenv("AGENT_BROWSER_ALLOW_OPEN", raising=False)
+    service = importlib.import_module("app.service")
+
+    async def _fake_ensure_browser() -> _FakeBrowser:
+        return _FakeBrowser()
+
+    monkeypatch.setattr(service, "_ensure_browser", _fake_ensure_browser)
+    c = TestClient(service.app)
+    headers = {"X-Agent-Token": "s3cret"}
+
+    # Literal private IPs — resolver returns the IP itself.
+    for bad in (
+        "http://127.0.0.1/",
+        "http://localhost/",
+        "http://10.0.0.5/",
+        "http://192.168.1.1/",
+        "http://172.16.0.1/",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://metadata.google.internal/computeMetadata/v1/",
+    ):
+        r = c.post("/navigate", json={"url": bad, "session_id": "s"}, headers=headers)
+        assert r.status_code == 400, f"expected 400 for {bad}, got {r.status_code}"
+        assert r.json()["detail"] == "private_or_internal_host"
+
+    # ftp:// is a scheme refusal (before the SSRF check).
+    r = c.post(
+        "/navigate",
+        json={"url": "ftp://files.example.com/", "session_id": "s"},
+        headers=headers,
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "scheme_not_http_or_https"

@@ -690,3 +690,191 @@ async def clear_eia_key(request: Request) -> EiaKeyOut:
         )
         await s.commit()
     return EiaKeyOut(configured=False)
+
+
+# ---- Agent-browser sidecar (migration 0041) -------------------------------
+# URL stored on the settings row; token stored in the vault under the
+# ``agent_browser`` connector. Env (``AGENT_BROWSER_URL`` /
+# ``AGENT_BROWSER_TOKEN``) still wins at read time; the UI flags that.
+
+
+class AgentBrowserIn(BaseModel):
+    url: str | None = Field(default=None, max_length=500)
+    token: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class AgentBrowserOut(BaseModel):
+    url: str
+    url_source: str  # "env" | "db" | "unset"
+    token_set: bool
+    token_source: str  # "env" | "db" | "unset"
+    env_url_override: bool
+    env_token_override: bool
+
+
+def _mask_url(u: str) -> str:
+    return u
+
+
+async def _agent_browser_state(settings, sessionmaker) -> AgentBrowserOut:
+    env_url = (getattr(settings, "agent_browser_url", "") or "").strip()
+    env_token = (getattr(settings, "agent_browser_token", "") or "").strip()
+    db_url = ""
+    db_token_set = False
+    async with sessionmaker() as s:
+        row = (
+            await s.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+        ).scalar_one_or_none()
+        if row is not None:
+            db_url = (getattr(row, "agent_browser_url", "") or "").strip()
+        from app.identity.credentials import (
+            CredentialVault,
+            VaultConfigError,
+            VaultNotFound,
+        )
+        try:
+            vault = await CredentialVault.for_session(s)
+            try:
+                _ = await vault.get(
+                    s, TenantId(LJM_TENANT_ID), "agent_browser", "token"
+                )
+                db_token_set = True
+            except VaultNotFound:
+                db_token_set = False
+        except VaultConfigError:
+            db_token_set = False
+    url = env_url or db_url
+    url_source = "env" if env_url else ("db" if db_url else "unset")
+    token_set = bool(env_token or db_token_set)
+    token_source = "env" if env_token else ("db" if db_token_set else "unset")
+    return AgentBrowserOut(
+        url=url,
+        url_source=url_source,
+        token_set=token_set,
+        token_source=token_source,
+        env_url_override=bool(env_url),
+        env_token_override=bool(env_token),
+    )
+
+
+@router.get("/connectors/agent-browser", response_model=AgentBrowserOut)
+async def get_agent_browser(request: Request) -> AgentBrowserOut:
+    """Status read: effective URL + whether a token is configured."""
+    return await _agent_browser_state(
+        request.app.state.settings, request.app.state.sessionmaker
+    )
+
+
+@router.put("/connectors/agent-browser", response_model=AgentBrowserOut)
+async def put_agent_browser(payload: AgentBrowserIn, request: Request) -> AgentBrowserOut:
+    """Write URL (plain column) and/or token (vault). Fields omitted stay as-is."""
+    from app.identity.credentials import CredentialVault, VaultConfigError
+    from app.integrations.adapters.loadboard.registry import set_db_overlay
+
+    async with request.app.state.sessionmaker() as s:
+        row = (
+            await s.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+        ).scalar_one_or_none()
+        if row is None:
+            row = SettingsRow(id=1)
+            s.add(row)
+            await s.flush()
+        if payload.url is not None:
+            cleaned = payload.url.strip()
+            if cleaned and not cleaned.startswith(("http://", "https://")):
+                raise HTTPException(400, "url_must_be_http_or_https")
+            row.agent_browser_url = cleaned
+        if payload.token is not None:
+            try:
+                vault = await CredentialVault.for_session(s)
+            except VaultConfigError as exc:
+                raise HTTPException(500, f"vault_unavailable:{exc}") from exc
+            await vault.put(
+                s, TenantId(LJM_TENANT_ID), "agent_browser", "token",
+                {"token": payload.token},
+            )
+        await s.commit()
+        await s.refresh(row)
+    # Refresh the in-process overlay so AiPageSource.enabled sees the URL
+    # on the next registry call without a restart.
+    set_db_overlay(agent_browser_url=row.agent_browser_url or "")
+    return await _agent_browser_state(
+        request.app.state.settings, request.app.state.sessionmaker
+    )
+
+
+@router.delete("/connectors/agent-browser", response_model=AgentBrowserOut)
+async def clear_agent_browser(request: Request) -> AgentBrowserOut:
+    """Clear URL + token. Env values (if set) still apply."""
+    from app.identity.models import TenantCredential
+    from app.integrations.adapters.loadboard.registry import set_db_overlay
+
+    async with request.app.state.sessionmaker() as s:
+        row = (
+            await s.execute(_sa_select(SettingsRow).where(SettingsRow.id == 1))
+        ).scalar_one_or_none()
+        if row is not None:
+            row.agent_browser_url = ""
+        await s.execute(
+            _sa_delete(TenantCredential).where(
+                TenantCredential.tenant_id == LJM_TENANT_ID,
+                TenantCredential.connector == "agent_browser",
+                TenantCredential.kind == "token",
+            )
+        )
+        await s.commit()
+    set_db_overlay(agent_browser_url="")
+    return await _agent_browser_state(
+        request.app.state.settings, request.app.state.sessionmaker
+    )
+
+
+class AgentBrowserTestOut(BaseModel):
+    ok: bool
+    status: int | None = None
+    reason: str | None = None
+    tools: list[str] | None = None
+    auth: str | None = None  # "token" | "open"
+    latency_ms: int | None = None
+
+
+@router.post("/connectors/agent-browser/test", response_model=AgentBrowserTestOut)
+async def test_agent_browser(request: Request) -> AgentBrowserTestOut:
+    """Call the sidecar's /health through the backend to prove reachability."""
+    import time as _time
+
+    import httpx as _httpx
+
+    from app.integrations.adapters.loadboard.agent_browser.config import (
+        resolve as resolve_agent_browser,
+    )
+
+    cfg = await resolve_agent_browser(
+        request.app.state.settings, request.app.state.sessionmaker
+    )
+    if not cfg.url:
+        return AgentBrowserTestOut(ok=False, reason="agent_browser_url_unset")
+    t0 = _time.monotonic()
+    try:
+        async with _httpx.AsyncClient(timeout=10.0) as c:
+            r = await c.get(cfg.url.rstrip("/") + "/health")
+    except Exception as exc:  # noqa: BLE001
+        return AgentBrowserTestOut(ok=False, reason=f"http:{type(exc).__name__}:{exc}")
+    latency = int((_time.monotonic() - t0) * 1000)
+    if r.status_code != 200:
+        return AgentBrowserTestOut(
+            ok=False, status=r.status_code, reason="non_200", latency_ms=latency
+        )
+    try:
+        body = r.json() if r.content else {}
+    except ValueError:
+        body = {}
+    tools = body.get("tools") if isinstance(body, dict) else None
+    auth = body.get("auth") if isinstance(body, dict) else None
+    return AgentBrowserTestOut(
+        ok=True,
+        status=200,
+        tools=list(tools) if isinstance(tools, list) else None,
+        auth=str(auth) if isinstance(auth, str) else None,
+        latency_ms=latency,
+    )

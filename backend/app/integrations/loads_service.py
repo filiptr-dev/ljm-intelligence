@@ -341,7 +341,7 @@ async def list_loads(session: AsyncSession, *, limit: int = 50) -> list[LoadRow]
 
 async def list_sources(sessionmaker: Any, settings: Any) -> list[SourceRow]:
     items: list[SourceRow] = []
-    for src in all_sources(settings):
+    for src in all_sources(settings, sessionmaker):
         reason = getattr(src, "reason", None)
         reason_val = reason() if callable(reason) else None
         verified = await _read_configured_at(sessionmaker, src.kind)
@@ -357,7 +357,7 @@ async def list_sources(sessionmaker: Any, settings: Any) -> list[SourceRow]:
 
 
 async def test_source(sessionmaker: Any, settings: Any, kind: str) -> ConnectionTestRow:
-    src = by_kind(settings, kind)
+    src = by_kind(settings, kind, sessionmaker)
     if src is None:
         raise UnknownSourceError(kind)
     result: ConnectionTest = await src.test_connection(settings)
@@ -380,7 +380,7 @@ async def test_source(sessionmaker: Any, settings: Any, kind: str) -> Connection
 
 
 async def refresh_source(sessionmaker: Any, settings: Any, kind: str) -> RefreshStatsRow:
-    src = by_kind(settings, kind)
+    src = by_kind(settings, kind, sessionmaker)
     if src is None:
         raise UnknownSourceError(kind)
     if not src.enabled:
@@ -400,7 +400,7 @@ async def refresh_source(sessionmaker: Any, settings: Any, kind: str) -> Refresh
 
 async def refresh_all(sessionmaker: Any, settings: Any) -> RefreshAllResult:
     items: list[RefreshStatsRow] = []
-    for src in enabled_sources(settings):
+    for src in enabled_sources(settings, sessionmaker):
         try:
             raws = await src.fetch(settings)
         except Exception as exc:  # noqa: BLE001

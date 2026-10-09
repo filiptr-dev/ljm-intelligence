@@ -17,6 +17,7 @@ import logging
 from typing import Any
 
 from app.integrations.adapters.loadboard.agent_browser import AgentSource
+from app.integrations.adapters.loadboard.agent_browser.config import resolve as resolve_agent_browser
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
@@ -25,8 +26,9 @@ log = logging.getLogger(__name__)
 class AiPageSource:
     kind: str = "ai_page"
 
-    def __init__(self, settings: Any | None = None) -> None:
+    def __init__(self, settings: Any | None = None, *, sessionmaker: Any = None) -> None:
         self._settings = settings
+        self._sessionmaker = sessionmaker
 
     def _urls(self, settings) -> list[dict]:
         raw = getattr(settings, "load_source_urls", None) or []
@@ -37,6 +39,16 @@ class AiPageSource:
     def _kill(self, settings) -> bool:
         return (getattr(settings, "loads_agent_kill", "") or "") == "1"
 
+    def _agent_url(self, settings) -> str:
+        # Env fast path first, then the in-process DB overlay primed at
+        # lifespan start / refreshed by the settings PUT.
+        env_url = (getattr(settings, "agent_browser_url", "") or "").strip()
+        if env_url:
+            return env_url
+        # Local import avoids a circular import on module load.
+        from app.integrations.adapters.loadboard.registry import db_overlay_agent_browser_url
+        return db_overlay_agent_browser_url()
+
     @property
     def enabled(self) -> bool:
         settings = self._settings
@@ -44,7 +56,7 @@ class AiPageSource:
             return False
         if self._kill(settings):
             return False
-        if not (getattr(settings, "agent_browser_url", "") or ""):
+        if not self._agent_url(settings):
             return False
         return len(self._urls(settings)) > 0
 
@@ -54,14 +66,14 @@ class AiPageSource:
             return "no_settings"
         if self._kill(settings):
             return "agent_killed"
-        if not (getattr(settings, "agent_browser_url", "") or ""):
+        if not self._agent_url(settings):
             return "agent_browser_url_unset"
         if not self._urls(settings):
             return "no_source_urls"
         return None
 
     async def fetch(self, settings) -> list[RawLoad]:
-        if not (getattr(settings, "agent_browser_url", "") or ""):
+        if not self._agent_url(settings):
             return []
         if self._kill(settings):
             return []
@@ -73,7 +85,10 @@ class AiPageSource:
             url = str(entry.get("url") or "")
             if not url:
                 continue
-            agent = AgentSource(src="broker_page", start_url=url, allowlist=[url])
+            agent = AgentSource(
+                src="broker_page", start_url=url, allowlist=[url],
+                sessionmaker=self._sessionmaker,
+            )
             try:
                 raws = await agent.fetch(settings)
             except Exception as exc:  # noqa: BLE001

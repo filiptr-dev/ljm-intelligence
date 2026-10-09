@@ -31,6 +31,7 @@ import {
 } from "@/lib/api/connectors"
 import { AiProvidersPanel } from "./ai-providers-panel"
 import { ConnectorsPanel } from "./connectors-panel"
+import { AgentBrowserPanel } from "./agent-browser-panel"
 import { LoadboardsPanel, SRCS, type SrcKey } from "./loadboards-panel"
 import { OwnerSwitches } from "./owner-switches"
 
@@ -229,6 +230,7 @@ export function IntegrationsStatus() {
           {open === "loadsettings" && (
             <div className="space-y-4">
               <LoadboardsPanel />
+              <AgentBrowserPanel />
               <ConnectorsPanel sections={["sources", "eia"]} />
             </div>
           )}

@@ -23,6 +23,10 @@ from app.integrations.adapters.loadboard.agent_browser.agent import (
     AgentResult,
     run as run_agent,
 )
+from app.integrations.adapters.loadboard.agent_browser.config import (
+    AgentBrowserConfig,
+    resolve as resolve_agent_browser,
+)
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)
@@ -38,17 +42,17 @@ _DRIVER_ENV_ATTR = {
 }
 
 
-def _driver_for(settings, src: str) -> str:
+def _driver_for(settings, src: str, *, agent_url: str = "") -> str:
     """Return ``off | api | agent`` for ``src``.
 
-    Unknown source → ``off`` (defensive). The settings row isn't consulted
-    here — env wins; the Settings UI write path (future) will set env-shaped
-    values that this reads back.
+    ``agent_url`` is the already-resolved URL (env > DB) — accepted here so
+    the caller doesn't have to repeat the overlay. Unknown source → ``off``
+    (defensive).
     """
     attr = _DRIVER_ENV_ATTR.get(src, None)
     if attr is None:
-        # broker_page / ai_page — always agent when agent sidecar is on.
-        return "agent" if (getattr(settings, "agent_browser_url", "") or "") else "off"
+        # broker_page / ai_page — always agent when the sidecar URL is set.
+        return "agent" if agent_url else "off"
     return str(getattr(settings, attr, "off") or "off")
 
 
@@ -62,12 +66,15 @@ class AgentSource:
         self._allowlist = allowlist or ([start_url] if start_url else [])
         self._sessionmaker = sessionmaker
 
-    def _env_ok(self, settings) -> tuple[bool, str | None]:
+    def _env_ok(self, settings, cfg: AgentBrowserConfig) -> tuple[bool, str | None]:
         if (getattr(settings, "loads_agent_kill", "") or "") == "1":
             return False, "agent_killed"
-        if not (getattr(settings, "agent_browser_url", "") or ""):
+        if not cfg.url:
             return False, "agent_browser_url_unset"
-        if _driver_for(settings, self.kind) != "agent" and self.kind not in {"ai_page", "broker_page"}:
+        if (
+            _driver_for(settings, self.kind, agent_url=cfg.url) != "agent"
+            and self.kind not in {"ai_page", "broker_page"}
+        ):
             return False, "driver_not_agent"
         return True, None
 
@@ -117,7 +124,8 @@ class AgentSource:
             await s.commit()
 
     async def fetch(self, settings) -> list[RawLoad]:
-        ok, reason = self._env_ok(settings)
+        cfg = await resolve_agent_browser(settings, self._sessionmaker)
+        ok, reason = self._env_ok(settings, cfg)
         if not ok:
             log.info("agent/%s: disabled (%s)", self.kind, reason)
             return []
@@ -140,19 +148,20 @@ class AgentSource:
         start_url = self._start_url or f"about:source/{self.kind}"
         result = await run_agent(
             provider=provider,
-            agent_browser_url=settings.agent_browser_url,
+            agent_browser_url=cfg.url,
             source=self.kind,
             start_url=start_url,
             session_id=session_id,
             allowlist=self._allowlist or [start_url],
             caps=caps,
-            agent_browser_token=getattr(settings, "agent_browser_token", "") or "",
+            agent_browser_token=cfg.token,
         )
         await self._log_run(settings, result)
         return result.loads
 
     async def test_connection(self, settings) -> ConnectionTest:
-        ok, reason = self._env_ok(settings)
+        cfg = await resolve_agent_browser(settings, self._sessionmaker)
+        ok, reason = self._env_ok(settings, cfg)
         return ConnectionTest(ok=ok, latency_ms=0, reason=reason, sample_count=0)
 
 

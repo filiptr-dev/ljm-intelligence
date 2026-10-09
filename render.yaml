@@ -19,11 +19,13 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: checksPass
     envVars:
-      # Shared secret with the api service. If unset here AND unset on the
-      # api service, the sidecar is open (handy for first-boot debugging).
-      # In prod: set the same value on both services.
+      # Render generates a strong random value on first deploy. The operator
+      # pastes it into the Settings UI as the token the backend sends; a
+      # missing token leaves the sidecar closed (every tool call 401) so a
+      # misconfigured deploy fails loud instead of becoming an open SSRF
+      # proxy.
       - key: AGENT_BROWSER_TOKEN
-        sync: false
+        generateValue: true
       - key: AGENT_BROWSER_IDLE_SECONDS
         value: "600"
 
@@ -209,15 +211,10 @@ services:
         sync: false
       - key: TRUCKSTOP_PASSWORD
         sync: false
-      # ---- Headless-browser sidecar (agent-browser service above)
-      # Set to the public HTTPS URL of ljm-intelligence-agent-browser on
-      # first deploy (e.g. https://ljm-intelligence-agent-browser.onrender.com).
-      # Render doesn't expose a `fromService` URL property that includes the
-      # scheme, so this stays sync:false — one-time paste after the sidecar
-      # service comes up. Absent → agent sources short-circuit as disabled;
-      # never a boot error.
-      - key: AGENT_BROWSER_URL
-        sync: false
-      # Must match AGENT_BROWSER_TOKEN on the sidecar. Both empty = open.
-      - key: AGENT_BROWSER_TOKEN
-        sync: false
+      # Note: AGENT_BROWSER_URL + AGENT_BROWSER_TOKEN deliberately NOT set
+      # here. Standing project rule (honeypot: "secrets in DB, not env"):
+      # the operator pastes the sidecar's public URL and the token (which
+      # Render generated above on the sidecar service) into the Settings
+      # UI; the backend resolves env > DB and will fall through to DB
+      # since no env is set. Env override stays available by setting
+      # these on the dashboard in a pinch.
