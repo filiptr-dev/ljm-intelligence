@@ -51,6 +51,21 @@ class BrandBlock:
 
 DEFAULT_BRAND = BrandBlock()
 
+# One brand-default banner (pre-rendered PNG, hosted by the Vercel frontend
+# from `frontend/public/email/`). Gmail/Outlook don't render inline SVG, so we
+# ship a raster at an absolute URL — same mechanism as the logo.
+TRUCK_BANNER_URL = "https://ljm-intelligence.vercel.app/email/truck-banner@2x.png"
+
+
+def _truck_banner() -> str:
+    return (
+        '<table role="presentation" cellspacing="0" cellpadding="0" border="0" '
+        'width="100%" style="margin-bottom:16px;background:#f4f2ee"><tr><td align="center" '
+        f'style="padding:0"><img src="{TRUCK_BANNER_URL}" alt="LJM International truck" '
+        'width="560" height="168" style="display:block;border:0;outline:none;'
+        'text-decoration:none;width:100%;max-width:560px;height:auto" /></td></tr></table>'
+    )
+
 
 def _paragraphs(body_text: str) -> list[str]:
     """Split on blank lines; each chunk becomes one <p>."""
@@ -148,6 +163,8 @@ def render_email(
     sig_html = _signature(br, accent) if design.signature else ""
     logo_html = _logo_header(br, accent) if (design.logo and not plain) else ""
 
+    truck_html = _truck_banner() if (design.show_truck and not plain) else ""
+
     footer_block = ""
     if footer_html:
         footer_block = (
@@ -157,7 +174,7 @@ def render_email(
             f'font-size:11px;line-height:1.5;color:#6b7280">{footer_html}</td></tr></table>'
         )
 
-    inner = f"{logo_html}{para_html}{cta_html}{sig_html}{footer_block}"
+    inner = f"{logo_html}{truck_html}{para_html}{cta_html}{sig_html}{footer_block}"
 
     if design.layout == "card":
         inner = (

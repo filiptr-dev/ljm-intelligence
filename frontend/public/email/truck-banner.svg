@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 180" width="600" height="180">
+  <defs>
+    <linearGradient id="cab" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d23a58"/><stop offset="0.55" stop-color="#BC2444"/><stop offset="1" stop-color="#8e1a33"/></linearGradient>
+    <linearGradient id="van" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3e0d8"/></linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b6672"/><stop offset="0.5" stop-color="#262a30"/><stop offset="1" stop-color="#171a1e"/></linearGradient>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f5f7"/><stop offset="0.5" stop-color="#b8bcc3"/><stop offset="1" stop-color="#868b93"/></linearGradient>
+    <radialGradient id="rim" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#f1f2f4"/><stop offset="1" stop-color="#a5aab2"/></radialGradient>
+    <g id="wheel">
+      <circle r="16" fill="#17181b"/>
+      <circle r="14.2" fill="none" stroke="#2c2e33" stroke-width="2" stroke-dasharray="2 2.2"/>
+      <circle r="10" fill="url(#rim)" stroke="#6f747c" stroke-width="0.8"/>
+      <circle r="6" fill="#d9dce0" stroke="#6f747c" stroke-width="0.6"/>
+      <circle r="1.8" fill="#2b2d31"/>
+      <g fill="#4a4e55"><circle cx="0" cy="-8" r="0.9"/><circle cx="7.6" cy="-2.5" r="0.9"/><circle cx="4.7" cy="6.5" r="0.9"/><circle cx="-4.7" cy="6.5" r="0.9"/><circle cx="-7.6" cy="-2.5" r="0.9"/></g>
+    </g>
+  </defs>
+  <rect width="600" height="180" fill="#f4f2ee"/>
+  <rect y="172" width="600" height="8" fill="#16171a"/>
+  <!-- ground shadow -->
+  <ellipse cx="300" cy="166" rx="270" ry="5" fill="#16171a" opacity="0.18"/>
+  <!-- trailer -->
+  <rect x="24" y="22" width="338" height="112" rx="3" fill="url(#van)" stroke="#16171a" stroke-width="3"/>
+  <g stroke="#cfcac0" stroke-width="1.6"><line x1="70" y1="25" x2="70" y2="131"/><line x1="116" y1="25" x2="116" y2="131"/><line x1="162" y1="25" x2="162" y2="131"/><line x1="208" y1="25" x2="208" y2="131"/><line x1="254" y1="25" x2="254" y2="131"/><line x1="300" y1="25" x2="300" y2="131"/><line x1="332" y1="25" x2="332" y2="131"/></g>
+  <rect x="24" y="22" width="338" height="9" fill="#BC2444"/>
+  <rect x="24" y="100" width="338" height="3" fill="#BC2444" opacity="0.85"/>
+  <text x="193" y="80" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="26" letter-spacing="3" fill="#16171a">LJM INTERNATIONAL</text>
+  <rect x="24" y="134" width="338" height="9" fill="#16171a"/>
+  <!-- landing gear + underride -->
+  <rect x="262" y="143" width="5" height="22" fill="#16171a"/><rect x="254" y="162" width="21" height="3" fill="#16171a"/>
+  <rect x="27" y="136" width="4" height="8" fill="#BC2444"/><rect x="355" y="136" width="4" height="8" fill="#BC2444"/>
+  <!-- chassis -->
+  <rect x="362" y="136" width="206" height="8" fill="#16171a"/>
+  <!-- exhaust stacks -->
+  <rect x="396" y="6" width="7" height="86" rx="3" fill="url(#chrome)" stroke="#16171a" stroke-width="1.5"/>
+  <rect x="408" y="14" width="7" height="78" rx="3" fill="url(#chrome)" stroke="#16171a" stroke-width="1.5"/>
+  <!-- sleeper -->
+  <path d="M364 40 h50 v96 h-50 z" fill="url(#cab)" stroke="#16171a" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="372" y="54" width="22" height="26" rx="2" fill="url(#glass)" stroke="#16171a" stroke-width="1.5"/>
+  <path d="M374 78 l8 -22 h5 l-8 22 z" fill="#fff" opacity="0.18"/>
+  <line x1="364" y1="98" x2="414" y2="98" stroke="#16171a" stroke-width="1" opacity="0.5"/>
+  <!-- cab -->
+  <path d="M414 48 h36 l20 36 v52 h-56 z" fill="url(#cab)" stroke="#16171a" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M424 56 h22 l14 26 h-36 z" fill="url(#glass)" stroke="#16171a" stroke-width="1.5"/>
+  <path d="M428 80 l10 -22 h6 l-10 22 z" fill="#fff" opacity="0.2"/>
+  <rect x="416" y="92" width="26" height="3" rx="1.5" fill="url(#chrome)" stroke="#16171a" stroke-width="0.8"/>
+  <rect x="436" y="100" width="12" height="3" rx="1.5" fill="#16171a" opacity="0.7"/>
+  <!-- mirror -->
+  <rect x="470" y="60" width="9" height="26" rx="2" fill="#16171a"/><rect x="466" y="62" width="4" height="4" fill="#16171a"/>
+  <!-- hood -->
+  <path d="M470 84 h66 q10 0 10 10 v42 h-76 z" fill="url(#cab)" stroke="#16171a" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M474 90 h60 q6 0 6 6" fill="none" stroke="#fff" stroke-width="2" opacity="0.28"/>
+  <line x1="496" y1="88" x2="496" y2="134" stroke="#16171a" stroke-width="1" opacity="0.45"/>
+  <!-- grille -->
+  <rect x="546" y="88" width="18" height="46" rx="3" fill="url(#chrome)" stroke="#16171a" stroke-width="2"/>
+  <g stroke="#16171a" stroke-width="1.2"><line x1="548" y1="96" x2="562" y2="96"/><line x1="548" y1="103" x2="562" y2="103"/><line x1="548" y1="110" x2="562" y2="110"/><line x1="548" y1="117" x2="562" y2="117"/><line x1="548" y1="124" x2="562" y2="124"/></g>
+  <!-- headlight + marker lights -->
+  <rect x="550" y="78" width="14" height="8" rx="3" fill="#fff6c9" stroke="#16171a" stroke-width="1.5"/>
+  <rect x="368" y="42" width="40" height="4" fill="#f5a623" stroke="#16171a" stroke-width="0.8"/>
+  <g fill="#f5a623"><circle cx="424" cy="52" r="1.8"/><circle cx="434" cy="52" r="1.8"/><circle cx="444" cy="52" r="1.8"/></g>
+  <!-- bumper -->
+  <rect x="538" y="136" width="36" height="9" rx="3" fill="url(#chrome)" stroke="#16171a" stroke-width="1.5"/>
+  <!-- fuel tank + step -->
+  <rect x="418" y="116" width="48" height="19" rx="9" fill="url(#chrome)" stroke="#16171a" stroke-width="1.5"/>
+  <rect x="428" y="110" width="26" height="4" fill="#16171a" opacity="0.6"/>
+  <!-- wheels -->
+  <use href="#wheel" x="70" y="150"/><use href="#wheel" x="106" y="150"/>
+  <use href="#wheel" x="390" y="150"/><use href="#wheel" x="426" y="150"/>
+  <use href="#wheel" x="516" y="150"/>
+  <!-- mud flaps -->
+  <rect x="128" y="144" width="7" height="16" fill="#16171a"/>
+  <rect x="446" y="144" width="7" height="16" fill="#16171a"/>
+</svg>
