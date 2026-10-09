@@ -51,6 +51,16 @@ def test_haversine_known_pair() -> None:
     assert 700 < d < 740
 
 
+def test_resolve_city_small_town() -> None:
+    # Guards the Gazetteer swap: a small town must be present, suffix stripped,
+    # and the lookup must be case-insensitive. Effingham, IL (pop ~12k) exists
+    # in the Gazetteer as "Effingham city".
+    pt = domain.resolve_city(domain.CityState(city="effingham", state="il"))
+    assert pt.city.lower() == "effingham"
+    assert pt.state == "IL"
+    assert 38 < pt.lat < 40 and -90 < pt.lon < -88
+
+
 def test_highway_miles_and_padd() -> None:
     assert domain.highway_miles(721) == round(721 * 1.17)
     assert domain.padd_for("CA") == "5"

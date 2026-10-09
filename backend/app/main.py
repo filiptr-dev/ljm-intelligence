@@ -217,6 +217,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.analysis.ai_router import router as ai_router
     from app.analysis.analysis_router import router as analysis_router
     from app.analysis.overview_router import router as overview_router
+    from app.followups.router import router as followups_router
     from app.identity.auth.deps import current_user, require_user_or_cron
     from app.identity.auth_router import router as auth_router
 
@@ -256,7 +257,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.prospecting.leads_router import router as leads_router
     from app.prospecting.shipper_finder_router import router as shipper_finder_router
     from app.vetting.router import router as vetting_router
-    from app.followups.router import router as followups_router
 
     user_or_cron = [Depends(require_user_or_cron)]
     user_only = [Depends(current_user), Depends(current_tenant)]

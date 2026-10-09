@@ -89,4 +89,12 @@ async def _analysis_nightly_tick(timestamp: int) -> None:
     await dispatch("analysis.nightly", tenant_id=_TENANT)
 
 
+@app.periodic(cron="0 10 * * 1")  # Mondays 10:00 UTC — after EIA publishes
+@app.task(name="scheduler.diesel_refresh_weekly", queue="default", pass_context=False)
+async def _diesel_refresh_weekly(timestamp: int) -> None:
+    from app.shared.queue import dispatch
+
+    await dispatch("rates.refresh_diesel", tenant_id=_TENANT)
+
+
 __all__: list[str] = []

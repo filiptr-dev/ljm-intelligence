@@ -7,6 +7,12 @@ unit-testable file keeps them from drifting apart.
 Constants are named in one place so a bump to driver pay or MPG lands in a
 single commit, and so the UI can quote the number back to the user (teaches
 them *why* the margin is what it is).
+
+City centroids in ``data/us_cities.json`` are derived from the US Census
+2023 Gazetteer PLACES file
+(https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2023_Gazetteer/2023_Gaz_place_national.zip);
+Census legal suffixes (" city", " town", " village", " CDP", etc.) are
+stripped so names match the way dispatchers type them.
 """
 from __future__ import annotations
 
