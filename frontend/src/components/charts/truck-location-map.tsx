@@ -11,7 +11,7 @@ import * as React from "react"
 import { Map as MapLibreMap, NavigationControl, type IControl } from "maplibre-gl"
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers"
 import { MapboxOverlay } from "@deck.gl/mapbox"
-import { hex, mix, placeStateLabels, readPalette, rgb, operatingArea, type Palette, type StateLabel, type StateProps } from "./us-map-base"
+import { hex, mix, placeStateLabels, stateLabelFont, readPalette, rgb, operatingArea, type Palette, type StateLabel, type StateProps } from "./us-map-base"
 
 // Fleet page has no lanes payload: the area is the shared fallback list (mirrors backend operating_area.py).
 const AREA = operatingArea()
@@ -73,7 +73,8 @@ export default function TruckLocationMap({ lat, lng, label }: { lat: number; lng
         new TextLayer<StateLabel>({
           id: "state-labels", data: placeStateLabels(zoom, { abbrOnly: true, fontPx: 10, only: AREA.set }), pickable: false,
           getPosition: (l) => l.position, getText: (l) => l.text, getSize: 10, sizeUnits: "pixels",
-          getColor: rgb(p.ink, 110), fontWeight: 600, getTextAnchor: "middle", getAlignmentBaseline: "center",
+          getColor: rgb(p.ink, 140), fontFamily: stateLabelFont(), fontWeight: 600, characterSet: "auto",
+          fontSettings: { sdf: true, buffer: 6, radius: 8 }, outlineWidth: 3, outlineColor: rgb(p.card, 235), getTextAnchor: "middle", getAlignmentBaseline: "center",
         }),
         new ScatterplotLayer<{ p: [number, number] }>({
           id: "halo", data: [{ p: [lng, lat] }], getPosition: (d) => d.p, getRadius: 16, radiusUnits: "pixels",

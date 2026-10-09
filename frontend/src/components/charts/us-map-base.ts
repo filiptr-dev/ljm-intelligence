@@ -168,3 +168,18 @@ export const mix = (a: [number, number, number], b: [number, number, number], t:
 ]
 export const rgb = (c: [number, number, number], a = 255): RGBA => [c[0], c[1], c[2], a]
 export const hex = (c: [number, number, number]) => `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`
+
+/** State-label font size (px) for a zoom: readable at the fitted view, a touch larger zoomed in. */
+export const stateLabelPx = (zoom: number) => Math.round(Math.min(13, Math.max(10, 10 + (zoom - 3) * 1.2)))
+
+/**
+ * The app's own UI font for deck.gl text. next/font hashes the family name, so read what
+ * <body> actually resolves to, and ask the browser to load that weight (the SDF atlas is
+ * rasterised from whatever the canvas can draw).
+ */
+export function stateLabelFont(): string {
+  if (typeof document === "undefined") return "system-ui, sans-serif"
+  const family = getComputedStyle(document.body).fontFamily || "system-ui, sans-serif"
+  void document.fonts?.load(`600 12px ${family}`)
+  return family
+}

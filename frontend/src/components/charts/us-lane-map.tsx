@@ -25,7 +25,7 @@ import { RotateCcw } from "lucide-react"
 import { EmptyStateCard, EntityCard } from "@/components/app/lanes/entity-card"
 import type { CityEntity, HeatArc, HeatmapData, LaneEntity } from "@/lib/api/lanes"
 import {
-  hex, mix, placeStateLabels, readPalette, rgb, operatingArea,
+  hex, mix, placeStateLabels, stateLabelPx, stateLabelFont, readPalette, rgb, operatingArea,
   type Palette, type RGBA, type StateLabel, type StateProps,
 } from "./us-map-base"
 
@@ -167,7 +167,7 @@ export default function UsLaneMap({
       return (mode === "origin" ? s.runs_as_origin : mode === "dest" ? s.runs_as_dest : s.metrics.runs) ?? 0
     }
     const cityPoints = data.cities.filter((c) => (mode === "origin" ? (c.runs_as_origin ?? 0) > 0 : mode === "dest" ? (c.runs_as_dest ?? 0) > 0 : true))
-    const labels = placeStateLabels(zoom, { only: operating })
+    const labels = placeStateLabels(zoom, { only: operating, fontPx: stateLabelPx(zoom) })
     const heatSource = mode === "origin" ? data.origins : mode === "dest" ? data.dests : []
 
     const layers = [
@@ -226,16 +226,18 @@ export default function UsLaneMap({
         pickable: false,
         getPosition: (l) => l.position,
         getText: (l) => l.text,
-        getSize: 11,
+        getSize: stateLabelPx(zoom),
         sizeUnits: "pixels",
-        getColor: rgb(p.ink, 200),
+        getColor: rgb(p.ink, 185),
+        fontFamily: stateLabelFont(),
         fontWeight: 600,
-        fontSettings: { sdf: true },
-        outlineWidth: 2,
-        outlineColor: rgb(p.card, 220),
+        characterSet: "auto",
+        fontSettings: { sdf: true, buffer: 6, radius: 8 },
+        outlineWidth: 3,
+        outlineColor: rgb(p.card, 235),
         getTextAnchor: "middle",
         getAlignmentBaseline: "center",
-        updateTriggers: { getColor: [p] },
+        updateTriggers: { getColor: [p], getSize: [zoom] },
       }),
       new ScatterplotLayer<CityEntity>({
         id: "cities",
