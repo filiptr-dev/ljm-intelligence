@@ -241,6 +241,13 @@ class SettingsRow(Base):
     agent_browser_url: Mapped[str] = mapped_column(
         String(500), nullable=False, default="", server_default=text("''")
     )
+    # Mail-read allowlist (migration 0044). JSONB list of mailbox emails the
+    # ingest side is permitted to touch. ``None`` = no restriction (match
+    # historical behaviour). When set, both ``list_mailboxes`` fan-out and an
+    # explicit per-mailbox incremental call drop any mailbox not in the list,
+    # before any Gmail I/O. Env ``MAIL_READ_ALLOWLIST`` (CSV) still wins so an
+    # operator can override on the fly.
+    mail_read_allowlist: Mapped[list | None] = mapped_column(JSONType)
 
 
 class User(TenantMixin, Base):

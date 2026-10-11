@@ -139,6 +139,16 @@ async def ingest_incremental(session: AsyncSession, source: MailboxSource, mailb
     start = cur.history_id if cur else "0"
     try:
         async for msg, new_hid in source.incremental(mailbox, start):
+            # Empty-page marker: the source observed a higher historyId on
+            # the page but there was no ``messagesAdded`` entry to upsert.
+            # Advance the cursor anyway so Gmail's ~7-day history retention
+            # does not march past us and silently drop the mailbox into a
+            # full re-backfill. The cursor update stays inside the same UoW
+            # commit below.
+            if msg is None:
+                if new_hid:
+                    stats.last_history_id = new_hid
+                continue
             stats.read += 1
             inserted = await _upsert(session, msg)
             if inserted:

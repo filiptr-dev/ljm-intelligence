@@ -22,6 +22,7 @@ from app.identity.models import SettingsRow
 from app.inbox.models import MailCursor
 from app.integrations.adapters.email.credentials import (
     load_sa_info,
+    resolve_mail_read_allowlist,
     resolve_mailbox_source,
     resolve_sa_info,
     sa_fingerprint,
@@ -212,7 +213,18 @@ async def incremental(
     sessionmaker: Any, settings: Any, *, mailbox: str | None
 ) -> IncrementalResult:
     source = get_mailbox_source(settings)
-    mailboxes = [mailbox] if mailbox else await source.list_mailboxes()
+    allow = resolve_mail_read_allowlist(settings)
+    if mailbox is not None:
+        if allow is not None and mailbox.strip().lower() not in allow:
+            log.info("mail/incremental: %s not in allowlist — skipping", mailbox)
+            return IncrementalResult(items=[])
+        mailboxes = [mailbox]
+    else:
+        listed = await source.list_mailboxes()
+        if allow is not None:
+            mailboxes = [m for m in listed if (m or "").strip().lower() in allow]
+        else:
+            mailboxes = listed
     items: list[IngestStatsRow] = []
     for mbx in mailboxes:
         async with sessionmaker() as s:

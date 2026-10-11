@@ -29,6 +29,11 @@ _vault_impersonate_cache: str | None = None
 # restart. Env default ``mailbox_source=simulated`` loses to this cache when
 # it says ``gmail``; an explicit env ``mailbox_source=gmail`` still wins.
 _vault_inbox_source_cache: str | None = None
+# Mail-read allowlist (migration 0044). ``None`` = no restriction. Env
+# ``MAIL_READ_ALLOWLIST`` (CSV) wins over this cache. Primed from the
+# ``settings.mail_read_allowlist`` JSONB column at app lifespan + worker
+# bootstrap.
+_vault_allowlist_cache: list[str] | None = None
 
 
 def set_vault_cache(sa_json: str | None, impersonate: str | None) -> None:
@@ -45,12 +50,28 @@ def set_vault_inbox_source_cache(value: str | None) -> None:
     _vault_inbox_source_cache = v if v in ("gmail", "simulated") else None
 
 
+def set_vault_allowlist_cache(values: list[str] | None) -> None:
+    """Install the stored mail-read allowlist in the process cache.
+
+    ``None`` or empty list disables the restriction (callers see ``None``
+    and the ``list_mailboxes`` fan-out keeps its historical behaviour).
+    """
+    global _vault_allowlist_cache
+    if not values:
+        _vault_allowlist_cache = None
+        return
+    norm = [str(v).strip().lower() for v in values if str(v).strip()]
+    _vault_allowlist_cache = norm or None
+
+
 def reset_vault_cache() -> None:
     """Test hook."""
     global _vault_sa_cache, _vault_impersonate_cache, _vault_inbox_source_cache
+    global _vault_allowlist_cache
     _vault_sa_cache = None
     _vault_impersonate_cache = None
     _vault_inbox_source_cache = None
+    _vault_allowlist_cache = None
 
 
 def vault_sa() -> dict[str, Any] | None:
@@ -71,7 +92,11 @@ async def ensure_vault_primed(sessionmaker: Any) -> None:
     Idempotent — once the cache has been populated by any path (lifespan,
     connect route, previous prime), this is a cheap no-op.
     """
-    if _vault_sa_cache is not None or _vault_inbox_source_cache is not None:
+    if (
+        _vault_sa_cache is not None
+        or _vault_inbox_source_cache is not None
+        or _vault_allowlist_cache is not None
+    ):
         return
     await prime_from_vault(sessionmaker)
 
@@ -82,6 +107,10 @@ def vault_impersonate() -> str | None:
 
 def vault_inbox_source() -> str | None:
     return _vault_inbox_source_cache
+
+
+def vault_allowlist() -> list[str] | None:
+    return _vault_allowlist_cache
 
 
 async def prime_from_vault(sessionmaker: Any) -> None:
@@ -162,6 +191,21 @@ async def prime_from_vault(sessionmaker: Any) -> None:
                         set_vault_inbox_source_cache(v)
             except Exception as exc:  # noqa: BLE001
                 log.debug("mail/credentials: inbox.source prime skipped: %s", exc)
+            # Prime the mail-read allowlist from SettingsRow (migration 0044).
+            try:
+                from app.identity.models import SettingsRow as _SR
+
+                srow = (
+                    await s.execute(_sel(_SR).where(_SR.id == 1))
+                ).scalar_one_or_none()
+                if srow is not None and srow.mail_read_allowlist:
+                    set_vault_allowlist_cache(list(srow.mail_read_allowlist))
+                    log.info(
+                        "mail/credentials: primed mail_read_allowlist=%s",
+                        list(srow.mail_read_allowlist),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.debug("mail/credentials: allowlist prime skipped: %s", exc)
     except Exception as exc:  # noqa: BLE001  pragma: no cover
         log.warning("mail/credentials: vault prime failed: %s", exc)
 
@@ -204,6 +248,29 @@ def resolve_mailbox_source(settings: Any) -> str:
     if _vault_sa_cache is not None:
         return "gmail"
     return env_val or "simulated"
+
+
+def resolve_mail_read_allowlist(settings: Any) -> set[str] | None:
+    """Env > stored allowlist > ``None`` (no restriction).
+
+    Env ``MAIL_READ_ALLOWLIST`` is a case-insensitive comma-separated list; a
+    stored ``SettingsRow.mail_read_allowlist`` (primed into the vault cache)
+    is a JSONB list of mailbox emails. Returns a lowercased set so callers
+    can do a cheap `email.lower() in allowlist` check, or ``None`` when the
+    gate is disabled.
+    """
+    env_val = ""
+    try:
+        env_val = (getattr(settings, "mail_read_allowlist", "") or "").strip()
+    except (AttributeError, ValueError):
+        env_val = ""
+    if env_val:
+        parts = [p.strip().lower() for p in env_val.split(",") if p.strip()]
+        return set(parts) if parts else None
+    cached = _vault_allowlist_cache
+    if cached:
+        return {str(x).strip().lower() for x in cached if str(x).strip()}
+    return None
 
 
 def resolve_impersonate(settings: Any) -> str:

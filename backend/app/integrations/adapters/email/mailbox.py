@@ -30,6 +30,7 @@ from app.config import Settings
 from app.integrations.adapters.email.credentials import (
     build_delegated_credentials,
     resolve_impersonate,
+    resolve_mail_read_allowlist,
     resolve_mailbox_source,
     resolve_sa_info,
     vault_impersonate,
@@ -38,6 +39,23 @@ from app.integrations.adapters.email.ratelimit import MailboxLimiter
 
 REBACKFILL_DAYS = 30
 BATCH_PAGE_SIZE = 100
+
+
+def _filter_allowlist(mailboxes: list[str], settings: Any) -> list[str]:
+    """Drop any mailbox not in the configured read-allowlist.
+
+    ``None`` allowlist = no restriction (historical behaviour). An empty
+    result when the allowlist is set is deliberate: better zero reads than
+    poisoning the cursor by walking an unintended mailbox.
+    """
+    allow = resolve_mail_read_allowlist(settings)
+    if allow is None:
+        return list(mailboxes)
+    out = [m for m in mailboxes if (m or "").strip().lower() in allow]
+    dropped = [m for m in mailboxes if m not in out]
+    if dropped:
+        log.info("mail/gmail: dropped by allowlist: %s", dropped)
+    return out
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +87,23 @@ class MailboxSource(Protocol):
 
     async def backfill(self, mailbox: str, since: datetime) -> AsyncIterator[RawMessage]: ...
 
-    async def incremental(self, mailbox: str, start_history_id: str) -> AsyncIterator[tuple[RawMessage, str]]: ...
+    async def incremental(
+        self, mailbox: str, start_history_id: str
+    ) -> AsyncIterator[tuple[RawMessage | None, str]]:
+        """Yield ``(msg, history_id)`` for each new message, and additionally
+        ``(None, max_history_id_seen)`` at the end of every history page so
+        the caller's cursor advances even when a page has 0 message events.
+
+        Why: Gmail's ``history.list`` paginates independently of
+        ``messagesAdded`` entries. A page that only contains ``labelAdded``
+        events used to leave the stored ``mail_cursors.history_id`` behind
+        while the real ``historyId`` marched past Gmail's ~7-day retention
+        window — once past, incremental silently falls back to a full
+        rebackfill and the mailbox goes quiet. The empty-page marker closes
+        that gap without a half-written state (the cursor update is still
+        inside the same UoW as any upserts on the page).
+        """
+        ...
 
 
 def _default_corpus() -> dict[str, list[RawMessage]]:
@@ -102,11 +136,14 @@ class SimulatedMailbox:
             if m.sent_at >= since:
                 yield m
 
-    async def incremental(self, mailbox: str, start_history_id: str) -> AsyncIterator[tuple[RawMessage, str]]:
+    async def incremental(
+        self, mailbox: str, start_history_id: str
+    ) -> AsyncIterator[tuple[RawMessage | None, str]]:
         try:
             start = int(start_history_id)
         except ValueError:
             start = 0
+        max_hid = start
         for m in self.messages.get(mailbox, []):
             try:
                 hid = int(m.history_id)
@@ -114,6 +151,12 @@ class SimulatedMailbox:
                 continue
             if hid > start:
                 yield m, m.history_id
+                if hid > max_hid:
+                    max_hid = hid
+        # Mirror Gmail's end-of-page marker so an empty mailbox still advances
+        # a cursor past ``start`` when the source has newer history.
+        if max_hid > start:
+            yield None, str(max_hid)
 
 
 class GmailMailbox:
@@ -139,6 +182,15 @@ class GmailMailbox:
              → Directory 403 → no mailboxes → nothing syncs. Verified live
              2026-10-09.
         """
+        # Shortcut: if the operator has configured a read-allowlist, those
+        # ARE the mailboxes — skip the Directory probe entirely. Directory
+        # requires a real Workspace admin + the admin scope; with DWD granted
+        # only on individual mailboxes the probe would 403 and fall back to a
+        # single mailbox anyway, dropping viktor@ silently.
+        allow = resolve_mail_read_allowlist(self._settings)
+        if allow:
+            return sorted(allow)
+
         # The admin subject (used only for the Directory API call) is the
         # explicit env ``admin_impersonate``; falling back to the user mailbox
         # here would just reproduce the 403.
@@ -192,7 +244,7 @@ class GmailMailbox:
 
                     mailboxes = await anyio.to_thread.run_sync(_call)
                     if mailboxes:
-                        return mailboxes
+                        return _filter_allowlist(mailboxes, self._settings)
                     log.info(
                         "mail/gmail: directory listing empty — falling back to [impersonate=%s]",
                         user_sub or admin_sub,
@@ -205,7 +257,7 @@ class GmailMailbox:
                     )
         # Single-mailbox fallback: the connected mailbox (contact@…) rather
         # than the admin — the admin inbox is irrelevant to lead sync.
-        return [user_sub or admin_sub]
+        return _filter_allowlist([user_sub or admin_sub], self._settings)
 
     def _service(self, mailbox: str):
         """Build a per-mailbox Gmail service with DWD impersonation."""
@@ -305,11 +357,27 @@ class GmailMailbox:
             )
 
         page_token: str | None = None
+        # Track the highest ``historyId`` observed across *all* history
+        # entries on the page — including label-only entries that we filter
+        # out — so an empty-of-``messagesAdded`` page still advances the
+        # stored cursor via the end-of-page ``(None, max_hid)`` yield.
+        max_hid_seen = 0
+        try:
+            start_int = int(start_history_id)
+        except (TypeError, ValueError):
+            start_int = 0
         try:
             while True:
                 await self._limiter.acquire(mailbox)
                 page = await anyio.to_thread.run_sync(_history_page, page_token)
                 for entry in page.get("history") or []:
+                    hid_s = str(entry.get("id") or "")
+                    try:
+                        hid_i = int(hid_s)
+                    except (TypeError, ValueError):
+                        hid_i = 0
+                    if hid_i > max_hid_seen:
+                        max_hid_seen = hid_i
                     for added in entry.get("messagesAdded") or []:
                         m = added.get("message") or {}
                         mid = m.get("id")
@@ -323,9 +391,17 @@ class GmailMailbox:
                             continue
                         parsed = _parse_gmail_message(raw, mailbox)
                         if parsed is not None:
+                            try:
+                                phid = int(parsed.history_id)
+                                if phid > max_hid_seen:
+                                    max_hid_seen = phid
+                            except (TypeError, ValueError):
+                                pass
                             yield parsed, parsed.history_id
                 page_token = page.get("nextPageToken")
                 if not page_token:
+                    if max_hid_seen > start_int:
+                        yield None, str(max_hid_seen)
                     return
         except Exception as exc:  # noqa: BLE001
             # historyId expired → re-backfill the last REBACKFILL_DAYS days.
