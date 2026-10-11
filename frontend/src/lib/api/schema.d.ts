@@ -1124,6 +1124,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/mailboxes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mailboxes Endpoint
+         * @description List the mailboxes the operator may filter by.
+         *
+         *     Derived from the mail-read allowlist — the single source of truth for
+         *     "which addresses the app will touch" — so the selector can't offer a
+         *     mailbox the backend would reject.
+         */
+        get: operations["list_mailboxes_endpoint_inbox_mailboxes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/emails": {
         parameters: {
             query?: never;
@@ -2658,18 +2682,29 @@ export interface components {
             /** Job Id */
             job_id?: number | null;
         };
+        /**
+         * BackfillFanOutOut
+         * @description Fan-out result — one `IngestStatsOut` per mailbox the handler touched.
+         */
+        BackfillFanOutOut: {
+            /** Items */
+            items: components["schemas"]["IngestStatsOut"][];
+        };
         /** BackfillIn */
         BackfillIn: {
-            /**
-             * Mailbox
-             * Format: email
-             */
-            mailbox: string;
+            /** Mailbox */
+            mailbox?: string | null;
+            /** Mailboxes */
+            mailboxes?: string[] | null;
             /**
              * Months
              * @default 12
              */
             months: number;
+            /** Days */
+            days?: number | null;
+            /** Hours */
+            hours?: number | null;
         };
         /** BackhaulCandidateOut */
         BackhaulCandidateOut: {
@@ -4826,6 +4861,11 @@ export interface components {
              */
             read_mailboxes_count: number;
         };
+        /** MailboxItem */
+        MailboxItem: {
+            /** Address */
+            address: string;
+        };
         /** MailboxOut */
         MailboxOut: {
             /** Email */
@@ -4834,6 +4874,11 @@ export interface components {
             last_history_id: string | null;
             /** Backfilled Through */
             backfilled_through: string | null;
+        };
+        /** MailboxesListOut */
+        MailboxesListOut: {
+            /** Items */
+            items: components["schemas"]["MailboxItem"][];
         };
         /** MailboxesOut */
         MailboxesOut: {
@@ -8888,6 +8933,37 @@ export interface operations {
             };
         };
     };
+    list_mailboxes_endpoint_inbox_mailboxes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxesListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_emails_endpoint_inbox_emails_get: {
         parameters: {
             query?: {
@@ -8895,6 +8971,7 @@ export interface operations {
                 q?: string | null;
                 page?: number;
                 page_size?: number;
+                mailbox?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -8929,6 +9006,7 @@ export interface operations {
             query?: {
                 urgent_only?: boolean;
                 limit?: number;
+                mailbox?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -8962,6 +9040,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                mailbox?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9026,7 +9105,9 @@ export interface operations {
     };
     staff_endpoint_inbox_staff_get: {
         parameters: {
-            query?: never;
+            query?: {
+                mailbox?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -9057,7 +9138,9 @@ export interface operations {
     };
     overview_kpis_endpoint_inbox_overview_kpis_get: {
         parameters: {
-            query?: never;
+            query?: {
+                mailbox?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -9156,6 +9239,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                mailbox?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9329,7 +9413,9 @@ export interface operations {
     };
     ask_endpoint_inbox_ask_post: {
         parameters: {
-            query?: never;
+            query?: {
+                mailbox?: string | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -10355,7 +10441,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["IngestStatsOut"];
+                    "application/json": components["schemas"]["BackfillFanOutOut"];
                 };
             };
             /** @description Validation Error */

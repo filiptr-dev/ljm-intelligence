@@ -23,6 +23,7 @@ export type AiDraft = components["schemas"]["AiDraftOutModel"]
 export type ReplyOut = components["schemas"]["ReplyOut"]
 export type ComposeOut = components["schemas"]["ComposeOut"]
 export type ForgetContactOut = components["schemas"]["ForgetContactOut"]
+export type MailboxItem = components["schemas"]["MailboxItem"]
 
 function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path: string): T {
   if (res.data !== undefined) return res.data
@@ -33,10 +34,7 @@ export async function listEmails(
   opts: { intent?: string; q?: string; page?: number; page_size?: number; mailbox?: string } = {},
   signal?: AbortSignal,
 ): Promise<EmailsPage> {
-  // ``mailbox`` is accepted by the backend but may not yet be in the
-  // generated schema; cast through ``never`` keeps callers typed while
-  // tolerating a stale codegen. Regenerate with ``pnpm gen:api``.
-  const res = await api.GET("/inbox/emails", { params: { query: opts as never }, signal })
+  const res = await api.GET("/inbox/emails", { params: { query: opts }, signal })
   return unwrap(res, "/inbox/emails")
 }
 
@@ -44,17 +42,13 @@ export async function listTriage(
   opts: { urgent_only?: boolean; limit?: number; mailbox?: string } = {},
   signal?: AbortSignal,
 ): Promise<TriageRow[]> {
-  const res = await api.GET("/inbox/triage", { params: { query: opts as never }, signal })
+  const res = await api.GET("/inbox/triage", { params: { query: opts }, signal })
   return unwrap(res, "/inbox/triage")
 }
 
-/** One allowed mailbox for the selector. */
-export type MailboxItem = { address: string }
-
 export async function listMailboxes(signal?: AbortSignal): Promise<MailboxItem[]> {
-  const res = await api.GET("/inbox/mailboxes" as never, { signal } as never)
-  const data = unwrap(res as never, "/inbox/mailboxes") as { items: MailboxItem[] }
-  return data.items ?? []
+  const res = await api.GET("/inbox/mailboxes", { signal })
+  return unwrap(res, "/inbox/mailboxes").items
 }
 
 export async function getThread(threadId: string, signal?: AbortSignal): Promise<ThreadOut> {
@@ -74,16 +68,9 @@ export async function getAiDraft(threadId: string, signal?: AbortSignal): Promis
   return res.data as AiDraft
 }
 
-/** Design block the rich builder sends alongside the body. */
-export type EmailDesignWire = {
-  accent_hex?: string | null
-  signature?: boolean
-  logo?: boolean
-  cta_label?: string
-  cta_url?: string
-  layout?: string
-  show_truck?: boolean
-}
+/** Design block the rich builder sends alongside the body — wire shape
+ * mirrors the generated schema's ``EmailDesignIn``. */
+export type EmailDesignWire = components["schemas"]["EmailDesignIn"]
 
 export async function sendReply(
   threadId: string,
@@ -98,16 +85,13 @@ export async function sendReply(
 ): Promise<ReplyOut> {
   const res = await api.POST("/inbox/threads/{thread_id}/reply", {
     params: { path: { thread_id: threadId } },
-    // openapi-fetch's generated type for POST bodies evolves after `pnpm
-    // gen:api`; we send the extended shape and let the backend ignore
-    // unknown fields until the schema is regenerated.
     body: {
       body_text: body.body_text,
       body_html: body.body_html ?? "",
       ...(body.design ? { design: body.design } : {}),
       ...(body.tone ? { tone: body.tone } : {}),
       ...(body.purpose ? { purpose: body.purpose } : {}),
-    } as never,
+    },
     signal,
   })
   return unwrap(res, `/inbox/threads/${threadId}/reply`)
@@ -134,7 +118,7 @@ export async function compose(
       ...(body.design ? { design: body.design } : {}),
       ...(body.tone ? { tone: body.tone } : {}),
       ...(body.purpose ? { purpose: body.purpose } : {}),
-    } as never,
+    },
     signal,
   })
   return unwrap(res, "/inbox/compose")
@@ -153,7 +137,7 @@ export async function aiDraftCompose(
   },
   signal?: AbortSignal,
 ): Promise<AiDraft> {
-  const res = await api.POST("/inbox/ai-draft" as never, {
+  const res = await api.POST("/inbox/ai-draft", {
     body: {
       to: body.to,
       purpose: body.purpose,
@@ -162,10 +146,10 @@ export async function aiDraftCompose(
       recipient_name: body.recipient_name ?? "",
       lane: body.lane ?? "",
       equipment: body.equipment ?? "",
-    } as never,
+    },
     signal,
-  } as never)
-  return unwrap(res as never, "/inbox/ai-draft")
+  })
+  return unwrap(res, "/inbox/ai-draft")
 }
 
 /** Rewrite the body in the given tone — hits the server-side `/inbox/rewrite`. */
@@ -173,11 +157,11 @@ export async function rewrite(
   body: { body_text: string; tone: string; brief?: string },
   signal?: AbortSignal,
 ): Promise<AiDraft> {
-  const res = await api.POST("/inbox/rewrite" as never, {
-    body: { body_text: body.body_text, tone: body.tone, brief: body.brief ?? "" } as never,
+  const res = await api.POST("/inbox/rewrite", {
+    body: { body_text: body.body_text, tone: body.tone, brief: body.brief ?? "" },
     signal,
-  } as never)
-  return unwrap(res as never, "/inbox/rewrite")
+  })
+  return unwrap(res, "/inbox/rewrite")
 }
 
 /** One cited email the AI answer leans on. */
@@ -222,14 +206,12 @@ export async function ask(
   opts: { mailbox?: string } = {},
   signal?: AbortSignal,
 ): Promise<AskOut> {
-  const query: Record<string, string> = {}
-  if (opts.mailbox) query.mailbox = opts.mailbox
-  const res = await api.POST("/inbox/ask" as never, {
-    params: { query } as never,
-    body: { question } as never,
+  const res = await api.POST("/inbox/ask", {
+    params: { query: { mailbox: opts.mailbox } },
+    body: { question },
     signal,
-  } as never)
-  return unwrap(res as never, "/inbox/ask") as AskOut
+  })
+  return unwrap(res, "/inbox/ask") as AskOut
 }
 
 export async function statusBoard(
@@ -238,7 +220,7 @@ export async function statusBoard(
   signal?: AbortSignal,
 ): Promise<StatusBoardRow[]> {
   const res = await api.GET("/inbox/status-board", {
-    params: { query: { limit, ...(opts.mailbox ? { mailbox: opts.mailbox } : {}) } as never },
+    params: { query: { limit, mailbox: opts.mailbox } },
     signal,
   })
   return unwrap(res, "/inbox/status-board")
@@ -250,7 +232,7 @@ export async function noReply(
   signal?: AbortSignal,
 ): Promise<NoReplyRow[]> {
   const res = await api.GET("/inbox/no-reply", {
-    params: { query: { limit, ...(opts.mailbox ? { mailbox: opts.mailbox } : {}) } as never },
+    params: { query: { limit, mailbox: opts.mailbox } },
     signal,
   })
   return unwrap(res, "/inbox/no-reply")
@@ -272,7 +254,7 @@ export async function overviewKpis(
   signal?: AbortSignal,
 ): Promise<OverviewKPIs> {
   const res = await api.GET("/inbox/overview-kpis", {
-    params: { query: (opts.mailbox ? { mailbox: opts.mailbox } : {}) as never },
+    params: { query: { mailbox: opts.mailbox } },
     signal,
   })
   return unwrap(res, "/inbox/overview-kpis")
@@ -294,7 +276,7 @@ export async function staff(
   signal?: AbortSignal,
 ): Promise<StaffRow[]> {
   const res = await api.GET("/inbox/staff", {
-    params: { query: (opts.mailbox ? { mailbox: opts.mailbox } : {}) as never },
+    params: { query: { mailbox: opts.mailbox } },
     signal,
   })
   return unwrap(res, "/inbox/staff")

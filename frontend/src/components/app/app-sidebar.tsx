@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import {
   Building2,
   Calculator,
@@ -68,8 +68,16 @@ const TOOLS = [
 ]
 const CONFIG = [{ href: "/settings", label: "Settings", icon: SettingsIcon }]
 
+// The mail pages (/emails, /messages) share a `?mailbox=` scope. Keeping it
+// across sidebar jumps is AC5 of the inbox-separation plan: a selection on
+// /emails should still be in force after clicking "Emails" (status board).
+const MAIL_HREFS = new Set<string>(["/emails", "/messages"])
+
 export function AppSidebar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const mailbox = searchParams.get("mailbox") || ""
+  const mailQuery = mailbox ? `?mailbox=${encodeURIComponent(mailbox)}` : ""
   const { campaigns } = useEngine()
   // The longest matching href wins, so /intelligence/lanes doesn't also light up "Broker Intelligence".
   const ALL_HREFS = [...ANALYSE, ...GROW, ...TOOLS, ...CONFIG].map((i) => i.href)
@@ -89,7 +97,7 @@ export function AppSidebar() {
       <SidebarMenuButton
         isActive={active(i.href)}
         tooltip={i.label}
-        render={<Link href={i.href} />}
+        render={<Link href={MAIL_HREFS.has(i.href) ? `${i.href}${mailQuery}` : i.href} />}
         className="h-9 rounded-sm font-medium data-active:bg-sidebar-accent data-active:text-white data-active:shadow-[inset_3px_0_0_var(--safety)]"
       >
         <i.icon />
