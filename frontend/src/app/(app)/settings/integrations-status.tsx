@@ -82,6 +82,22 @@ function fmtWhen(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleString() : "—"
 }
 
+type LoadstopState = {
+  driver: "off" | "api"
+  status: string
+  email_set: boolean
+  email_masked: string | null
+  has_session: boolean
+  last_login_at: string | null
+  toggles: { fleet: boolean; customers: boolean; loads: boolean; rates: boolean }
+}
+
+async function getLoadstopState(): Promise<LoadstopState | null> {
+  const res = await fetch("/api/loadboards/loadstop", { credentials: "include" })
+  if (!res.ok) return null
+  return (await res.json()) as LoadstopState
+}
+
 export function IntegrationsStatus() {
   const [version, setVersion] = React.useState(0)
   const [open, setOpen] = React.useState<string | null>(null)
@@ -90,16 +106,18 @@ export function IntegrationsStatus() {
   const [mail, setMail] = React.useState<Result<MailStatus> | null>(null)
   const [creds, setCreds] = React.useState<Result<LoadboardCredsList> | null>(null)
   const [drivers, setDrivers] = React.useState<LoadboardDriverOut | null>(null)
+  const [loadstop, setLoadstop] = React.useState<Result<LoadstopState> | null>(null)
 
   React.useEffect(() => {
     let cancelled = false
     void (async () => {
-      const [f, u, m, c, d] = await Promise.all([
+      const [f, u, m, c, d, ls] = await Promise.all([
         settle(getFeatures()),
         settle(getUsage({ since: "24h" })),
         settle(getMailStatus()),
         settle(listLoadboardCreds()),
         settle(getLoadboardDrivers()),
+        settle(getLoadstopState()),
       ])
       if (cancelled) return
       setFeatures(f)
@@ -107,6 +125,7 @@ export function IntegrationsStatus() {
       setMail(m)
       setCreds(c)
       setDrivers(d.data)
+      setLoadstop(ls)
     })()
     return () => {
       cancelled = true
@@ -153,6 +172,35 @@ export function IntegrationsStatus() {
           } · ${m.sends_today} sent today` + (m.postal_address_set ? "" : " · postal address missing")
         : "Status unavailable",
       lastTested: "—",
+    })
+  }
+
+  // LoadStop (TMS) — the client's real TMS; read-only ABP ingest.
+  {
+    const ls = loadstop?.data
+    const enabledOn = ls?.driver === "api"
+    const connected = Boolean(ls && ls.email_set && ls.has_session && enabledOn)
+    const summary = !ls
+      ? "Status unavailable"
+      : !ls.email_set
+        ? "no credential · sync off"
+        : !ls.has_session
+          ? "credential saved · not yet tested"
+          : !enabledOn
+            ? "connected · driver off"
+            : `connected · last login ${ls.last_login_at ? new Date(ls.last_login_at).toLocaleString() : "—"}`
+    rows.push({
+      id: "loadstop",
+      name: "LoadStop (TMS)",
+      state: !loadstop
+        ? "unknown"
+        : loadstop.failed
+          ? "unknown"
+          : connected
+            ? "connected"
+            : "not_set_up",
+      detail: summary,
+      lastTested: fmtWhen(ls?.last_login_at),
     })
   }
 
@@ -227,6 +275,7 @@ export function IntegrationsStatus() {
               <OwnerSwitches sections={["gmail", "switches"]} />
             </div>
           )}
+          {open === "loadstop" && <LoadstopPanel />}
           {open && SRCS.some((s) => s.key === open) && <LoadboardsPanel src={open as SrcKey} />}
           {open === "loadsettings" && (
             <div className="space-y-4">
