@@ -33,6 +33,7 @@ import { AiProvidersPanel } from "./ai-providers-panel"
 import { ConnectorsPanel } from "./connectors-panel"
 import { AgentBrowserPanel } from "./agent-browser-panel"
 import { LoadboardsPanel, SRCS, type SrcKey } from "./loadboards-panel"
+import { LoadstopPanel } from "./loadstop-panel"
 import { OwnerSwitches } from "./owner-switches"
 
 type State = "connected" | "not_set_up" | "simulated" | "unknown"
@@ -230,6 +231,7 @@ export function IntegrationsStatus() {
           {open === "loadsettings" && (
             <div className="space-y-4">
               <LoadboardsPanel />
+              <LoadstopPanel />
               <AgentBrowserPanel />
               <ConnectorsPanel sections={["sources", "eia"]} />
             </div>

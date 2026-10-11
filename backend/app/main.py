@@ -250,6 +250,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.inbox.inbox_router import router as inbox_router
     from app.inbox.mail_router import cron_router as mail_cron_router, router as mail_router
     from app.integrations.loads_router import router as loads_router
+    from app.integrations.loadstop_router import router as loadstop_router
     from app.outreach.call_list_router import router as call_list_router
     from app.outreach.capacity_router import router as capacity_router
     from app.outreach.email_router import router as email_router
@@ -291,6 +292,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(lanes_router, dependencies=user_only)
     app.include_router(mail_cron_router, dependencies=user_or_cron)
     app.include_router(loads_router, dependencies=user_or_cron)
+    app.include_router(loadstop_router, dependencies=user_only)
     app.include_router(unsubscribe_router)
     # Jobs API — `/jobs/drain` is cron-callable, `/jobs/{id}` is user-only,
     # `/admin/jobs` is user-only. The drain route also re-checks the cron

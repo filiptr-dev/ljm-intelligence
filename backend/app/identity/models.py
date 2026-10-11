@@ -248,6 +248,26 @@ class SettingsRow(Base):
     # before any Gmail I/O. Env ``MAIL_READ_ALLOWLIST`` (CSV) still wins so an
     # operator can override on the fly.
     mail_read_allowlist: Mapped[list | None] = mapped_column(JSONType)
+    # LoadStop TMS connector (migration 0045). ``'off' | 'api'`` — no agent
+    # mode (LoadStop speaks ABP JSON over httpx, no browser). Server default
+    # ``'off'`` keeps existing rows safe (bbunikoop boolean-default lesson).
+    loads_loadstop_driver: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="off", server_default=text("'off'")
+    )
+    # Per-service import toggles — default on once Test is ok; operator can
+    # turn any off from the Settings LoadStop row.
+    loadstop_import_fleet: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    loadstop_import_customers: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    loadstop_import_loads: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    loadstop_import_rates: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
 
 
 class User(TenantMixin, Base):
