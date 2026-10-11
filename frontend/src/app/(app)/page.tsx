@@ -117,13 +117,15 @@ function HeaderActions({ data }: { data: OverviewToday | null }) {
 async function OverviewContent({
   filters,
   kpiPeriodLabel,
+  mailbox,
 }: {
   filters: AnalyticsFilters
   kpiPeriodLabel: string
+  mailbox?: string
 }) {
   const [todayRes, inboxRes, kpiRes] = await Promise.allSettled([
     getToday(),
-    inbox.overviewKpis(),
+    inbox.overviewKpis({ mailbox }),
     analysis.getOverviewKpi(filtersToQuery(filters)),
   ])
 
@@ -381,6 +383,7 @@ export default async function OverviewPage({
   const sp = await searchParams
   const filters = readFilters(sp)
   const kpiPeriodLabel = filters.period === "today" ? "today" : filters.period
+  const mailbox = typeof sp.mailbox === "string" && sp.mailbox.trim() ? sp.mailbox.trim() : undefined
 
   return (
     <Suspense
@@ -401,7 +404,7 @@ export default async function OverviewPage({
         </>
       }
     >
-      <OverviewContent filters={filters} kpiPeriodLabel={kpiPeriodLabel} />
+      <OverviewContent filters={filters} kpiPeriodLabel={kpiPeriodLabel} mailbox={mailbox} />
     </Suspense>
   )
 }

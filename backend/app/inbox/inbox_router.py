@@ -10,13 +10,40 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.db import Session
 from app.inbox import service as svc
+from app.integrations.adapters.email.credentials import resolve_mail_read_allowlist
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
+
+
+def _validate_mailbox(request: Request, mailbox: str | None) -> str | None:
+    """Lowercase + membership-check against the mail-read allowlist.
+
+    The allowlist (``settings.mail_read_allowlist`` → vault cache) is the
+    one trust boundary for "which mailboxes the app may touch". Reusing it
+    here keeps us from inventing a second rule that could drift.
+    """
+    if mailbox is None:
+        return None
+    normalized = mailbox.strip().lower()
+    if not normalized:
+        return None
+    allow = resolve_mail_read_allowlist(request.app.state.settings)
+    if allow is None or normalized not in allow:
+        raise HTTPException(status_code=400, detail="mailbox not allowed")
+    return normalized
+
+
+class MailboxItem(BaseModel):
+    address: str
+
+
+class MailboxesListOut(BaseModel):
+    items: list[MailboxItem]
 
 
 # ---- response shapes ------------------------------------------------------
@@ -132,23 +159,39 @@ class ThreadOut(BaseModel):
 # ---- endpoints ------------------------------------------------------------
 
 
+@router.get("/mailboxes", response_model=MailboxesListOut)
+async def list_mailboxes_endpoint(request: Request) -> MailboxesListOut:
+    """List the mailboxes the operator may filter by.
+
+    Derived from the mail-read allowlist — the single source of truth for
+    "which addresses the app will touch" — so the selector can't offer a
+    mailbox the backend would reject.
+    """
+    allow = resolve_mail_read_allowlist(request.app.state.settings) or set()
+    items = [MailboxItem(address=addr) for addr in sorted(allow)]
+    return MailboxesListOut(items=items)
+
+
 @router.get("/emails", response_model=EmailsPageOut)
 async def list_emails_endpoint(
     session: Session,
+    request: Request,
     intent: str | None = Query(default=None, max_length=32),
     q: str | None = Query(default=None, max_length=200),
     page: int = Query(default=1, ge=1, le=10000),
     page_size: int = Query(default=40, ge=1, le=200),
+    mailbox: str | None = Query(default=None, max_length=320),
 ) -> EmailsPageOut:
     """List emails for the /emails page. Returns the triage counts + sentiment
     bar numbers in one call so the Server Component doesn't need a second trip.
     """
+    mb = _validate_mailbox(request, mailbox)
     offset = (page - 1) * page_size
     rows, total = await svc.list_emails(
-        session, intent=intent, text_query=q, limit=page_size, offset=offset
+        session, intent=intent, text_query=q, limit=page_size, offset=offset, mailbox=mb,
     )
-    counts = await svc.intent_counts(session)
-    bucket = await svc.sentiment_buckets(session)
+    counts = await svc.intent_counts(session, mailbox=mb)
+    bucket = await svc.sentiment_buckets(session, mailbox=mb)
     return EmailsPageOut(
         items=[EmailListItem(**r.__dict__) for r in rows],
         total=total,
@@ -165,18 +208,25 @@ async def list_emails_endpoint(
 @router.get("/triage", response_model=list[TriageOut])
 async def triage_endpoint(
     session: Session,
+    request: Request,
     urgent_only: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
+    mailbox: str | None = Query(default=None, max_length=320),
 ) -> list[TriageOut]:
-    items = await svc.triage_list(session, urgent_only=urgent_only, limit=limit)
+    mb = _validate_mailbox(request, mailbox)
+    items = await svc.triage_list(session, urgent_only=urgent_only, limit=limit, mailbox=mb)
     return [TriageOut(**i.__dict__) for i in items]
 
 
 @router.get("/no-reply", response_model=list[NoReplyOut])
 async def no_reply_endpoint(
-    session: Session, limit: int = Query(default=50, ge=1, le=200)
+    session: Session,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    mailbox: str | None = Query(default=None, max_length=320),
 ) -> list[NoReplyOut]:
-    items = await svc.no_reply_list(session, limit=limit)
+    mb = _validate_mailbox(request, mailbox)
+    items = await svc.no_reply_list(session, limit=limit, mailbox=mb)
     return [NoReplyOut(**i.__dict__) for i in items]
 
 
@@ -190,14 +240,24 @@ async def response_time_endpoint(
 
 
 @router.get("/staff", response_model=list[StaffOut])
-async def staff_endpoint(session: Session) -> list[StaffOut]:
-    items = await svc.staff_performance(session)
+async def staff_endpoint(
+    session: Session,
+    request: Request,
+    mailbox: str | None = Query(default=None, max_length=320),
+) -> list[StaffOut]:
+    mb = _validate_mailbox(request, mailbox)
+    items = await svc.staff_performance(session, mailbox=mb)
     return [StaffOut(**i.__dict__) for i in items]
 
 
 @router.get("/overview-kpis", response_model=KPIsOut)
-async def overview_kpis_endpoint(session: Session) -> KPIsOut:
-    k = await svc.overview_kpis(session)
+async def overview_kpis_endpoint(
+    session: Session,
+    request: Request,
+    mailbox: str | None = Query(default=None, max_length=320),
+) -> KPIsOut:
+    mb = _validate_mailbox(request, mailbox)
+    k = await svc.overview_kpis(session, mailbox=mb)
     return KPIsOut(**k.__dict__)
 
 
@@ -318,9 +378,13 @@ class ForgetContactOut(BaseModel):
 
 @router.get("/status-board", response_model=list[StatusBoardRowOut])
 async def status_board_endpoint(
-    session: Session, limit: int = Query(default=200, ge=1, le=1000),
+    session: Session,
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=1000),
+    mailbox: str | None = Query(default=None, max_length=320),
 ) -> list[StatusBoardRowOut]:
-    rows = await svc.status_board(session, limit=limit)
+    mb = _validate_mailbox(request, mailbox)
+    rows = await svc.status_board(session, limit=limit, mailbox=mb)
     return [StatusBoardRowOut(**r.__dict__) for r in rows]
 
 
@@ -420,13 +484,19 @@ class AskOutModel(BaseModel):
 
 
 @router.post("/ask", response_model=AskOutModel)
-async def ask_endpoint(session: Session, payload: AskIn) -> AskOutModel:
+async def ask_endpoint(
+    session: Session,
+    request: Request,
+    payload: AskIn,
+    mailbox: str | None = Query(default=None, max_length=320),
+) -> AskOutModel:
     """Answer the operator's natural-language question against the real
     inbox via Gemini. Reuses the ``inbox_draft_reply`` AI feature slot.
     Never 500s — provider resolve/timeout/parse errors come back as
     ``ok=false`` with ``error`` naming the reason and ``answer`` a
     human-readable message, so the UI can always say *why*."""
-    out = await svc.ask_question(session=session, question=payload.question)
+    mb = _validate_mailbox(request, mailbox)
+    out = await svc.ask_question(session=session, question=payload.question, mailbox=mb)
     return AskOutModel(
         intent=out.intent, keywords=out.keywords,
         sentiment=out.sentiment, summary=out.summary,

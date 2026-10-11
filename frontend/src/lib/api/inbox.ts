@@ -30,19 +30,31 @@ function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path:
 }
 
 export async function listEmails(
-  opts: { intent?: string; q?: string; page?: number; page_size?: number } = {},
+  opts: { intent?: string; q?: string; page?: number; page_size?: number; mailbox?: string } = {},
   signal?: AbortSignal,
 ): Promise<EmailsPage> {
-  const res = await api.GET("/inbox/emails", { params: { query: opts }, signal })
+  // ``mailbox`` is accepted by the backend but may not yet be in the
+  // generated schema; cast through ``never`` keeps callers typed while
+  // tolerating a stale codegen. Regenerate with ``pnpm gen:api``.
+  const res = await api.GET("/inbox/emails", { params: { query: opts as never }, signal })
   return unwrap(res, "/inbox/emails")
 }
 
 export async function listTriage(
-  opts: { urgent_only?: boolean; limit?: number } = {},
+  opts: { urgent_only?: boolean; limit?: number; mailbox?: string } = {},
   signal?: AbortSignal,
 ): Promise<TriageRow[]> {
-  const res = await api.GET("/inbox/triage", { params: { query: opts }, signal })
+  const res = await api.GET("/inbox/triage", { params: { query: opts as never }, signal })
   return unwrap(res, "/inbox/triage")
+}
+
+/** One allowed mailbox for the selector. */
+export type MailboxItem = { address: string }
+
+export async function listMailboxes(signal?: AbortSignal): Promise<MailboxItem[]> {
+  const res = await api.GET("/inbox/mailboxes" as never, { signal } as never)
+  const data = unwrap(res as never, "/inbox/mailboxes") as { items: MailboxItem[] }
+  return data.items ?? []
 }
 
 export async function getThread(threadId: string, signal?: AbortSignal): Promise<ThreadOut> {
@@ -205,21 +217,42 @@ export type AskOut = {
  * list uses to narrow down. Never 500s — ``ok=false`` + ``error``
  * tells the UI exactly why we don't have a real answer.
  */
-export async function ask(question: string, signal?: AbortSignal): Promise<AskOut> {
+export async function ask(
+  question: string,
+  opts: { mailbox?: string } = {},
+  signal?: AbortSignal,
+): Promise<AskOut> {
+  const query: Record<string, string> = {}
+  if (opts.mailbox) query.mailbox = opts.mailbox
   const res = await api.POST("/inbox/ask" as never, {
+    params: { query } as never,
     body: { question } as never,
     signal,
   } as never)
   return unwrap(res as never, "/inbox/ask") as AskOut
 }
 
-export async function statusBoard(limit = 200, signal?: AbortSignal): Promise<StatusBoardRow[]> {
-  const res = await api.GET("/inbox/status-board", { params: { query: { limit } }, signal })
+export async function statusBoard(
+  limit = 200,
+  opts: { mailbox?: string } = {},
+  signal?: AbortSignal,
+): Promise<StatusBoardRow[]> {
+  const res = await api.GET("/inbox/status-board", {
+    params: { query: { limit, ...(opts.mailbox ? { mailbox: opts.mailbox } : {}) } as never },
+    signal,
+  })
   return unwrap(res, "/inbox/status-board")
 }
 
-export async function noReply(limit = 50, signal?: AbortSignal): Promise<NoReplyRow[]> {
-  const res = await api.GET("/inbox/no-reply", { params: { query: { limit } }, signal })
+export async function noReply(
+  limit = 50,
+  opts: { mailbox?: string } = {},
+  signal?: AbortSignal,
+): Promise<NoReplyRow[]> {
+  const res = await api.GET("/inbox/no-reply", {
+    params: { query: { limit, ...(opts.mailbox ? { mailbox: opts.mailbox } : {}) } as never },
+    signal,
+  })
   return unwrap(res, "/inbox/no-reply")
 }
 
@@ -234,8 +267,14 @@ export async function responseTime(
   return unwrap(res, "/inbox/response-time")
 }
 
-export async function overviewKpis(signal?: AbortSignal): Promise<OverviewKPIs> {
-  const res = await api.GET("/inbox/overview-kpis", { signal })
+export async function overviewKpis(
+  opts: { mailbox?: string } = {},
+  signal?: AbortSignal,
+): Promise<OverviewKPIs> {
+  const res = await api.GET("/inbox/overview-kpis", {
+    params: { query: (opts.mailbox ? { mailbox: opts.mailbox } : {}) as never },
+    signal,
+  })
   return unwrap(res, "/inbox/overview-kpis")
 }
 
@@ -250,8 +289,14 @@ export async function relationship(
   return unwrap(res, `/inbox/relationship/${brokerDomain}`)
 }
 
-export async function staff(signal?: AbortSignal): Promise<StaffRow[]> {
-  const res = await api.GET("/inbox/staff", { signal })
+export async function staff(
+  opts: { mailbox?: string } = {},
+  signal?: AbortSignal,
+): Promise<StaffRow[]> {
+  const res = await api.GET("/inbox/staff", {
+    params: { query: (opts.mailbox ? { mailbox: opts.mailbox } : {}) as never },
+    signal,
+  })
   return unwrap(res, "/inbox/staff")
 }
 

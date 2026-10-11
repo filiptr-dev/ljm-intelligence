@@ -166,13 +166,16 @@ async def list_emails(
     text_query: str | None = None,
     limit: int = 40,
     offset: int = 0,
+    mailbox: str | None = None,
 ) -> tuple[list[EmailRow], int]:
     """Paginated list for the /emails page. Joins mail_messages+message_insights.
 
     Returns rows ordered newest-first + the total match count (for pagination).
     """
-    total = await count_emails(session, intent=intent, text_query=text_query)
-    rows = await fetch_emails_page(session, intent=intent, text_query=text_query, offset=offset, limit=limit)
+    total = await count_emails(session, intent=intent, text_query=text_query, mailbox=mailbox)
+    rows = await fetch_emails_page(
+        session, intent=intent, text_query=text_query, offset=offset, limit=limit, mailbox=mailbox,
+    )
     out: list[EmailRow] = []
     for r in rows:
         to_addr = (r.to_addrs or [""])[0] if r.to_addrs else ""
@@ -191,14 +194,14 @@ async def list_emails(
     return out, total
 
 
-async def intent_counts(session: AsyncSession) -> list[IntentCount]:
-    rows = await fetch_intent_counts(session)
+async def intent_counts(session: AsyncSession, *, mailbox: str | None = None) -> list[IntentCount]:
+    rows = await fetch_intent_counts(session, mailbox=mailbox)
     return [IntentCount(intent=i, count=int(c)) for i, c in rows]
 
 
-async def sentiment_buckets(session: AsyncSession) -> SentimentBuckets:
+async def sentiment_buckets(session: AsyncSession, *, mailbox: str | None = None) -> SentimentBuckets:
     """Sentiment distribution over inbound-only messages (same rule the demo UI used)."""
-    values = [float(v or 0.0) for (v,) in await fetch_inbound_sentiments(session)]
+    values = [float(v or 0.0) for (v,) in await fetch_inbound_sentiments(session, mailbox=mailbox)]
     pos = sum(1 for v in values if v > 0.2)
     neg = sum(1 for v in values if v < -0.1)
     return SentimentBuckets(
@@ -207,12 +210,13 @@ async def sentiment_buckets(session: AsyncSession) -> SentimentBuckets:
 
 
 async def triage_list(
-    session: AsyncSession, *, urgent_only: bool = False, limit: int = 50
+    session: AsyncSession, *, urgent_only: bool = False, limit: int = 50,
+    mailbox: str | None = None,
 ) -> list[TriageItem]:
     """Urgent-first list for the triage surface. Waiting-minutes derived live."""
     # SQL order is newest-first; the Python pass below re-sorts by urgency to
     # push "urgent" strings to the top (lexical sort wouldn't).
-    rows = await fetch_triage_rows(session, urgent_only=urgent_only, limit=limit)
+    rows = await fetch_triage_rows(session, urgent_only=urgent_only, limit=limit, mailbox=mailbox)
     now = datetime.now(UTC)
     out: list[TriageItem] = []
     for r in rows:
@@ -232,9 +236,11 @@ async def triage_list(
     return out[:limit]
 
 
-async def no_reply_list(session: AsyncSession, *, limit: int = 50) -> list[NoReplyRow]:
+async def no_reply_list(
+    session: AsyncSession, *, limit: int = 50, mailbox: str | None = None,
+) -> list[NoReplyRow]:
     now = datetime.now(UTC)
-    rows = await fetch_no_reply_rows(session, limit=limit)
+    rows = await fetch_no_reply_rows(session, limit=limit, mailbox=mailbox)
     out: list[NoReplyRow] = []
     for r in rows:
         we_sent = _as_utc(r.we_sent_at) or now
@@ -298,9 +304,9 @@ async def response_time_stats(session: AsyncSession, *, broker_domain: str | Non
     )
 
 
-async def staff_performance(session: AsyncSession) -> list[StaffRow]:
+async def staff_performance(session: AsyncSession, *, mailbox: str | None = None) -> list[StaffRow]:
     """Per-mailbox counts + a rough reply-speed median."""
-    rows = await fetch_staff_rows(session)
+    rows = await fetch_staff_rows(session, mailbox=mailbox)
     bucket: dict[str, dict] = defaultdict(lambda: {"inbound": 0, "outbound": 0, "gaps": [], "dropped": 0})
     thread_last_dir: dict[tuple[str, str], tuple[datetime, str] | None] = {}
     for r in rows:
@@ -337,12 +343,12 @@ async def staff_performance(session: AsyncSession) -> list[StaffRow]:
     return out
 
 
-async def overview_kpis(session: AsyncSession) -> OverviewKPIs:
+async def overview_kpis(session: AsyncSession, *, mailbox: str | None = None) -> OverviewKPIs:
     now = datetime.now(UTC)
-    volume = await count_all_messages(session)
-    open_threads = await count_no_reply_rows(session)
-    urgent = await count_urgent_insights(session)
-    negative = await count_negative_insights(session)
+    volume = await count_all_messages(session, mailbox=mailbox)
+    open_threads = await count_no_reply_rows(session, mailbox=mailbox)
+    urgent = await count_urgent_insights(session, mailbox=mailbox)
+    negative = await count_negative_insights(session, mailbox=mailbox)
     _ = now  # reserved for a windowed count once we add received_at filter
     return OverviewKPIs(volume_7d=volume, open_threads=open_threads, urgent=urgent, negative=negative)
 
@@ -434,7 +440,9 @@ class StatusBoardRow:
     message_count: int
 
 
-async def status_board(session: AsyncSession, *, limit: int = 200) -> list[StatusBoardRow]:
+async def status_board(
+    session: AsyncSession, *, limit: int = 200, mailbox: str | None = None,
+) -> list[StatusBoardRow]:
     """One row per OPEN conversation.
 
     Stage derivation: last-direction + no_reply_tracker presence.
@@ -442,7 +450,7 @@ async def status_board(session: AsyncSession, *, limit: int = 200) -> list[Statu
       - last=out → ``waiting_on_them`` (they owe a reply).
       - closed when the thread's last message is >60 days old.
     """
-    rows = await fetch_status_board_rows(session)
+    rows = await fetch_status_board_rows(session, mailbox=mailbox)
     now = datetime.now(UTC)
     by_thread: dict[str, dict] = defaultdict(
         lambda: {
@@ -882,7 +890,7 @@ _ASK_SNIPPET_CHARS = 220
 
 
 async def _fetch_ask_context(
-    session: AsyncSession, *, keywords: list[str]
+    session: AsyncSession, *, keywords: list[str], mailbox: str | None = None,
 ) -> list[dict[str, Any]]:
     """Pull a bounded slice of recent mail+insights for the AI prompt.
 
@@ -921,6 +929,8 @@ async def _fetch_ask_context(
         .order_by(m.sent_at.desc())
         .limit(_ASK_CTX_ROWS * 3)  # over-fetch, then filter in Python
     )
+    if mailbox:
+        stmt = stmt.where(m.mailbox == mailbox)
 
     if keywords:
         clauses = []
@@ -934,7 +944,7 @@ async def _fetch_ask_context(
     # If the keyword filter zeroed the result, drop it and retry — a blank
     # context is worse than a loosely-related one.
     if not rows and keywords:
-        rows = list((await session.execute(
+        fallback = (
             select(
                 m.thread_id, m.subject, m.body_text, m.sent_at, m.from_addr,
                 j.intent, j.sentiment, j.evidence, j.lane_from, j.lane_to, j.rate_usd,
@@ -953,7 +963,10 @@ async def _fetch_ask_context(
             .where(m.from_addr != m.mailbox)
             .order_by(m.sent_at.desc())
             .limit(_ASK_CTX_ROWS)
-        )).all())
+        )
+        if mailbox:
+            fallback = fallback.where(m.mailbox == mailbox)
+        rows = list((await session.execute(fallback)).all())
 
     out: list[dict[str, Any]] = []
     for r in rows[:_ASK_CTX_ROWS]:
@@ -1007,6 +1020,7 @@ async def ask_question(
     question: str,
     session: AsyncSession | None = None,
     provider: Any | None = None,
+    mailbox: str | None = None,
 ) -> AskOut:
     """Answer a natural-language inbox question with real AI over real mail.
 
@@ -1061,7 +1075,9 @@ async def ask_question(
         )
     context_rows: list[dict[str, Any]] = []
     try:
-        context_rows = await _fetch_ask_context(session, keywords=_naive_keywords(q))
+        context_rows = await _fetch_ask_context(
+            session, keywords=_naive_keywords(q), mailbox=mailbox,
+        )
     except Exception as exc:  # noqa: BLE001
         _l.warning("ask_question: context fetch failed: %s", type(exc).__name__, exc_info=True)
         return _fail(

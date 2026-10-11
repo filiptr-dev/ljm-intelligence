@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { MailboxSelector } from "@/components/app/mailbox-selector"
 import { PageHeader, Panel } from "@/components/app/ui"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import * as inbox from "@/lib/api/inbox"
@@ -10,8 +11,18 @@ import { cn } from "@/lib/utils"
  * (waiting_on_us / waiting_on_them), next step, counterparty, last
  * direction. Backed by `/inbox/status-board`.
  */
-export default async function MessagesPage() {
-  const [rows, noReply] = await Promise.all([inbox.statusBoard(500), inbox.noReply(50)])
+export default async function MessagesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const sp = await searchParams
+  const mailbox = typeof sp.mailbox === "string" && sp.mailbox.trim() ? sp.mailbox.trim() : undefined
+  const [rows, noReply, mailboxes] = await Promise.all([
+    inbox.statusBoard(500, { mailbox }),
+    inbox.noReply(50, { mailbox }),
+    inbox.listMailboxes().catch(() => []),
+  ])
   const waitingOnUs = rows.filter((r) => r.stage === "waiting_on_us")
   const waitingOnThem = rows.filter((r) => r.stage === "waiting_on_them")
 
@@ -22,6 +33,8 @@ export default async function MessagesPage() {
         title="Status board"
         description="Every open conversation, grouped by who owes a reply. Click a row to open the thread and reply inline."
       />
+
+      <MailboxSelector options={mailboxes} />
 
       <div className="mb-4 flex items-center gap-2">
         <Link href="/emails/compose" className="rounded-sm border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted">+ New email</Link>

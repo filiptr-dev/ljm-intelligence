@@ -1,6 +1,7 @@
 import Link from "next/link"
 import { AlertCircle, Search, Sparkles } from "lucide-react"
 import { INTENT_META, IntentBadge, SentimentDot } from "@/components/app/intent"
+import { MailboxSelector } from "@/components/app/mailbox-selector"
 import { BarList, PageHeader, Panel, StackBar } from "@/components/app/ui"
 import { buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -51,7 +52,9 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams
   const q = typeof sp.q === "string" ? sp.q.trim() : ""
   const intent = typeof sp.intent === "string" ? sp.intent : undefined
+  const mailbox = typeof sp.mailbox === "string" && sp.mailbox.trim() ? sp.mailbox.trim() : undefined
   const page = Math.max(1, Number(sp.page) || 1)
+  const mailboxes = await inbox.listMailboxes().catch(() => [])
 
   // When the operator submits a question, hand it to the AI first. The
   // server runs Gemini over a bounded slice of real mail and returns
@@ -64,7 +67,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   let effectiveQ: string | undefined = q || undefined
   if (q && !intent) {
     try {
-      ask = await inbox.ask(q)
+      ask = await inbox.ask(q, { mailbox })
     } catch {
       ask = {
         intent: null, keywords: [], sentiment: null, summary: "",
@@ -76,7 +79,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
     if (ask && ask.keywords.length > 0) effectiveQ = ask.keywords[0]
   }
 
-  const data = await inbox.listEmails({ intent: effectiveIntent, q: effectiveQ, page, page_size: PAGE })
+  const data = await inbox.listEmails({ intent: effectiveIntent, q: effectiveQ, page, page_size: PAGE, mailbox })
   const rows = data.items
   const total = data.total
   const pages = Math.ceil(total / PAGE)
@@ -89,7 +92,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
 
   const href = (p: Record<string, string | number | undefined>) => {
     const u = new URLSearchParams()
-    Object.entries({ intent, q: q || undefined, ...p }).forEach(([k, v]) => v !== undefined && v !== "" && u.set(k, String(v)))
+    Object.entries({ intent, q: q || undefined, mailbox, ...p }).forEach(([k, v]) => v !== undefined && v !== "" && u.set(k, String(v)))
     return `/emails?${u}`
   }
 
@@ -114,7 +117,10 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         description={`${total.toLocaleString("en-US")} emails read by the AI. Each one gets an intent, a sentiment score and extracted rates, lanes and reasons.`}
       />
 
+      <MailboxSelector options={mailboxes} />
+
       <form action="/emails" className="mb-3 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
+        {mailbox ? <input type="hidden" name="mailbox" value={mailbox} /> : null}
         <Sparkles className="hidden size-5 shrink-0 text-chart-2 sm:block" />
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground sm:hidden" />
@@ -130,7 +136,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
           {ASK_EXAMPLES.map((ex) => (
             <Link
               key={ex}
-              href={`/emails?q=${encodeURIComponent(ex)}`}
+              href={`/emails?q=${encodeURIComponent(ex)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ""}`}
               className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
             >
               {ex}
@@ -209,7 +215,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
       <div className="rounded-sm border border-border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
           <div className="flex flex-wrap gap-1">
-            <Link href="/emails" className={cn("rounded-sm px-2.5 py-1 text-sm", !intent ? "bg-asphalt text-white" : "hover:bg-muted")}>All</Link>
+            <Link href={href({ intent: undefined, page: undefined })} className={cn("rounded-sm px-2.5 py-1 text-sm", !intent ? "bg-asphalt text-white" : "hover:bg-muted")}>All</Link>
             {[...counts.entries()].filter(([, v]) => v > 0).map(([k]) => (
               <Link key={k} href={href({ intent: k, page: undefined })} className={cn("rounded-sm px-2.5 py-1 text-sm", intent === k ? "bg-asphalt text-white" : "hover:bg-muted")}>
                 {INTENT_META[mapIntent(k)].label}
@@ -237,6 +243,12 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
                   <TableCell className="pl-4 font-mono text-xs text-muted-foreground">{dateTime(r.sent_at as unknown as string)}</TableCell>
                   <TableCell className="max-w-[220px]">
                     <span className="truncate" title={r.from_addr}>{brokerLabel}</span>
+                    <span
+                      title={r.mailbox}
+                      className="ml-2 inline-block rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[0.6rem] uppercase tracking-wide text-muted-foreground"
+                    >
+                      {(r.mailbox || "").split("@")[0] || r.mailbox}
+                    </span>
                   </TableCell>
                   <TableCell className="max-w-[360px]">
                     <Link href={`/emails/${encodeURIComponent(r.thread_id)}`} className="block hover:underline">
