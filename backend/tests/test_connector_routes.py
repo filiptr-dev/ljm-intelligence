@@ -187,3 +187,19 @@ async def test_email_send_route_writes_sent_log() -> None:
             body = r.json()
             assert body["ok"] is True
             assert body["mode"] == "simulated"
+
+
+@pytest.mark.asyncio
+async def test_mail_status_mode_follows_effective_read_source() -> None:
+    """Send mode is simulated but the read source resolves to gmail (env override):
+    /mail/status must report mode=gmail, matching what the ingest worker uses."""
+    settings = _settings().model_copy(update={"mailbox_source": "gmail"})
+    app = create_app(settings)
+    app.dependency_overrides[current_user] = _owner
+    app.dependency_overrides[require_user_or_cron] = _owner
+    async with app.router.lifespan_context(app):
+        await _prep_db(app)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            body = (await c.get("/mail/status")).json()
+            assert body["mailbox_source"] == "gmail"
+            assert body["mode"] == "gmail"

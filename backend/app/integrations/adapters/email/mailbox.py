@@ -151,8 +151,7 @@ class SimulatedMailbox:
                 continue
             if hid > start:
                 yield m, m.history_id
-                if hid > max_hid:
-                    max_hid = hid
+                max_hid = max(max_hid, hid)
         # Mirror Gmail's end-of-page marker so an empty mailbox still advances
         # a cursor past ``start`` when the source has newer history.
         if max_hid > start:
@@ -376,8 +375,7 @@ class GmailMailbox:
                         hid_i = int(hid_s)
                     except (TypeError, ValueError):
                         hid_i = 0
-                    if hid_i > max_hid_seen:
-                        max_hid_seen = hid_i
+                    max_hid_seen = max(max_hid_seen, hid_i)
                     for added in entry.get("messagesAdded") or []:
                         m = added.get("message") or {}
                         mid = m.get("id")
@@ -393,8 +391,7 @@ class GmailMailbox:
                         if parsed is not None:
                             try:
                                 phid = int(parsed.history_id)
-                                if phid > max_hid_seen:
-                                    max_hid_seen = phid
+                                max_hid_seen = max(max_hid_seen, phid)
                             except (TypeError, ValueError):
                                 pass
                             yield parsed, parsed.history_id

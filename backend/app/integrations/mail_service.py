@@ -142,7 +142,10 @@ async def status(sessionmaker: Any, settings: Any) -> MailStatusRow:
         except Exception as exc:  # noqa: BLE001
             log.warning("mail/status: list_mailboxes probe failed: %s", exc)
     return MailStatusRow(
-        mode=mode if mode in ("simulated", "gmail") else "simulated",
+        # Surface "gmail" when EITHER side is live: the send mode (DB/env
+        # sender) or the effective read source the ingest worker uses. Sends
+        # themselves still follow effective_mode() — only the display widens.
+        mode="gmail" if "gmail" in (mode, mailbox_source_effective) else "simulated",
         impersonate=settings.gmail.impersonate,
         admin_impersonate=settings.gmail.admin_impersonate,
         scopes=list(settings.gmail.scopes_send)
