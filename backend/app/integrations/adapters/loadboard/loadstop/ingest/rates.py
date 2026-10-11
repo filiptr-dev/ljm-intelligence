@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.rates.models import LaneRate
 from app.shared.orm import LJM_TENANT_ID
 
-
 SOURCE = "loadstop"
 
 

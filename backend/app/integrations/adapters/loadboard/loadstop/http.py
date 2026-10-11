@@ -20,10 +20,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
-
 
 LOG = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ def _is_read_only(method: str) -> bool:
 def _assert_allowed_host(url: str) -> None:
     try:
         host = httpx.URL(url).host
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise LoadstopSSRFBlocked(f"invalid url: {exc}") from exc
     if host not in ALLOWED_HOSTS:
         raise LoadstopSSRFBlocked(f"host not in allowlist: {host!r}")

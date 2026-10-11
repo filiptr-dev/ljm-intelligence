@@ -15,7 +15,6 @@ from app.integrations.adapters.loadboard.loadstop.ingest.customers import (
 from app.prospecting.models import Lead, LeadContact
 from app.shared.orm import LJM_TENANT_ID
 
-
 SAMPLE_CUSTOMERS = [
     {
         "id": "ls-c-1",

@@ -30,14 +30,13 @@ import re
 import secrets
 from typing import Any, Protocol
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.prospecting.broker_matching import normalize_name
 from app.prospecting.contacts_repository import norm_email, norm_name
 from app.prospecting.models import Lead, LeadContact, LeadSource
 from app.shared.orm import LJM_TENANT_ID
-
 
 LOG = logging.getLogger(__name__)
 SOURCE = "loadstop"

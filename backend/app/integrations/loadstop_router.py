@@ -8,6 +8,7 @@ customers + loads + rates), not a plain load-board source.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,11 +21,9 @@ from app.identity.credentials import (
     VaultNotFound,
 )
 from app.identity.models import SettingsRow
+from app.integrations.adapters.loadboard.loadstop.login import perform_login
 from app.shared.orm import LJM_TENANT_ID
 from app.shared.tenant import TenantId
-
-from app.integrations.adapters.loadboard.loadstop.login import perform_login
-
 
 LOG = logging.getLogger(__name__)
 
@@ -185,7 +184,7 @@ async def test_connection(request: Request) -> TestOut:
                 vault = await CredentialVault.for_session(s)
             except VaultConfigError as exc:
                 return TestOut(status="unknown", detail=f"vault_unavailable:{exc}")
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             await vault.put(
                 s,
@@ -194,7 +193,7 @@ async def test_connection(request: Request) -> TestOut:
                 "session",
                 {
                     "cookies": result.cookies,
-                    "last_login_at": datetime.now(timezone.utc).isoformat(),
+                    "last_login_at": datetime.now(UTC).isoformat(),
                 },
             )
             await s.commit()
@@ -203,10 +202,35 @@ async def test_connection(request: Request) -> TestOut:
 
 @router.post("/sync/{service}", response_model=dict)
 async def kick_sync(service: str, request: Request) -> dict:
-    """Operator-triggered one-shot refresh. v1 wires 'fleet'."""
+    """Operator-triggered one-shot refresh. Defers the real ingest job.
+
+    Gated the same way the scheduler ticks are gated — driver must be
+    'api', a session cookie must be stored, kill switch must be off.
+    A refused request is explicit (409) rather than silently queued; the
+    operator sees "fix the connector first".
+    """
+    import os as _os
+
     if service not in {"fleet", "customers", "loads", "rates"}:
         raise HTTPException(404, f"unknown service: {service}")
-    # Scheduler wiring is the hourly tick; here we just acknowledge the request
-    # so the Settings UI can show "queued". A worker-side kickoff is the next
-    # increment — not blocking v1 of the connector.
-    return {"service": service, "queued": True}
+
+    if _os.environ.get("LOADSTOP_INGEST_KILL", "").strip() in ("1", "true", "on", "yes"):
+        raise HTTPException(409, "LOADSTOP_INGEST_KILL is set — ingest is disabled")
+
+    async with request.app.state.sessionmaker() as s:
+        row = await _get_settings(s)
+        if row.loads_loadstop_driver != "api":
+            raise HTTPException(409, "LoadStop driver is not 'api' — enable it in Settings")
+        sess = await _get_session_bundle(s)
+    if not sess or not sess.get("cookies"):
+        raise HTTPException(409, "no stored LoadStop session — run Test with credentials first")
+
+    from app.shared.queue import dispatch
+
+    # Both the full-ingest tick (hourly job) and the trucks-locations tick
+    # (15-min job) honour the Settings toggles internally, so a /sync/fleet
+    # that uses the trucks tick is cheap; the other three dispatch the full
+    # tick which will no-op the services whose toggle is off.
+    task_name = "loadstop.trucks_tick" if service == "fleet" else "loadstop.ingest_tick"
+    await dispatch(task_name, tenant_id=LJM_TENANT_ID)
+    return {"service": service, "queued": True, "task": task_name}

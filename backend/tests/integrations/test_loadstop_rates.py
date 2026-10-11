@@ -12,7 +12,6 @@ from app.integrations.adapters.loadboard.loadstop.ingest.rates import ingest_rat
 from app.rates.models import LaneRate
 from app.shared.orm import LJM_TENANT_ID
 
-
 SAMPLE_RATES = [
     {"id": "lr-1", "originState": "GA", "destState": "NC", "equipment": "Van", "asOfMonth": "2026-10", "low": 1.80, "avg": 2.10, "high": 2.40, "miles": 420},
     {"id": "lr-2", "originState": "FL", "destState": "NY", "equipment": "Van", "asOfMonth": "2026-10", "low": 2.0, "avg": 2.3, "high": 2.6, "miles": 1200},

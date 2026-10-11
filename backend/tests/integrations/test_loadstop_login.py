@@ -7,10 +7,8 @@ username/password are the obviously-fake string ``bogus@invented.test``.
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from app.integrations.adapters.loadboard.loadstop.login import perform_login
-
 
 EMAIL_FORM = (
     b"<html><body>"

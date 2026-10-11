@@ -29,7 +29,6 @@ from app.analysis.operating_area import in_operating_area
 from app.prospecting.models import Load
 from app.shared.orm import LJM_TENANT_ID
 
-
 SOURCE = "loadstop"
 DRY_VAN_WORDS = ("van", "dry van", "dv", "reefer-off")  # 'reefer-off' = van-eligible
 
@@ -53,7 +52,7 @@ def _parse_ts(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(value))
     except Exception:  # noqa: BLE001
         return None
 

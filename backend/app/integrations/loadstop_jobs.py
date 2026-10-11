@@ -18,19 +18,17 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.models import SettingsRow
+from app.integrations.adapters.loadboard.loadstop.http import LoadstopAuthRequired
+from app.integrations.adapters.loadboard.loadstop.session import open_client
 from app.shared.orm import LJM_TENANT_ID
 from app.shared.queue import app
 from app.shared.tenant import TenantId, set_tenant
-
-from app.integrations.adapters.loadboard.loadstop.http import LoadstopAuthRequired
-from app.integrations.adapters.loadboard.loadstop.session import open_client
-
 
 LOG = logging.getLogger(__name__)
 
@@ -62,7 +60,7 @@ async def _record_run(
             "tid": LJM_TENANT_ID,
             "svc": service,
             "started": started_at,
-            "finished": datetime.now(timezone.utc),
+            "finished": datetime.now(UTC),
             "status": status,
             "ri": rows_in,
             "ru": rows_upserted,
@@ -141,7 +139,7 @@ async def loadstop_trucks_tick(tenant_id: str = LJM_TENANT_ID) -> None:
 # --- per-service wrappers --------------------------------------------------
 
 async def _run_one(sessionmaker, client, service: str, fn) -> None:
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     status = "ok"
     error = None
     counts: dict[str, int] = {"rows_in": 0, "rows_upserted": 0}
@@ -149,7 +147,7 @@ async def _run_one(sessionmaker, client, service: str, fn) -> None:
         async with sessionmaker() as s:
             counts = await fn(s, client)
             await s.commit()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         status = "error"
         error = str(exc)[:500]
         LOG.exception("loadstop %s failed", service)

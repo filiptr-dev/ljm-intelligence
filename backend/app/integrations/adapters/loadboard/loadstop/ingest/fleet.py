@@ -12,7 +12,7 @@ the default so make/model/plate/odometer also refresh.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Protocol
 
 from sqlalchemy import select
@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.fleet.models import Truck
 from app.shared.orm import LJM_TENANT_ID
-
 
 SOURCE = "loadstop"
 
@@ -33,7 +32,7 @@ def _parse_ts(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value)
     except Exception:  # noqa: BLE001
         return None
 

@@ -23,7 +23,6 @@ import httpx
 
 from .http import BASE_URL
 
-
 LOG = logging.getLogger(__name__)
 
 LOGIN_PAGE = f"{BASE_URL}/Account/Login"

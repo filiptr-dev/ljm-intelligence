@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +33,6 @@ from app.shared.tenant import TenantId
 
 from .http import BASE_URL, AbpClient, LoadstopAuthRequired
 from .login import perform_login
-
 
 LOG = logging.getLogger(__name__)
 
@@ -84,7 +83,7 @@ async def open_client(sessionmaker):
                 "session",
                 {
                     "cookies": result.cookies,
-                    "last_login_at": datetime.now(timezone.utc).isoformat(),
+                    "last_login_at": datetime.now(UTC).isoformat(),
                 },
             )
             await s.commit()

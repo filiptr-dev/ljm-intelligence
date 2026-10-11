@@ -13,8 +13,6 @@ from app.integrations.adapters.loadboard.loadstop.ingest.loads import (
     ingest_loads,
 )
 from app.prospecting.models import Load
-from app.shared.orm import LJM_TENANT_ID
-
 
 SAMPLE_LOADS = [
     {"id": "L1", "originState": "GA", "destState": "NC", "equipment": "Van", "rate": 1800, "miles": 420, "brokerName": "Acme", "originCity": "Atlanta", "destCity": "Charlotte"},
