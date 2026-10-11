@@ -39,6 +39,8 @@ const SOURCE_LABEL: Record<string, string> = {
   loadboard123: "123LB",
   truckstop: "Truckstop",
   inbox: "Inbox",
+  loadstop: "LoadStop",
+  dat_via_loadstop: "DAT via LoadStop",
   demo: "Demo",
   demo2: "Demo",
 }

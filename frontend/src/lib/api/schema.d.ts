@@ -2152,6 +2152,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/loadboards/loadstop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get State */
+        get: operations["get_state_loadboards_loadstop_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch State
+         * @description Save credentials (write-only) + driver + toggles. Never echoes the password back.
+         */
+        patch: operations["patch_state_loadboards_loadstop_patch"];
+        trace?: never;
+    };
+    "/loadboards/loadstop/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Connection
+         * @description Attempt login with the stored creds. Writes the session on success.
+         */
+        post: operations["test_connection_loadboards_loadstop_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loadboards/loadstop/sync/{service}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kick Sync
+         * @description Operator-triggered one-shot refresh. v1 wires 'fleet'.
+         */
+        post: operations["kick_sync_loadboards_loadstop_sync__service__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/unsubscribe": {
         parameters: {
             query?: never;
@@ -2891,6 +2952,7 @@ export interface components {
             /** Contacts */
             contacts: components["schemas"]["NamedContactOut"][];
             main_lane?: components["schemas"]["MainLaneOut"] | null;
+            loadstop?: components["schemas"]["LoadstopBrokerPanelOut"] | null;
         };
         /** BrokerDetailOut */
         BrokerDetailOut: {
@@ -3173,6 +3235,8 @@ export interface components {
             equipment: string | null;
             /** Pickup Date */
             pickup_date: string | null;
+            /** Source */
+            source?: string | null;
         };
         /** ComposeIn */
         ComposeIn: {
@@ -4461,6 +4525,17 @@ export interface components {
             /** Logged At */
             logged_at: string | null;
         };
+        /** LastSyncBlock */
+        LastSyncBlock: {
+            /** Fleet */
+            fleet?: string | null;
+            /** Customers */
+            customers?: string | null;
+            /** Loads */
+            loads?: string | null;
+            /** Rates */
+            rates?: string | null;
+        };
         /** LeadAiSummaryOut */
         LeadAiSummaryOut: {
             /** Summary */
@@ -4771,6 +4846,22 @@ export interface components {
         LoadsListOut: {
             /** Items */
             items: components["schemas"]["LoadGroupOut"][];
+        };
+        /**
+         * LoadstopBrokerPanelOut
+         * @description LoadStop customer metadata attached to a leads.raw['loadstop'] dict.
+         */
+        LoadstopBrokerPanelOut: {
+            /** Customer Id */
+            customer_id?: string | null;
+            /** Credit Status */
+            credit_status?: string | null;
+            /** Credit Updated At */
+            credit_updated_at?: string | null;
+            /** Address */
+            address?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** LoginIn */
         LoginIn: {
@@ -5241,6 +5332,18 @@ export interface components {
         PasteIn: {
             /** Text */
             text: string;
+        };
+        /** PatchIn */
+        PatchIn: {
+            /** Email */
+            email?: string | null;
+            /** Password */
+            password?: string | null;
+            /** One Time Code */
+            one_time_code?: string | null;
+            /** Driver */
+            driver?: ("off" | "api") | null;
+            toggles?: components["schemas"]["ToggleBlock"] | null;
         };
         /** PostIn */
         PostIn: {
@@ -6054,6 +6157,28 @@ export interface components {
             /** Dropped Threads */
             dropped_threads: number;
         };
+        /** StateOut */
+        StateOut: {
+            /** Driver */
+            driver: string;
+            /** Status */
+            status: string;
+            /** Email Set */
+            email_set: boolean;
+            /** Email Masked */
+            email_masked?: string | null;
+            /** Has Session */
+            has_session: boolean;
+            /** Last Login At */
+            last_login_at?: string | null;
+            toggles: components["schemas"]["ToggleBlock"];
+            last_sync: components["schemas"]["LastSyncBlock"];
+            /**
+             * Dat Connected
+             * @default false
+             */
+            dat_connected: boolean;
+        };
         /** StatusBoardRowOut */
         StatusBoardRowOut: {
             /** Thread Id */
@@ -6120,6 +6245,13 @@ export interface components {
             score: number;
             /** Reason */
             reason: string;
+        };
+        /** TestOut */
+        TestOut: {
+            /** Status */
+            status: string;
+            /** Detail */
+            detail?: string | null;
         };
         /** TestReadOut */
         TestReadOut: {
@@ -6195,6 +6327,29 @@ export interface components {
             to_call_today: components["schemas"]["TileCount"];
             new_leads_since_last_crawl: components["schemas"]["NewLeadsTile"];
             loads_booked_90d: components["schemas"]["LoadsBookedTile"];
+        };
+        /** ToggleBlock */
+        ToggleBlock: {
+            /**
+             * Fleet
+             * @default true
+             */
+            fleet: boolean;
+            /**
+             * Customers
+             * @default true
+             */
+            customers: boolean;
+            /**
+             * Loads
+             * @default true
+             */
+            loads: boolean;
+            /**
+             * Rates
+             * @default true
+             */
+            rates: boolean;
         };
         /** TopLane */
         TopLane: {
@@ -6457,6 +6612,8 @@ export interface components {
             odometer_miles: number | null;
             /** Home Base */
             home_base: string | null;
+            /** Source */
+            source: string | null;
             /**
              * Runs 30D
              * @default 0
@@ -10881,6 +11038,138 @@ export interface operations {
                 "X-Cron-Secret"?: string | null;
             };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_state_loadboards_loadstop_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_state_loadboards_loadstop_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_loadboards_loadstop_test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    kick_sync_loadboards_loadstop_sync__service__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                service: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

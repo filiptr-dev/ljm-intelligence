@@ -167,7 +167,12 @@ export default function RatesPage() {
                     <td className="py-1 pr-3 text-right num font-mono">{c.miles}</td>
                     <td className="py-1 pr-3 text-right num font-mono">${c.rate_usd.toFixed(0)}</td>
                     <td className="py-1 pr-3 text-right num font-mono">${c.rate_per_mile.toFixed(2)}</td>
-                    <td className="py-1 pr-3 text-xs text-muted-foreground">{c.pickup_date ?? "—"}</td>
+                    <td className="py-1 pr-3 text-xs text-muted-foreground">
+                      {c.pickup_date ?? "—"}
+                      {c.source === "loadstop" && (
+                        <span className="ml-2 rounded bg-emerald-500/10 px-1 py-[1px] text-[0.65rem] font-medium uppercase tracking-wide text-emerald-700">LoadStop</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

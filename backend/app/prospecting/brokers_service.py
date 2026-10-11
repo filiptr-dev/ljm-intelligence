@@ -196,6 +196,7 @@ class BrokerDetailResult:
     main_lane: MainLaneRow | None
     overview_metrics: OverviewMetricsRow | None = None
     email_analytics: EmailAnalyticsRow | None = None
+    loadstop: dict | None = None
 
 
 # ---------- helpers ---------------------------------------------------------
@@ -839,6 +840,7 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         main_lane=main_lane,
         overview_metrics=overview_map.get(lead.id),
         email_analytics=email_analytics,
+        loadstop=((lead.raw or {}).get("loadstop") if isinstance(lead.raw, dict) else None),
     )
 
 

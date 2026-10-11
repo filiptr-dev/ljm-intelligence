@@ -47,6 +47,7 @@ IMPORT_PATHS: list[str] = [
     "app.inbox.jobs",
     "app.analysis.jobs",
     "app.integrations.loads_jobs",
+    "app.integrations.loadstop_jobs",
     "app.integrations.mail_jobs",
     "app.rates.jobs",
     "app.shared.scheduler",

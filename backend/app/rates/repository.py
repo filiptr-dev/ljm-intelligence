@@ -55,6 +55,7 @@ async def recent_booked_rates(
             Load.dest_state,
             Load.equipment,
             Load.pickup_date,
+            Load.source,
         )
         .join(SentLog, SentLog.lead_id == Load.broker_lead_id)
         .where(
@@ -84,6 +85,7 @@ async def recent_booked_rates(
             "dest": f"{r.dest_city or ''}, {r.dest_state or ''}".strip(", "),
             "equipment": r.equipment,
             "pickup_date": r.pickup_date.isoformat() if r.pickup_date else None,
+            "source": r.source,
         })
     return out
 

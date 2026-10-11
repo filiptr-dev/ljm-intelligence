@@ -33,6 +33,7 @@ class TruckRow(_Out):
     driver_name: str | None = None
     odometer_miles: int | None = None
     home_base: str | None = None
+    source: str | None = None
     runs_30d: int = 0
     miles_30d: int = 0
     revenue_30d_usd: float = 0.0

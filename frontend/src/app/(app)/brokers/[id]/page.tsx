@@ -565,6 +565,38 @@ export default function BrokerDetailPage() {
 
           <BrokerStatTiles om={data.overview_metrics ?? null} />
 
+          {b.loadstop && (
+            <Panel
+              title="LoadStop (TMS)"
+              description="Read-only mirror of this customer in LoadStop — refreshed hourly when the connector is on."
+            >
+              <div className="grid gap-2 text-sm sm:grid-cols-2">
+                <div className="flex justify-between gap-3 rounded border border-border px-3 py-2">
+                  <span className="text-muted-foreground">Customer id</span>
+                  <span className="font-mono">{b.loadstop.customer_id ?? "—"}</span>
+                </div>
+                <div className="flex justify-between gap-3 rounded border border-border px-3 py-2">
+                  <span className="text-muted-foreground">Credit status</span>
+                  <span className="font-medium">{b.loadstop.credit_status ?? "—"}</span>
+                </div>
+                <div className="flex justify-between gap-3 rounded border border-border px-3 py-2">
+                  <span className="text-muted-foreground">Credit updated</span>
+                  <span>{b.loadstop.credit_updated_at ? new Date(b.loadstop.credit_updated_at).toLocaleDateString() : "—"}</span>
+                </div>
+                <div className="flex justify-between gap-3 rounded border border-border px-3 py-2">
+                  <span className="text-muted-foreground">Address</span>
+                  <span className="truncate">
+                    {b.loadstop.address
+                      ? [b.loadstop.address.line1, b.loadstop.address.city, b.loadstop.address.state]
+                          .filter(Boolean)
+                          .join(", ") || "—"
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+            </Panel>
+          )}
+
           <Panel
             title="Contact block"
             description="Every field with a visible source. Missing data stays missing — we don't fake it."

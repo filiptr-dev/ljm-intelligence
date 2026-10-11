@@ -97,7 +97,12 @@ export function TrucksTable({
             className="cursor-pointer focus-visible:bg-muted/60 focus-visible:outline-none"
           >
             <TableCell className="px-2 py-2">
-              <div className="font-mono text-[0.85rem] font-semibold">{r.unit_number}</div>
+              <div className="flex items-center gap-1.5 font-mono text-[0.85rem] font-semibold">
+                {r.unit_number}
+                {r.source === "loadstop" && (
+                  <span className="rounded bg-emerald-500/10 px-1 py-[1px] text-[0.65rem] font-medium uppercase tracking-wide text-emerald-700">LS</span>
+                )}
+              </div>
               <div className="truncate text-xs text-muted-foreground">{[r.year, r.make, r.model].filter(Boolean).join(" ")}</div>
             </TableCell>
             <TableCell className="px-2 py-2"><StatusChip status={r.status} /></TableCell>

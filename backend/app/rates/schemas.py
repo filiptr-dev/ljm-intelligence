@@ -37,6 +37,7 @@ class CompRowOut(BaseModel):
     dest: str
     equipment: str | None
     pickup_date: str | None
+    source: str | None = None
 
 
 class RateQuoteOut(BaseModel):

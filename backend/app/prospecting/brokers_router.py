@@ -251,12 +251,22 @@ class EmailAnalyticsOut(BaseModel):
     weekly_series_12w: list[WeeklyPointOut]
 
 
+class LoadstopBrokerPanelOut(BaseModel):
+    """LoadStop customer metadata attached to a leads.raw['loadstop'] dict."""
+
+    customer_id: str | None = None
+    credit_status: str | None = None
+    credit_updated_at: str | None = None
+    address: dict | None = None
+
+
 class BrokerDetailBody(BrokerRowOut):
     address: ContactFieldOut
     linkedin_company_url: str | None = None
     website_url: str | None = None
     contacts: list[NamedContactOut]
     main_lane: MainLaneOut | None = None
+    loadstop: LoadstopBrokerPanelOut | None = None
 
 
 class BrokerDetailOut(BaseModel):
@@ -703,6 +713,14 @@ async def get_broker(request: Request, broker_id: str) -> BrokerDetailOut:
             miles_band=result.main_lane.miles_band,
             last_seen_at=result.main_lane.last_seen_at,
         )
+    ls_panel = None
+    if result.loadstop and isinstance(result.loadstop, dict):
+        ls_panel = LoadstopBrokerPanelOut(
+            customer_id=result.loadstop.get("customer_id"),
+            credit_status=result.loadstop.get("credit_status"),
+            credit_updated_at=result.loadstop.get("credit_updated_at"),
+            address=result.loadstop.get("address") if isinstance(result.loadstop.get("address"), dict) else None,
+        )
     detail = BrokerDetailBody(
         **base.model_dump(),
         address=_field_out(result.address),
@@ -710,6 +728,7 @@ async def get_broker(request: Request, broker_id: str) -> BrokerDetailOut:
         website_url=result.website_url,
         contacts=[_named_contact_out(c) for c in result.contacts],
         main_lane=main_lane_out,
+        loadstop=ls_panel,
     )
     summary = BrokerSummaryOut(
         sent_count_30d=result.summary.sent_count_30d,

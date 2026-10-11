@@ -64,7 +64,7 @@ async def list_trucks(session: AsyncSession, tenant_id: str) -> FleetList:
         return TruckRow(
             id=u.id, kind=u.kind, unit_number=u.unit_number, make=u.make, model=u.model, year=u.year,
             equipment=u.equipment, status=u.status, driver_name=u.assigned_driver_name,
-            odometer_miles=u.odometer_miles, home_base=_home(u),
+            odometer_miles=u.odometer_miles, home_base=_home(u), source=u.source,
             runs_30d=int(t.get("runs", 0)), miles_30d=int(t.get("miles", 0)),
             revenue_30d_usd=round(t.get("revenue", 0.0), 2),
             cost_per_mile_30d_usd=_ratio(t.get("cost", 0.0), t.get("miles", 0)),
