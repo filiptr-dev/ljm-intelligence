@@ -34,16 +34,17 @@ async def test_fleet_ingest_inserts_then_upserts_locations(db):
     assert counts["rows_in"] == 2
     assert counts["rows_upserted"] == 2
 
-    # Second pass with new coordinates — same unit numbers → upsert, not duplicate.
-    moved = [{**SAMPLE_TRUCKS[0], "lastLocation": {**SAMPLE_TRUCKS[0]["lastLocation"], "lat": 42.0, "lng": -88.0}}]
+    # Second pass with a fresh location string — same unit numbers →
+    # upsert, not duplicate; raw envelope refreshes.
+    moved = [{**SAMPLE_TRUCKS[0], "locationDescription": "Milwaukee, WI (moving)"}]
     client2 = FakeAbpClient({("trucks", "GetAll"): [moved]})
     async with db() as s:
-        await ingest_trucks(s, client2, locations_only=True)
+        await ingest_trucks(s, client2, locations_only=False)
         await s.commit()
     async with db() as s:
         rows = (await s.execute(select(Truck).where(Truck.tenant_id == LJM_TENANT_ID))).scalars().all()
     assert len(rows) == 2  # no duplicate
     t100 = next(r for r in rows if r.unit_number == "T-100")
-    assert float(t100.last_lat) == 42.0
     assert t100.source == "loadstop"
     assert t100.source_ref == "ls-tr-100"
+    assert (t100.raw or {}).get("locationDescription") == "Milwaukee, WI (moving)"

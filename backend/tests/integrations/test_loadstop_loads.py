@@ -15,10 +15,13 @@ from app.integrations.adapters.loadboard.loadstop.ingest.loads import (
 from app.prospecting.models import Load
 
 SAMPLE_LOADS = [
-    {"id": "L1", "originState": "GA", "destState": "NC", "equipment": "Van", "rate": 1800, "miles": 420, "brokerName": "Acme", "originCity": "Atlanta", "destCity": "Charlotte"},
-    {"id": "L2", "originState": "TX", "destState": "OH", "equipment": "Van", "rate": 2200, "miles": 1400, "brokerName": "TX Broker"},  # OUT: TX origin
-    {"id": "L3", "originState": "OH", "destState": "PA", "equipment": "Flatbed", "rate": 1500, "miles": 300, "brokerName": "Flat Co"},  # OUT: not dry van
-    {"id": "L4", "originState": "FL", "destState": "GA", "equipment": "Dry Van", "rate": 900, "miles": 300, "brokerName": "FL Co"},
+    # Mirror the splitLoads/GetAllWithSP grid shape:
+    # vanType=1 is Dry Van, totalAmount is the rate, calculatedTotalMiles
+    # is the mileage, pickup/deliveryState carry the lanes.
+    {"id": "L1", "pickupState": "GA", "deliveryState": "NC", "vanType": 1, "totalAmount": 1800, "calculatedTotalMiles": 420, "customerName": "Acme", "pickupCity": "Atlanta", "deliveryCity": "Charlotte"},
+    {"id": "L2", "pickupState": "TX", "deliveryState": "OH", "vanType": 1, "totalAmount": 2200, "calculatedTotalMiles": 1400, "customerName": "TX Broker"},  # OUT: TX origin
+    {"id": "L3", "pickupState": "OH", "deliveryState": "PA", "equipment": "Flatbed", "totalAmount": 1500, "calculatedTotalMiles": 300, "customerName": "Flat Co"},  # OUT: not dry van
+    {"id": "L4", "pickupState": "FL", "deliveryState": "GA", "vanType": 1, "totalAmount": 900, "calculatedTotalMiles": 300, "customerName": "FL Co"},
 ]
 
 
@@ -43,7 +46,7 @@ def test_dry_van_predicate_classifies_known_equipments():
 
 
 async def test_loads_filters_texas_and_non_van(db):
-    client = FakeAbpClient({("leads", "GetAll"): [SAMPLE_LOADS], ("leadPastLoads", "GetAll"): [[]], ("splitLoads", "GetAll"): [[]]})
+    client = FakeAbpClient({("splitLoads", "GetAllWithSP"): [SAMPLE_LOADS]})
     async with db() as s:
         counts = await ingest_loads(s, client)
         await s.commit()
@@ -51,9 +54,9 @@ async def test_loads_filters_texas_and_non_van(db):
     assert counts["rows_upserted"] == 2
     async with db() as s:
         rows = (await s.execute(select(Load).where(Load.source == "loadstop"))).scalars().all()
-    assert sorted(r.source_ref for r in rows) == ["dat_via_loadstop:L1", "dat_via_loadstop:L4"]
+    assert sorted(r.source_ref for r in rows) == ["split:L1", "split:L4"]
     # Dedupe: a second ingest with same ids must be an upsert, not duplicate.
-    client2 = FakeAbpClient({("leads", "GetAll"): [SAMPLE_LOADS], ("leadPastLoads", "GetAll"): [[]], ("splitLoads", "GetAll"): [[]]})
+    client2 = FakeAbpClient({("splitLoads", "GetAllWithSP"): [SAMPLE_LOADS]})
     async with db() as s:
         await ingest_loads(s, client2)
         await s.commit()

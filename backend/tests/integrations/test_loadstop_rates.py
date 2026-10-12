@@ -29,14 +29,14 @@ async def db():
 
 
 async def test_rates_upsert_updates_in_place(db):
-    client = FakeAbpClient({("globalLaneRates", "GetAll"): [SAMPLE_RATES]})
+    client = FakeAbpClient({("globalLaneRates", "GetAllWithSP"): [SAMPLE_RATES]})
     async with db() as s:
         counts = await ingest_rates(s, client)
         await s.commit()
     assert counts["rows_upserted"] == 2
 
     bumped = [{**SAMPLE_RATES[0], "avg": 2.25}]
-    client2 = FakeAbpClient({("globalLaneRates", "GetAll"): [bumped]})
+    client2 = FakeAbpClient({("globalLaneRates", "GetAllWithSP"): [bumped]})
     async with db() as s:
         await ingest_rates(s, client2)
         await s.commit()

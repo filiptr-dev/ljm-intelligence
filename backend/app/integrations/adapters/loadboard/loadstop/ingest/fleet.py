@@ -25,7 +25,7 @@ SOURCE = "loadstop"
 
 
 class _ClientLike(Protocol):
-    async def paged(self, service, method, *, page_size=200, extra=None): ...
+    async def paged(self, service, method, *, page_size=200, extra=None, result_path=None): ...
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -38,20 +38,35 @@ def _parse_ts(value: str | None) -> datetime | None:
 
 
 def _project(row: dict[str, Any]) -> dict[str, Any]:
-    loc = row.get("lastLocation") or {}
+    """Project one ``trucks/GetAll`` envelope row.
+
+    LoadStop returns ``{truck: {...}, carrierName, assignedDriverName,
+    locationDescription, status, ...}`` — the nested ``truck`` dict carries
+    the identifying fields (id, number, make, model, vin, licenseNumber,
+    currentMileage), with the live location string on the outer envelope.
+    """
+    inner = row.get("truck") or row.get("truckDto") or {}
+    status_bool = inner.get("status")
+    out_of_service = bool(inner.get("outOfOrder"))
+    status = "out_of_service" if out_of_service else ("active" if status_bool else "inactive" if status_bool is False else None)
+    loc_desc = row.get("locationDescription") or inner.get("locationDescription") or ""
     return {
-        "source_ref": str(row.get("id") or ""),
-        "unit_number": str(row.get("unitNumber") or "").strip(),
-        "make": row.get("make"),
-        "model": row.get("model"),
-        "vin": row.get("vin"),
-        "plate": row.get("plate"),
-        "status": (row.get("status") or "").lower() or None,
-        "odometer_miles": row.get("odometer"),
-        "assigned_driver_name": row.get("assignedDriverName"),
-        "last_lat": loc.get("lat"),
-        "last_lng": loc.get("lng"),
-        "last_seen_at": _parse_ts(loc.get("movedAt")),
+        "source_ref": str(inner.get("id") or row.get("id") or ""),
+        "unit_number": str(inner.get("number") or inner.get("unitNumber") or row.get("truckNumber") or "").strip(),
+        "make": inner.get("make"),
+        "model": inner.get("model"),
+        "vin": inner.get("vin"),
+        "plate": inner.get("licenseNumber") or inner.get("plate"),
+        "status": status,
+        "odometer_miles": inner.get("currentMileage") or inner.get("odometer"),
+        "assigned_driver_name": row.get("assignedDriverName") or inner.get("assignedDriverName"),
+        # No lat/lng in the paged envelope — only a human string. Store the
+        # string on `raw` so the fleet view can show it; coordinates come
+        # from a tracking endpoint we don't call read-only.
+        "last_lat": None,
+        "last_lng": None,
+        "last_seen_at": None,
+        "location_description": loc_desc or None,
     }
 
 
@@ -65,7 +80,9 @@ async def ingest_trucks(
     """Pull every truck page; upsert into ``trucks``. Returns a count dict."""
     rows_in = 0
     rows_upserted = 0
-    async for page in client.paged("trucks", "GetAll", page_size=200):
+    # statusFilter=-1 is "all statuses" — without it the server returns
+    # the stats envelope with items=[] (discovery 2026-10-12).
+    async for page in client.paged("trucks", "GetAll", page_size=200, extra={"statusFilter": -1}):
         for raw in page:
             rows_in += 1
             projected = _project(raw)
@@ -105,10 +122,15 @@ async def ingest_trucks(
                 session.add(truck)
                 rows_upserted += 1
             else:
-                # Refresh locations always; refresh the rest only on the full tick.
-                existing.last_lat = projected["last_lat"]
-                existing.last_lng = projected["last_lng"]
-                existing.last_seen_at = projected["last_seen_at"]
+                # Refresh locations when the envelope carries them; otherwise
+                # keep what we had (the paged list has only the string
+                # locationDescription, no coordinates).
+                if projected["last_lat"] is not None:
+                    existing.last_lat = projected["last_lat"]
+                if projected["last_lng"] is not None:
+                    existing.last_lng = projected["last_lng"]
+                if projected["last_seen_at"] is not None:
+                    existing.last_seen_at = projected["last_seen_at"]
                 if not locations_only:
                     existing.make = projected["make"] or existing.make
                     existing.model = projected["model"] or existing.model

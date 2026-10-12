@@ -16,24 +16,34 @@ from app.prospecting.models import Lead, LeadContact
 from app.shared.orm import LJM_TENANT_ID
 
 SAMPLE_CUSTOMERS = [
+    # Mirror the real customers/GetAll envelope: identifying fields nested
+    # under ``customer`` (customerName, mc, dot, address string, city,
+    # state, phone, email, creditStatus=1 == approved).
     {
-        "id": "ls-c-1",
-        "name": "Acme Freight LLC",
-        "mcNumber": "MC-123456",
-        "dotNumber": "7654321",
-        "type": "Broker",
-        "phone": "555-0100",
-        "email": "ops@acmefreight.invented",
-        "address": {"city": "Atlanta", "state": "GA", "line1": "1 Peachtree"},
-        "creditStatus": "Good",
+        "customer": {
+            "id": "ls-c-1",
+            "customerName": "Acme Freight LLC",
+            "mc": "MC-123456",
+            "dot": "7654321",
+            "customerType": 1,
+            "phone": "555-0100",
+            "email": "ops@acmefreight.invented",
+            "address": "1 Peachtree",
+            "city": "Atlanta",
+            "state": "GA",
+            "creditStatus": 1,
+        },
     },
     {
-        "id": "ls-c-2",
-        "name": "Rivergate Logistics",
-        "mcNumber": "999001",
-        "type": "Broker",
-        "phone": "555-0200",
-        "address": {"city": "Nashville", "state": "TN"},
+        "customer": {
+            "id": "ls-c-2",
+            "customerName": "Rivergate Logistics",
+            "mc": "999001",
+            "customerType": 1,
+            "phone": "555-0200",
+            "city": "Nashville",
+            "state": "TN",
+        },
     },
 ]
 
@@ -62,7 +72,7 @@ async def test_customers_creates_new_leads_and_stamps_loadstop(db):
     acme = next(x for x in leads if x.name == "Acme Freight LLC")
     assert acme.mc == "123456"  # cleaned
     assert acme.raw["loadstop"]["customer_id"] == "ls-c-1"
-    assert acme.raw["loadstop"]["credit_status"] == "Good"
+    assert acme.raw["loadstop"]["credit_status"] == "approved"
     assert acme.raw["review_needed"] is True
 
 

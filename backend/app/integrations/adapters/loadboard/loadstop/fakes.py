@@ -33,7 +33,7 @@ class FakeAbpClient:
         pages = self._pages.get((service, method)) or [[]]
         return {"result": {"items": pages[0]}}
 
-    async def paged(self, service, method, *, page_size=200, extra=None):
+    async def paged(self, service, method, *, page_size=200, extra=None, result_path=None):
         self.assert_read_only(method)
         for p in self._pages.get((service, method)) or [[]]:
             self.calls.append((service, method))
@@ -41,42 +41,36 @@ class FakeAbpClient:
 
 
 SAMPLE_TRUCKS = [
+    # The grid envelope: identifying fields are nested under ``truck``;
+    # the live-location string + assignedDriverName are on the outer row.
     {
-        "id": "ls-tr-100",
-        "unitNumber": "T-100",
-        "make": "Freightliner",
-        "model": "Cascadia",
-        "vin": "1FUJGLDR0CSBE0001",
-        "plate": "LJM-100",
-        "status": "Available",
-        "odometer": 412_355,
-        "assignedDriverId": "ls-dr-10",
-        "assignedDriverName": "Igor P.",
-        "lastLocation": {
-            "lat": 41.878,
-            "lng": -87.629,
-            "city": "Chicago",
-            "state": "IL",
-            "movedAt": "2026-10-10T22:14:00Z",
+        "truck": {
+            "id": "ls-tr-100",
+            "number": "T-100",
+            "make": "Freightliner",
+            "model": "Cascadia",
+            "vin": "1FUJGLDR0CSBE0001",
+            "licenseNumber": "LJM-100",
+            "status": True,
+            "outOfOrder": False,
+            "currentMileage": 412_355,
         },
+        "assignedDriverName": "Igor P.",
+        "locationDescription": "Chicago, IL (moving)",
     },
     {
-        "id": "ls-tr-101",
-        "unitNumber": "T-101",
-        "make": "Volvo",
-        "model": "VNL",
-        "vin": "4V4NC9EJ4LN000001",
-        "plate": "LJM-101",
-        "status": "Moving",
-        "odometer": 288_900,
-        "assignedDriverId": "ls-dr-11",
-        "assignedDriverName": "Marko S.",
-        "lastLocation": {
-            "lat": 39.962,
-            "lng": -83.001,
-            "city": "Columbus",
-            "state": "OH",
-            "movedAt": "2026-10-11T06:02:00Z",
+        "truck": {
+            "id": "ls-tr-101",
+            "number": "T-101",
+            "make": "Volvo",
+            "model": "VNL",
+            "vin": "4V4NC9EJ4LN000001",
+            "licenseNumber": "LJM-101",
+            "status": True,
+            "outOfOrder": False,
+            "currentMileage": 288_900,
         },
+        "assignedDriverName": "Marko S.",
+        "locationDescription": "Columbus, OH (moving)",
     },
 ]

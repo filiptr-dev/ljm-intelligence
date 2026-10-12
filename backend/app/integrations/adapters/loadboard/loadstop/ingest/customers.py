@@ -44,7 +44,16 @@ _MC_RE = re.compile(r"[^0-9]")
 
 
 class _ClientLike(Protocol):
-    async def paged(self, service, method, *, page_size=200, extra=None): ...
+    async def paged(self, service, method, *, page_size=200, extra=None, result_path=None): ...
+
+
+_CREDIT_STATUS_MAP = {
+    1: "approved",
+    2: "watch",
+    3: "declined",
+    4: "cod",
+    5: "hold",
+}
 
 
 def _clean_mc(mc: Any) -> str | None:
@@ -69,20 +78,35 @@ def _lead_id(mc: str | None, dot: str | None, name: str) -> str:
 
 
 def _project(row: dict[str, Any]) -> dict[str, Any]:
-    addr = row.get("address") or {}
+    """Project one ``customers/GetAll`` envelope row.
+
+    LoadStop wraps the customer as ``{customer: {customerName, mc, dot,
+    address, city, state, zipCode, phone, email, creditStatus, source,
+    customerType, ...}, defaultCarrierName, customerDto, agencyId}`` —
+    ``address`` is a plain string and city often lives alongside it as a
+    separate field. Credit status is a numeric enum we map to a short
+    label the broker-detail panel renders directly.
+    """
+    inner = row.get("customer") or row.get("customerDto") or {}
+    name = str(inner.get("customerName") or inner.get("legalName") or inner.get("name") or "").strip()
+    credit_num = inner.get("creditStatus")
+    credit_label = _CREDIT_STATUS_MAP.get(credit_num) if isinstance(credit_num, int) else credit_num
     return {
-        "loadstop_id": str(row.get("id") or ""),
-        "name": str(row.get("name") or row.get("legalName") or "").strip(),
-        "mc": _clean_mc(row.get("mcNumber") or row.get("mc")),
-        "dot": _clean_dot(row.get("dotNumber") or row.get("dot")),
-        "kind": (row.get("type") or "Broker"),
-        "phone": row.get("phone"),
-        "email": row.get("email"),
-        "city": addr.get("city") or row.get("city"),
-        "state": (addr.get("state") or row.get("state") or "")[:2].upper() or None,
-        "address": addr.get("line1") or (row.get("address") if isinstance(row.get("address"), str) else None),
-        "credit_status": row.get("creditStatus") or row.get("credit"),
-        "credit_updated_at": row.get("creditUpdatedAt"),
+        "loadstop_id": str(inner.get("id") or row.get("id") or ""),
+        "name": name,
+        "mc": _clean_mc(inner.get("mc") or inner.get("mcNumber")),
+        "dot": _clean_dot(inner.get("dot") or inner.get("dotNumber")),
+        # customerType=1 is historically Broker on this install; we keep it
+        # as Broker when the enum is set, otherwise default Broker (freight
+        # buyers are the only reads we need here).
+        "kind": "Broker",
+        "phone": inner.get("phone"),
+        "email": inner.get("email"),
+        "city": inner.get("city"),
+        "state": (inner.get("state") or "")[:2].upper() or None,
+        "address": inner.get("address") if isinstance(inner.get("address"), str) else None,
+        "credit_status": credit_label,
+        "credit_updated_at": inner.get("creditModifiedBy") and inner.get("approvalDate"),
     }
 
 
@@ -118,7 +142,9 @@ async def ingest_customers(
     rows_in = 0
     matched = 0
     created = 0
-    async for page in client.paged("customers", "GetAll", page_size=200):
+    # statusFilter=-1 is "all statuses" — required for the server to
+    # return items instead of the stats envelope (discovery 2026-10-12).
+    async for page in client.paged("customers", "GetAll", page_size=200, extra={"statusFilter": -1}):
         for raw in page:
             rows_in += 1
             p = _project(raw)
@@ -197,7 +223,9 @@ async def ingest_contacts(
         cid = ((r.raw or {}).get("loadstop") or {}).get("customer_id")
         if cid:
             customer_to_lead[str(cid)] = r.id
-    async for page in client.paged("contacts", "GetAll", page_size=200):
+    # contacts.StatusFilter is a bool enum ('True' = active). Without a
+    # value the server returns items=[] regardless of population.
+    async for page in client.paged("contacts", "GetAll", page_size=200, extra={"statusFilter": "True"}):
         for raw in page:
             rows_in += 1
             cust_id = str(raw.get("customerId") or raw.get("CustomerId") or "")

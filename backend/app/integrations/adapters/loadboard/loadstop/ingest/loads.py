@@ -34,7 +34,7 @@ DRY_VAN_WORDS = ("van", "dry van", "dv", "reefer-off")  # 'reefer-off' = van-eli
 
 
 class _ClientLike(Protocol):
-    async def paged(self, service, method, *, page_size=200, extra=None): ...
+    async def paged(self, service, method, *, page_size=200, extra=None, result_path=None): ...
 
 
 def _is_dry_van(equipment: str | None) -> bool:
@@ -58,31 +58,50 @@ def _parse_ts(value: str | None) -> datetime | None:
 
 
 def _project(row: dict[str, Any], subsource: str) -> dict[str, Any] | None:
-    origin_state = ((row.get("originState") or (row.get("origin") or {}).get("state") or "")[:2]).upper() or None
-    dest_state = ((row.get("destState") or (row.get("destination") or {}).get("state") or "")[:2]).upper() or None
+    """Project one row from the splitLoads grid envelope.
+
+    LoadStop's ``splitLoads/GetAllWithSP`` returns a flat dict per load:
+    ``{refNumber, pickupState, pickupCity, pickupDate, deliveryState,
+    deliveryCity, deliveryDate, customerName, carrierName, totalAmount,
+    calculatedTotalMiles, vanType, id, …}``. ``vanType=1`` is Dry Van.
+    """
+    origin_state = (
+        (row.get("pickupState") or row.get("originState") or (row.get("origin") or {}).get("state") or "")[:2]
+    ).upper() or None
+    dest_state = (
+        (row.get("deliveryState") or row.get("destState") or (row.get("destination") or {}).get("state") or "")[:2]
+    ).upper() or None
     equipment = row.get("equipment") or row.get("equipmentType")
+    van_type = row.get("vanType")
+    is_dry_van = (equipment and _is_dry_van(equipment)) or van_type == 1
     if not in_operating_area(origin_state):
         return None
-    if not _is_dry_van(equipment):
+    if not is_dry_van:
         return None
     sid = str(row.get("id") or "")
     if not sid:
         return None
-    rate = row.get("rate") or row.get("rateUsd") or row.get("totalRate")
+    rate = (
+        row.get("totalAmount")
+        or row.get("rate")
+        or row.get("rateUsd")
+        or row.get("totalRate")
+        or row.get("primaryFees")
+    )
     return {
         "source_ref": f"{subsource}:{sid}",
-        "broker_name": row.get("brokerName") or row.get("company") or "",
+        "broker_name": row.get("customerName") or row.get("brokerName") or row.get("company") or "",
         "broker_email": row.get("brokerEmail") or row.get("email"),
         "broker_phone": row.get("brokerPhone") or row.get("phone"),
-        "origin_city": row.get("originCity") or (row.get("origin") or {}).get("city"),
+        "origin_city": row.get("pickupCity") or row.get("originCity") or (row.get("origin") or {}).get("city"),
         "origin_state": origin_state,
-        "dest_city": row.get("destCity") or (row.get("destination") or {}).get("city"),
+        "dest_city": row.get("deliveryCity") or row.get("destCity") or (row.get("destination") or {}).get("city"),
         "dest_state": dest_state,
         "pickup_date": _parse_ts(row.get("pickupDate") or row.get("pickup")),
-        "equipment": equipment,
+        "equipment": equipment or ("Van" if van_type == 1 else None),
         "rate_usd": float(rate) if rate is not None else None,
-        "miles": row.get("miles"),
-        "posted_at": _parse_ts(row.get("postedAt")),
+        "miles": row.get("calculatedTotalMiles") or row.get("miles"),
+        "posted_at": _parse_ts(row.get("creationTime") or row.get("postedAt")),
         "raw": {"loadstop": {"subsource": subsource, "id": sid}, **row},
     }
 
@@ -95,10 +114,11 @@ async def _ingest_service(
     method: str,
     subsource: str,
     tenant_id: str,
+    result_path: str | None = None,
 ) -> tuple[int, int]:
     rows_in = 0
     upserted = 0
-    async for page in client.paged(service, method, page_size=200):
+    async for page in client.paged(service, method, page_size=200, result_path=result_path):
         for raw in page:
             rows_in += 1
             p = _project(raw, subsource)
@@ -151,13 +171,18 @@ async def ingest_loads(
 ) -> dict[str, int]:
     total_in = 0
     total_up = 0
-    for service, method, sub in (
-        ("leads", "GetAll", "dat_via_loadstop"),
-        ("leadPastLoads", "GetAll", "dat_via_loadstop"),
-        ("splitLoads", "GetAll", "split"),
+    # Real list is at splitLoads/GetAllWithSP with the items under
+    # ``result.spLoadsGridResult``. The old leads/leadPastLoads DAT-via-
+    # LoadStop services return 302/empty on this install — removed to
+    # avoid noisy per-sub-service auth-failed rows.
+    for service, method, sub, path in (
+        ("splitLoads", "GetAllWithSP", "split", "spLoadsGridResult"),
     ):
         try:
-            i, u = await _ingest_service(session, client, service=service, method=method, subsource=sub, tenant_id=tenant_id)
+            i, u = await _ingest_service(
+                session, client, service=service, method=method,
+                subsource=sub, tenant_id=tenant_id, result_path=path,
+            )
             total_in += i
             total_up += u
         except Exception as exc:  # noqa: BLE001 — one failing service doesn't kill the batch

@@ -198,8 +198,15 @@ class AbpClient:
         *,
         page_size: int = 200,
         extra: dict[str, Any] | None = None,
+        result_path: str | None = None,
     ):
-        """Yield ABP ``items`` pages — stops when a page returns < page_size."""
+        """Yield ABP paginated pages — stops when a page returns < page_size.
+
+        ``extra`` is merged into the query (ABP endpoints like
+        ``trucks/GetAll`` require filter params such as ``statusFilter=-1``
+        before they return items). ``result_path`` lets callers dig into a
+        nested sub-result (``spLoadsGridResult`` for splitLoads).
+        """
         self.assert_read_only(method)
         skip = 0
         while True:
@@ -208,7 +215,11 @@ class AbpClient:
                 body.update(extra)
             data = await self.call(service, method, body)
             result = data.get("result") or data
+            if result_path and isinstance(result, dict):
+                result = result.get(result_path) or {}
             items = result.get("items") if isinstance(result, dict) else None
+            if items is None and isinstance(result, list):
+                items = result
             items = items or []
             yield items
             if len(items) < page_size:
