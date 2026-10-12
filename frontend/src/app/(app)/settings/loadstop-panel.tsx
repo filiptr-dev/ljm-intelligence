@@ -1,7 +1,8 @@
 /**
  * LoadStop (TMS) settings row — connector for the client's real TMS.
  *
- * Shape matches the backend ``/api/loadboards/loadstop`` surface:
+ * Talks to the backend ``/loadboards/loadstop`` surface through the typed
+ * ``lib/api/loadstop`` module (openapi-fetch + the shared /api/proxy BFF):
  *   GET → state (driver, status, email_masked, toggles, last_sync)
  *   PATCH → write-only credentials + driver + toggles
  *   POST /test → attempt login with stored creds
@@ -22,19 +23,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import {
+  getLoadstopState,
+  patchLoadstopState,
+  testLoadstopConnection,
+  type LoadstopPatch,
+  type LoadstopState,
+  type LoadstopToggles,
+} from "@/lib/api/loadstop"
 
-type Toggles = { fleet: boolean; customers: boolean; loads: boolean; rates: boolean }
-type State = {
-  driver: "off" | "api"
-  status: string
-  email_set: boolean
-  email_masked: string | null
-  has_session: boolean
-  last_login_at: string | null
-  toggles: Toggles
-  last_sync: Record<string, string | null>
-  dat_connected: boolean
-}
+type Toggles = LoadstopToggles
+type State = LoadstopState
 
 const EMPTY: State = {
   driver: "off",
@@ -59,10 +58,8 @@ export function LoadstopPanel() {
 
   const refresh = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/loadboards/loadstop", { credentials: "include" })
-      if (!res.ok) throw new Error(`GET ${res.status}`)
-      const data = (await res.json()) as State
-      setState(data)
+      const data = await getLoadstopState()
+      if (data) setState(data)
     } catch (err) {
       // Soft-fail: the panel still renders in the ``not_configured`` state.
       console.warn("loadstop panel load failed", err)
@@ -75,10 +72,8 @@ export function LoadstopPanel() {
     let cancelled = false
     const run = async () => {
       try {
-        const res = await fetch("/api/loadboards/loadstop", { credentials: "include" })
-        if (!res.ok) throw new Error(`GET ${res.status}`)
-        const data = (await res.json()) as State
-        if (!cancelled) setState(data)
+        const data = await getLoadstopState()
+        if (!cancelled && data) setState(data)
       } catch (err) {
         console.warn("loadstop panel load failed", err)
       } finally {
@@ -94,20 +89,14 @@ export function LoadstopPanel() {
   const save = async () => {
     setSaving(true)
     try {
-      const body: Record<string, unknown> = { toggles: state.toggles, driver: state.driver }
+      const body: LoadstopPatch = { toggles: state.toggles, driver: state.driver }
       if (email && password) {
         body.email = email
         body.password = password
         if (oneTimeCode) body.one_time_code = oneTimeCode
       }
-      const res = await fetch("/api/loadboards/loadstop", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error(`PATCH ${res.status}`)
-      const data = (await res.json()) as State
+      const data = await patchLoadstopState(body)
+      if (!data) throw new Error("PATCH failed")
       setState(data)
       setPassword("")
       setOneTimeCode("")
@@ -122,8 +111,8 @@ export function LoadstopPanel() {
   const test = async () => {
     setTesting(true)
     try {
-      const res = await fetch("/api/loadboards/loadstop/test", { method: "POST", credentials: "include" })
-      const data = (await res.json()) as { status: string; detail?: string }
+      const data = await testLoadstopConnection()
+      if (!data) throw new Error("Test failed")
       if (data.status === "ok") toast.success("Connected")
       else if (data.status === "not_configured") toast.message("Save email + password first")
       else if (data.status === "needs_code") toast.warning("One-time code required")

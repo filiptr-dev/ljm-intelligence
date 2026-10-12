@@ -29,6 +29,7 @@ import {
   type LoadboardDriverOut,
   type MailStatus,
 } from "@/lib/api/connectors"
+import { getLoadstopState, type LoadstopState } from "@/lib/api/loadstop"
 import { AiProvidersPanel } from "./ai-providers-panel"
 import { ConnectorsPanel } from "./connectors-panel"
 import { AgentBrowserPanel } from "./agent-browser-panel"
@@ -80,22 +81,6 @@ type Row = {
 
 function fmtWhen(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleString() : "—"
-}
-
-type LoadstopState = {
-  driver: "off" | "api"
-  status: string
-  email_set: boolean
-  email_masked: string | null
-  has_session: boolean
-  last_login_at: string | null
-  toggles: { fleet: boolean; customers: boolean; loads: boolean; rates: boolean }
-}
-
-async function getLoadstopState(): Promise<LoadstopState | null> {
-  const res = await fetch("/api/loadboards/loadstop", { credentials: "include" })
-  if (!res.ok) return null
-  return (await res.json()) as LoadstopState
 }
 
 export function IntegrationsStatus() {
