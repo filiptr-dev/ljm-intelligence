@@ -161,16 +161,27 @@ class AbpClient:
         *,
         query: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """POST /api/services/app/<service>/<method>. Read-only enforced."""
+        """GET /api/services/app/<service>/<method>. Read-only enforced.
+
+        ABP exposes Get*/List* verbs as HTTP GET on this install; a POST
+        returns ``302 /Error?statusCode=405``. We merge the body dict
+        into the query string so callers keep their ``{skipCount,
+        maxResultCount, ...}`` shape.
+        """
         self.assert_read_only(method)
         url = f"{BASE_URL}/api/services/app/{service}/{method}"
         _assert_allowed_host(url)
+        params: dict[str, Any] = {}
+        if body:
+            params.update(body)
+        if query:
+            params.update(query)
         async with self._lock:
-            resp = await self._http.post(url, json=body or {}, params=query or None)
+            resp = await self._http.get(url, params=params or None)
             if resp.status_code in (401, 302) and self._relogin and self._relogin_attempts == 0:
                 self._relogin_attempts += 1
                 await self._relogin()
-                resp = await self._http.post(url, json=body or {}, params=query or None)
+                resp = await self._http.get(url, params=params or None)
             if resp.status_code in (401, 302):
                 raise LoadstopAuthRequired(f"auth failed for {service}/{method}")
             resp.raise_for_status()

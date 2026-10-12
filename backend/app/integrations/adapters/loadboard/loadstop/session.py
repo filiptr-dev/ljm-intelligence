@@ -37,6 +37,18 @@ from .login import perform_login
 LOG = logging.getLogger(__name__)
 
 
+def _install_abp_headers(http: httpx.AsyncClient) -> None:
+    """ABP service endpoints under cookie auth require the XSRF echo header
+    and the ``XMLHttpRequest`` marker — without them the server redirects
+    the POST back to /Account/Login with a 302. The cookie value is reused
+    verbatim as the ``X-XSRF-TOKEN`` header on every request.
+    """
+    xsrf = http.cookies.get("XSRF-TOKEN")
+    if xsrf:
+        http.headers["X-XSRF-TOKEN"] = xsrf
+    http.headers["X-Requested-With"] = "XMLHttpRequest"
+
+
 async def _get_bundle(session: AsyncSession, connector: str, kind: str) -> dict | None:
     try:
         vault = await CredentialVault.for_session(session)
@@ -70,6 +82,7 @@ async def open_client(sessionmaker):
         http.cookies.jar.clear()
         for name, value in result.cookies.items():
             http.cookies.set(name, value)
+        _install_abp_headers(http)
         async with sessionmaker() as s:
             try:
                 vault = await CredentialVault.for_session(s)
@@ -90,6 +103,7 @@ async def open_client(sessionmaker):
     http = httpx.AsyncClient(base_url=BASE_URL, timeout=20.0, follow_redirects=False)
     for name, value in cookies.items():
         http.cookies.set(name, value)
+    _install_abp_headers(http)
     try:
         client = AbpClient(http, relogin=_relogin)
         yield client
