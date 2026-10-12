@@ -14,6 +14,7 @@ import { EQUIPMENT_LABEL, EQUIPMENT_ORDER, STATUS_LABEL, STATUS_ORDER } from "./
 import { TruckDrawer } from "./truck-drawer"
 import { TruckFormDialog } from "./truck-form-dialog"
 import { sortRows, TrucksTable, type Sort, type SortKey } from "./trucks-table"
+import { LoadstopSyncButton } from "@/components/app/loadstop-sync-button"
 
 type Kind = "trucks" | "trailers"
 
@@ -68,9 +69,12 @@ export function FleetView({ initial }: { initial: { list: FleetList; alerts: Ale
           </>
         }
         actions={
-          <Button type="button" size="sm" onClick={() => setAdding(true)}>
-            <Plus className="size-4" aria-hidden /> Add truck
-          </Button>
+          <div className="flex items-center gap-2">
+            <LoadstopSyncButton service="fleet" label="Sync fleet" />
+            <Button type="button" size="sm" onClick={() => setAdding(true)}>
+              <Plus className="size-4" aria-hidden /> Add truck
+            </Button>
+          </div>
         }
       />
       <AlertsStrip alerts={alerts} onOpen={setOpenId} />

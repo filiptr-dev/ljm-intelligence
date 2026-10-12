@@ -1,17 +1,16 @@
-"""Session factory — build an authenticated AbpClient from the vault.
+"""Session factory — build an authenticated AbpClient from env + vault session.
 
-The vault stores two bundles for LoadStop:
+LoadStop credentials come from ``Settings.loadstop_username`` /
+``Settings.loadstop_password`` (env ``LOADSTOP_USERNAME`` / ``LOADSTOP_PASSWORD``
+— user override of the standing secrets-in-DB rule). The rotating session
+cookie dict is still vaulted at ``connector='loadstop_session', kind='session'``
+— that is an operational artefact, not a user-typed secret, and auto-refresh
+on 401 writes it back.
 
-* ``connector='loadstop_login', kind='password'`` — email + password
-  (operator-entered via Settings).
-* ``connector='loadstop_session', kind='session'`` — the cookie dict +
-  ``last_login_at`` (written by ``POST /loadboards/loadstop/test`` on
-  success, re-written by auto-re-login on 401).
-
-``open_client()`` returns a ready AbpClient wired to the stored cookies,
-with a re-login callback that refreshes the session on a bounded single
-retry. If no session cookie is present the caller gets
-``LoadstopAuthRequired`` and should surface the Settings prompt.
+``open_client()`` returns a ready AbpClient wired to the stored cookies, with
+a re-login callback that refreshes the session on a bounded single retry. If
+env creds are missing the caller gets ``LoadstopAuthRequired("no_credentials")``
+and should surface the "set env + restart" prompt.
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from datetime import UTC, datetime
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.identity.credentials import (
     CredentialVault,
     VaultConfigError,
@@ -53,19 +53,18 @@ async def _get_bundle(session: AsyncSession, connector: str, kind: str) -> dict 
 @asynccontextmanager
 async def open_client(sessionmaker):
     """Yield an authenticated AbpClient; raise LoadstopAuthRequired if we can't."""
-    async with sessionmaker() as s:
-        login = await _get_bundle(s, "loadstop_login", "password")
-        sess = await _get_bundle(s, "loadstop_session", "session")
-    if not login or not login.get("username") or not login.get("password"):
+    cfg = get_settings()
+    username = (cfg.loadstop_username or "").strip()
+    password = cfg.loadstop_password.get_secret_value() if cfg.loadstop_password else ""
+    if not username or not password:
         raise LoadstopAuthRequired("no_credentials")
+
+    async with sessionmaker() as s:
+        sess = await _get_bundle(s, "loadstop_session", "session")
     cookies = (sess or {}).get("cookies") or {}
 
     async def _relogin() -> None:
-        result = await perform_login(
-            str(login["username"]),
-            str(login["password"]),
-            one_time_code=login.get("one_time_code"),
-        )
+        result = await perform_login(username, password)
         if result.status != "ok" or not result.cookies:
             raise LoadstopAuthRequired(f"relogin_failed:{result.status}")
         http.cookies.jar.clear()

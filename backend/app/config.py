@@ -229,6 +229,13 @@ class Settings(BaseSettings):
 
     frontend_origin: str | None = None
 
+    # LoadStop (TMS) — env-only credentials (user override of the
+    # secrets-in-DB rule for this connector). Both empty → `configured:false`
+    # and every sync verb short-circuits with 409 `not_configured`. The
+    # existing `LOADSTOP_INGEST_KILL` env is still read directly by the jobs.
+    loadstop_username: str = ""
+    loadstop_password: SecretStr | None = None
+
     # Shipper Finder — OSM Overpass ingest (Slice 2b). Enabled by default; the
     # source itself fails gracefully so a bad Overpass day never blocks the
     # FMCSA pass. `osm_overpass_max_states` bounds how many in-region states

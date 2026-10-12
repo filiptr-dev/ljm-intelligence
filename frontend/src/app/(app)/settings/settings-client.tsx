@@ -33,23 +33,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import {
-  DEFAULT_FIT_WEIGHTS,
-  FIT_PANEL_INTRO,
-  FIT_WEIGHT_META,
-} from "./fit-weight-meta"
 import { api } from "@/lib/api/client"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { IntegrationsStatus } from "./integrations-status"
 import { OwnerSwitches } from "./owner-switches"
-
-type FitWeights = Record<string, number>
 
 export type SettingsOut = {
   threshold: number
@@ -65,7 +51,6 @@ export type SettingsOut = {
   auto_outreach_window_end_h: number
   auto_outreach_status_filter: string
   auto_outreach_min_fit: number
-  fit_weights: FitWeights | null
   unsub_secret_set: boolean
   unsub_config_ready: boolean
 }
@@ -108,7 +93,6 @@ function InfoDot({ label, children }: { label: string; children: React.ReactNode
 }
 
 export default function SettingsClient({ initial }: { initial: SettingsOut | null }) {
-  const [fitOpen, setFitOpen] = React.useState(false)
   // SSR seed: the Server Component resolved the first `GET /settings` with the
   // HttpOnly cookie, so there is no mount-time flash. `loaded` starts true when
   // we got a payload; otherwise we flip into "load failed" mode and the save
@@ -126,10 +110,6 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
   const [windowEnd, setWindowEnd] = React.useState(initial?.auto_outreach_window_end_h ?? 18)
   const [statusFilter, setStatusFilter] = React.useState<string>(initial?.auto_outreach_status_filter ?? "found")
   const [minFit, setMinFit] = React.useState(initial?.auto_outreach_min_fit ?? 60)
-  const [fitWeights, setFitWeights] = React.useState<FitWeights>({
-    ...DEFAULT_FIT_WEIGHTS,
-    ...(initial?.fit_weights ?? {}),
-  })
   // Unsubscribe config (migration 0007). The secret VALUE never leaves the API;
   // we only know whether it's set. `unsubReady` gates the auto-outreach toggle.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -162,7 +142,6 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
           auto_outreach_window_end_h: windowEnd,
           auto_outreach_status_filter: statusFilter,
           auto_outreach_min_fit: minFit,
-          fit_weights: fitWeights,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       })
@@ -359,96 +338,8 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
             </div>
           </Panel>
 
-          <Panel
-            title="Fit-score weights"
-            description="Rare tuning of how leads are scored."
-            action={<Button size="sm" variant="outline" onClick={() => setFitOpen(true)}>Tune fit weights</Button>}
-          >
-            <p className="text-sm text-muted-foreground">{FIT_PANEL_INTRO.headline}</p>
-          </Panel>
-
           <OwnerSwitches sections={["forget"]} />
         </div>
-
-        <Dialog open={fitOpen} onOpenChange={setFitOpen}>
-          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
-            <DialogHeader>
-              <DialogTitle>Fit-score weights</DialogTitle>
-              <DialogDescription>{FIT_PANEL_INTRO.headline}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2 rounded-sm border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-              <div>{FIT_PANEL_INTRO.worked_example}</div>
-              <div>{FIT_PANEL_INTRO.auto_outreach_link}</div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {Object.keys(DEFAULT_FIT_WEIGHTS).map((k) => {
-                const meta = FIT_WEIGHT_META[k as keyof typeof FIT_WEIGHT_META]
-                const fallbackLabel = k
-                const label = meta?.label ?? fallbackLabel
-                return (
-                  <div key={k} className="space-y-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <Label htmlFor={`fw-${k}`}>{label}</Label>
-                      {meta && (
-                        <InfoDot label={label}>
-                          <div className="space-y-1.5">
-                            <div>
-                              <div className="font-semibold">{label}</div>
-                              <div className="text-muted-foreground">Default {DEFAULT_FIT_WEIGHTS[k]}</div>
-                            </div>
-                            <div>
-                              <div className="font-semibold">Trigger</div>
-                              <div>{meta.trigger}</div>
-                            </div>
-                            <div>
-                              <div className="font-semibold">What the number does</div>
-                              <div>{meta.hint}</div>
-                            </div>
-                            <div>
-                              <div className="font-semibold">Example</div>
-                              <div>{meta.example}</div>
-                            </div>
-                            <div>
-                              <div className="font-semibold">Effect on auto-contact</div>
-                              <div>{meta.auto_outreach_effect}</div>
-                            </div>
-                          </div>
-                        </InfoDot>
-                      )}
-                    </div>
-                    <Input
-                      id={`fw-${k}`}
-                      type="number"
-                      value={fitWeights[k] ?? DEFAULT_FIT_WEIGHTS[k]}
-                      onChange={(e) =>
-                        setFitWeights((prev) => ({ ...prev, [k]: Number(e.target.value) || 0 }))
-                      }
-                      disabled={!loaded}
-                      aria-describedby={`fw-${k}-code`}
-                    />
-                    <div id={`fw-${k}-code`} className="font-mono text-[0.68rem] text-muted-foreground">
-                      {k}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <div className="mt-5 flex items-center justify-between gap-3 border-t border-border pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setFitWeights(DEFAULT_FIT_WEIGHTS)}
-                disabled={!loaded}
-                className="font-semibold"
-              >
-                Reset to defaults
-              </Button>
-              <Button onClick={save} disabled={!loaded || saving} className="font-semibold">
-                <Save /> {saving ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
     </TooltipProvider>
   )
 }

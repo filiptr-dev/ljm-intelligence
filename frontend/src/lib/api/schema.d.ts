@@ -1376,6 +1376,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/ask/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ask Suggestions Endpoint
+         * @description Return 0-6 concrete AI-suggested chip questions for the Ask-your-inbox
+         *     strip, grounded in the real mailbox (named brokers, lanes, dates, counts).
+         *
+         *     Never 500s — the service wraps each fact miner, and an empty mailbox
+         *     just yields ``{suggestions: []}`` so the UI can render nothing.
+         */
+        get: operations["ask_suggestions_endpoint_inbox_ask_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/ask": {
         parameters: {
             query?: never;
@@ -2166,30 +2190,6 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Patch State
-         * @description Save credentials (write-only) + driver + toggles. Never echoes the password back.
-         */
-        patch: operations["patch_state_loadboards_loadstop_patch"];
-        trace?: never;
-    };
-    "/loadboards/loadstop/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test Connection
-         * @description Attempt login with the stored creds. Writes the session on success.
-         */
-        post: operations["test_connection_loadboards_loadstop_test_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -2204,7 +2204,12 @@ export interface paths {
         put?: never;
         /**
          * Kick Sync
-         * @description Operator-triggered one-shot refresh. v1 wires 'fleet'.
+         * @description Operator-triggered one-shot refresh. Defers the real ingest job.
+         *
+         *     Gates: kill switch off + env creds present. The hourly tick already
+         *     fans across every service in order, so `fleet|customers|loads|rates|all`
+         *     all dispatch the same `loadstop.ingest_tick` task; the ingest job
+         *     runs them all serially.
          */
         post: operations["kick_sync_loadboards_loadstop_sync__service__post"];
         delete?: never;
@@ -5333,18 +5338,6 @@ export interface components {
             /** Text */
             text: string;
         };
-        /** PatchIn */
-        PatchIn: {
-            /** Email */
-            email?: string | null;
-            /** Password */
-            password?: string | null;
-            /** One Time Code */
-            one_time_code?: string | null;
-            /** Driver */
-            driver?: ("off" | "api") | null;
-            toggles?: components["schemas"]["ToggleBlock"] | null;
-        };
         /** PostIn */
         PostIn: {
             /** Kind */
@@ -5974,10 +5967,6 @@ export interface components {
             auto_outreach_status_filter: string;
             /** Auto Outreach Min Fit */
             auto_outreach_min_fit: number;
-            /** Fit Weights */
-            fit_weights: {
-                [key: string]: unknown;
-            } | null;
             /** Unsub Secret Set */
             unsub_secret_set: boolean;
             /** Unsub Config Ready */
@@ -6013,10 +6002,6 @@ export interface components {
             auto_outreach_status_filter?: string | null;
             /** Auto Outreach Min Fit */
             auto_outreach_min_fit?: number | null;
-            /** Fit Weights */
-            fit_weights?: {
-                [key: string]: unknown;
-            } | null;
             /** Ai Features */
             ai_features?: {
                 [key: string]: unknown;
@@ -6159,25 +6144,17 @@ export interface components {
         };
         /** StateOut */
         StateOut: {
-            /** Driver */
-            driver: string;
-            /** Status */
-            status: string;
-            /** Email Set */
-            email_set: boolean;
+            /** Configured */
+            configured: boolean;
             /** Email Masked */
             email_masked?: string | null;
             /** Has Session */
             has_session: boolean;
             /** Last Login At */
             last_login_at?: string | null;
-            toggles: components["schemas"]["ToggleBlock"];
             last_sync: components["schemas"]["LastSyncBlock"];
-            /**
-             * Dat Connected
-             * @default false
-             */
-            dat_connected: boolean;
+            /** Kill Switch On */
+            kill_switch_on: boolean;
         };
         /** StatusBoardRowOut */
         StatusBoardRowOut: {
@@ -6221,6 +6198,13 @@ export interface components {
             /** Rows Updated */
             rows_updated: number;
         };
+        /** SuggestionItem */
+        SuggestionItem: {
+            /** Text */
+            text: string;
+            /** Kind */
+            kind: string;
+        };
         /** SuggestionList */
         SuggestionList: {
             post: components["schemas"]["PostOut"];
@@ -6246,12 +6230,22 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /** TestOut */
-        TestOut: {
-            /** Status */
-            status: string;
-            /** Detail */
-            detail?: string | null;
+        /**
+         * SuggestionsOut
+         * @description Payload for the /inbox/ask/suggestions endpoint.
+         *
+         *     ``generated_at`` is the server timestamp of the response (not the
+         *     cache insert) — the UI uses it only for debugging; the in-process
+         *     TTL cache is the actual freshness contract.
+         */
+        SuggestionsOut: {
+            /** Suggestions */
+            suggestions: components["schemas"]["SuggestionItem"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
         };
         /** TestReadOut */
         TestReadOut: {
@@ -6327,29 +6321,6 @@ export interface components {
             to_call_today: components["schemas"]["TileCount"];
             new_leads_since_last_crawl: components["schemas"]["NewLeadsTile"];
             loads_booked_90d: components["schemas"]["LoadsBookedTile"];
-        };
-        /** ToggleBlock */
-        ToggleBlock: {
-            /**
-             * Fleet
-             * @default true
-             */
-            fleet: boolean;
-            /**
-             * Customers
-             * @default true
-             */
-            customers: boolean;
-            /**
-             * Loads
-             * @default true
-             */
-            loads: boolean;
-            /**
-             * Rates
-             * @default true
-             */
-            rates: boolean;
         };
         /** TopLane */
         TopLane: {
@@ -9568,6 +9539,39 @@ export interface operations {
             };
         };
     };
+    ask_suggestions_endpoint_inbox_ask_suggestions_get: {
+        parameters: {
+            query?: {
+                mailbox?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ask_endpoint_inbox_ask_post: {
         parameters: {
             query?: {
@@ -11095,72 +11099,6 @@ export interface operations {
             };
         };
     };
-    patch_state_loadboards_loadstop_patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PatchIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StateOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    test_connection_loadboards_loadstop_test_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     kick_sync_loadboards_loadstop_sync__service__post: {
         parameters: {
             query?: never;
@@ -11168,7 +11106,7 @@ export interface operations {
                 authorization?: string | null;
             };
             path: {
-                service: string;
+                service: "fleet" | "customers" | "loads" | "rates" | "all";
             };
             cookie?: never;
         };

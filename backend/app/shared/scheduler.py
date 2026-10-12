@@ -89,20 +89,12 @@ async def _analysis_nightly_tick(timestamp: int) -> None:
     await dispatch("analysis.nightly", tenant_id=_TENANT)
 
 
-@app.periodic(cron="0 * * * *")  # every hour — LoadStop full ingest
-@app.task(name="scheduler.loadstop_ingest_tick", queue="default", pass_context=False)
-async def _loadstop_ingest_tick(timestamp: int) -> None:
+@app.periodic(cron="0 6 * * *")  # 06:00 UTC — single daily LoadStop crawl
+@app.task(name="scheduler.loadstop_daily_tick", queue="default", pass_context=False)
+async def _loadstop_daily_tick(timestamp: int) -> None:
     from app.shared.queue import dispatch
 
     await dispatch("loadstop.ingest_tick", tenant_id=_TENANT)
-
-
-@app.periodic(cron="*/15 * * * *")  # every 15 min — LoadStop truck locations
-@app.task(name="scheduler.loadstop_trucks_tick", queue="default", pass_context=False)
-async def _loadstop_trucks_tick(timestamp: int) -> None:
-    from app.shared.queue import dispatch
-
-    await dispatch("loadstop.trucks_tick", tenant_id=_TENANT)
 
 
 @app.periodic(cron="0 10 * * 1")  # Mondays 10:00 UTC — after EIA publishes

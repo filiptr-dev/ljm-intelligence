@@ -6,10 +6,11 @@ token (``__RequestVerificationToken``) is a hidden input scraped from
 each step's HTML. No captcha and the operator reports no 2FA code, but
 we still classify ``needs_code`` in case an OTP input appears.
 
-Credentials come from the vault via ``CredentialVault.get(connector=
-'loadstop_login', kind='password')`` — we never read env or args for
-them. The resulting session cookie dict is written back to the vault
-under ``connector='loadstop_session', kind='session'``.
+Credentials now come from env (``LOADSTOP_USERNAME`` / ``LOADSTOP_PASSWORD``)
+and are passed into ``perform_login`` by the session factory. The resulting
+cookie dict is written back to the vault under
+``connector='loadstop_session', kind='session'`` — session cookies are
+operational artefacts, not user-typed secrets.
 """
 
 from __future__ import annotations

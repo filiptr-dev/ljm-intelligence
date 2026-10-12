@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { quoteLane, type RateQuoteIn, type RateQuoteOut } from "@/lib/api/rates"
+import { LoadstopSyncButton } from "@/components/app/loadstop-sync-button"
 
 const EQUIPMENT: { value: "V" | "R" | "F"; label: string }[] = [
   { value: "V", label: "Van" },
@@ -83,6 +84,7 @@ export default function RatesPage() {
         eyebrow="Lane Rate Calculator"
         title="What should this lane pay?"
         description="Estimate $/mile for an origin → destination lane — distance, fuel, historical comps — and drop the quote straight into the email builder."
+        actions={<LoadstopSyncButton service="rates" label="Sync rates" />}
       />
       <div className="grid gap-5 md:grid-cols-2">
         <Panel title="Lane">

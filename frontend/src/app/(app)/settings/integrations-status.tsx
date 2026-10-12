@@ -34,7 +34,6 @@ import { AiProvidersPanel } from "./ai-providers-panel"
 import { ConnectorsPanel } from "./connectors-panel"
 import { AgentBrowserPanel } from "./agent-browser-panel"
 import { LoadboardsPanel, SRCS, type SrcKey } from "./loadboards-panel"
-import { LoadstopPanel } from "./loadstop-panel"
 import { OwnerSwitches } from "./owner-switches"
 
 type State = "connected" | "not_set_up" | "simulated" | "unknown"
@@ -160,20 +159,19 @@ export function IntegrationsStatus() {
     })
   }
 
-  // LoadStop (TMS) — the client's real TMS; read-only ABP ingest.
+  // LoadStop (TMS) — env-driven credentials; passive status row only.
   {
     const ls = loadstop?.data
-    const enabledOn = ls?.driver === "api"
-    const connected = Boolean(ls && ls.email_set && ls.has_session && enabledOn)
+    const connected = Boolean(ls && ls.configured)
     const summary = !ls
       ? "Status unavailable"
-      : !ls.email_set
-        ? "no credential · sync off"
-        : !ls.has_session
-          ? "credential saved · not yet tested"
-          : !enabledOn
-            ? "connected · driver off"
-            : `connected · last login ${ls.last_login_at ? new Date(ls.last_login_at).toLocaleString() : "—"}`
+      : !ls.configured
+        ? "env creds not set"
+        : ls.kill_switch_on
+          ? "configured · ingest kill switch ON"
+          : ls.has_session
+            ? `connected · last login ${ls.last_login_at ? new Date(ls.last_login_at).toLocaleString() : "—"}`
+            : "configured · no session yet (first sync will log in)"
     rows.push({
       id: "loadstop",
       name: "LoadStop (TMS)",
@@ -237,9 +235,13 @@ export function IntegrationsStatus() {
               <div className="hidden w-48 shrink-0 text-xs text-muted-foreground md:block">
                 Last tested: {r.lastTested}
               </div>
-              <Button size="sm" variant="outline" onClick={() => setOpen(r.id)}>
-                Edit
-              </Button>
+              {r.id === "loadstop" ? (
+                <span className="w-[64px] shrink-0 text-xs text-muted-foreground">env</span>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setOpen(r.id)}>
+                  Edit
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -260,12 +262,10 @@ export function IntegrationsStatus() {
               <OwnerSwitches sections={["gmail", "switches"]} />
             </div>
           )}
-          {open === "loadstop" && <LoadstopPanel />}
           {open && SRCS.some((s) => s.key === open) && <LoadboardsPanel src={open as SrcKey} />}
           {open === "loadsettings" && (
             <div className="space-y-4">
               <LoadboardsPanel />
-              <LoadstopPanel />
               <AgentBrowserPanel />
               <ConnectorsPanel sections={["sources", "eia"]} />
             </div>

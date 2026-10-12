@@ -36,7 +36,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
-from app.identity.models import SettingsRow
 from app.integrations.adapters.ai.linkedin_search import (
     CompanyRef,
     find_company_page,
@@ -616,8 +615,8 @@ async def _compute_and_persist_fit(
             )
 
     signals = build_signals(state=target.state, contacts=contacts_out, text=site_text)
-    cfg = (await session.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
-    weights = (cfg.fit_weights if cfg else None) or DEFAULT_WEIGHTS
+    # Fit-weight tuning UI removed; the defaults are the only source of truth.
+    weights = DEFAULT_WEIGHTS
     score, reasons = compute_fit(signals, weights)
 
     target.fit_score = score

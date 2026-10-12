@@ -1,16 +1,12 @@
-"""LoadStop ingest jobs — hourly (full) + 15-min (trucks locations only).
+"""LoadStop ingest job — one daily full crawl, serial across services.
 
-Both are no-ops when:
-
-* ``LOADSTOP_INGEST_KILL=1`` env flag is set (circuit breaker — this is
-  the only env the LoadStop surface reads, and it carries a boolean,
-  not a secret).
-* ``settings.loads_loadstop_driver != 'api'``.
-* No session cookie is stored in the vault (login hasn't been Tested
-  yet in Settings).
+Gates: ``LOADSTOP_INGEST_KILL`` env off, and env creds
+(``LOADSTOP_USERNAME``/``LOADSTOP_PASSWORD``) present. No per-service DB
+toggles — the user wants it always on when creds exist; a toggle is just
+a hidden off-switch.
 
 Each per-service run records a ``loadstop_ingest_runs`` row with
-``rows_in`` / ``rows_upserted`` / ``status`` so the Settings page can
+``rows_in`` / ``rows_upserted`` / ``status`` so the Sync buttons can
 render "Last sync (ok · N rows · 2m ago)".
 """
 
@@ -20,10 +16,10 @@ import logging
 import os
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.identity.models import SettingsRow
+from app.config import get_settings
 from app.integrations.adapters.loadboard.loadstop.http import LoadstopAuthRequired
 from app.integrations.adapters.loadboard.loadstop.session import open_client
 from app.shared.orm import LJM_TENANT_ID
@@ -37,8 +33,11 @@ def _kill_switch() -> bool:
     return os.environ.get("LOADSTOP_INGEST_KILL", "").strip() in ("1", "true", "on", "yes")
 
 
-async def _read_settings(session: AsyncSession) -> SettingsRow | None:
-    return (await session.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one_or_none()
+def _creds_present() -> bool:
+    cfg = get_settings()
+    user = (cfg.loadstop_username or "").strip()
+    pw = cfg.loadstop_password.get_secret_value() if cfg.loadstop_password else ""
+    return bool(user and pw)
 
 
 async def _record_run(
@@ -69,69 +68,38 @@ async def _record_run(
     )
 
 
-async def _should_run(sessionmaker) -> SettingsRow | None:
-    """Returns the SettingsRow when the ingest is cleared to proceed; else None."""
+def _should_run() -> bool:
+    """True when the ingest is cleared to proceed."""
     if _kill_switch():
         LOG.info("loadstop ingest skipped: LOADSTOP_INGEST_KILL set")
-        return None
-    async with sessionmaker() as s:
-        row = await _read_settings(s)
-    if row is None or row.loads_loadstop_driver != "api":
-        return None
-    return row
+        return False
+    if not _creds_present():
+        LOG.info("loadstop ingest skipped: env creds not set")
+        return False
+    return True
 
 
 @app.task(name="loadstop.ingest_tick", queue="default", pass_context=False)
 async def loadstop_ingest_tick(tenant_id: str = LJM_TENANT_ID) -> None:
-    """Hourly — fleet / customers / contacts / loads / rates per toggles."""
+    """Full daily crawl — fleet → customers → contacts → loads → rates (serial)."""
     set_tenant(TenantId(tenant_id))
-    from app.config import get_settings
     from app.db import create_engine, create_sessionmaker
 
     settings = get_settings()
     engine = create_engine(settings)
     try:
         sm = create_sessionmaker(engine)
-        srow = await _should_run(sm)
-        if srow is None:
+        if not _should_run():
             return
         try:
             async with open_client(sm) as client:
-                # Each service runs serial under the client's own semaphore.
-                if srow.loadstop_import_fleet:
-                    await _run_one(sm, client, "trucks", _run_trucks)
-                if srow.loadstop_import_customers:
-                    await _run_one(sm, client, "customers", _run_customers)
-                    await _run_one(sm, client, "contacts", _run_contacts)
-                if srow.loadstop_import_loads:
-                    await _run_one(sm, client, "loads", _run_loads)
-                if srow.loadstop_import_rates:
-                    await _run_one(sm, client, "rates", _run_rates)
+                await _run_one(sm, client, "trucks", _run_trucks)
+                await _run_one(sm, client, "customers", _run_customers)
+                await _run_one(sm, client, "contacts", _run_contacts)
+                await _run_one(sm, client, "loads", _run_loads)
+                await _run_one(sm, client, "rates", _run_rates)
         except LoadstopAuthRequired as exc:
             LOG.warning("loadstop ingest aborted: %s", exc)
-    finally:
-        await engine.dispose()
-
-
-@app.task(name="loadstop.trucks_tick", queue="default", pass_context=False)
-async def loadstop_trucks_tick(tenant_id: str = LJM_TENANT_ID) -> None:
-    """15-min — just truck locations (cheap, serial)."""
-    set_tenant(TenantId(tenant_id))
-    from app.config import get_settings
-    from app.db import create_engine, create_sessionmaker
-
-    settings = get_settings()
-    engine = create_engine(settings)
-    try:
-        sm = create_sessionmaker(engine)
-        srow = await _should_run(sm)
-        if srow is None or not srow.loadstop_import_fleet:
-            return
-        try:
-            async with open_client(sm) as client:
-                await _run_one(sm, client, "trucks_locations", lambda s, c: _run_trucks(s, c, locations_only=True))
-        except LoadstopAuthRequired as exc:
-            LOG.warning("loadstop trucks tick aborted: %s", exc)
     finally:
         await engine.dispose()
 

@@ -44,7 +44,6 @@ class SettingsOut(BaseModel):
     auto_outreach_window_end_h: int
     auto_outreach_status_filter: str
     auto_outreach_min_fit: int
-    fit_weights: dict | None
     unsub_secret_set: bool
     unsub_config_ready: bool
     ai_features: dict
@@ -63,7 +62,6 @@ class SettingsPatch(BaseModel):
     auto_outreach_window_end_h: int | None = Field(default=None, ge=0, le=23)
     auto_outreach_status_filter: str | None = None
     auto_outreach_min_fit: int | None = Field(default=None, ge=0, le=100)
-    fit_weights: dict | None = None
     ai_features: dict | None = None
 
     @field_validator("ai_features")
@@ -90,7 +88,6 @@ def _project(snap: SettingsSnapshot) -> SettingsOut:
         auto_outreach_window_end_h=row.auto_outreach_window_end_h,
         auto_outreach_status_filter=row.auto_outreach_status_filter,
         auto_outreach_min_fit=row.auto_outreach_min_fit,
-        fit_weights=row.fit_weights,
         unsub_secret_set=snap.unsub_secret_set,
         unsub_config_ready=snap.unsub_config_ready,
         ai_features=snap.ai_features,

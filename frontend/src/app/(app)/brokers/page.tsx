@@ -9,6 +9,7 @@
 
 import { PageHeader } from "@/components/app/ui"
 import { BrokersTable } from "@/components/app/brokers-table"
+import { LoadstopSyncButton } from "@/components/app/loadstop-sync-button"
 
 export default function BrokersPage() {
   return (
@@ -17,6 +18,7 @@ export default function BrokersPage() {
         eyebrow="Brokers"
         title="Broker database"
         description="Every broker on real data. Health combines recency, win rate, tone and volume (30/30/20/20)."
+        actions={<LoadstopSyncButton service="customers" label="Sync brokers" />}
       />
       <BrokersTable />
     </>
