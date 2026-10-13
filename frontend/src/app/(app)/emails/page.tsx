@@ -1,3 +1,4 @@
+import Form from "next/form"
 import Link from "next/link"
 import { AlertCircle, Search, Sparkles } from "lucide-react"
 import { INTENT_META, IntentBadge, SentimentDot } from "@/components/app/intent"
@@ -6,6 +7,7 @@ import { BarList, PageHeader, Panel, StackBar } from "@/components/app/ui"
 import { buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { AskButton } from "./ask-button"
 import type { Intent } from "@/lib/ai/types"
 import * as inbox from "@/lib/api/inbox"
 import type { AskOut, ChipFilter } from "@/lib/api/inbox"
@@ -133,7 +135,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
 
       <MailboxSelector options={mailboxes} />
 
-      <form action="/emails" className="mb-3 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
+      <Form action="/emails" className="mb-3 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
         {mailbox ? <input type="hidden" name="mailbox" value={mailbox} /> : null}
         <Sparkles className="hidden size-5 shrink-0 text-chart-2 sm:block" />
         <div className="relative flex-1">
@@ -170,8 +172,8 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
             })}
           </div>
         ) : null}
-        <button className={cn(buttonVariants(), "font-semibold")}>Ask</button>
-      </form>
+        <AskButton />
+      </Form>
 
       {ask ? (
         <div
