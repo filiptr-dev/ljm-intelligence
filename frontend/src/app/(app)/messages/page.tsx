@@ -17,7 +17,18 @@ export default async function MessagesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const sp = await searchParams
-  const mailbox = typeof sp.mailbox === "string" && sp.mailbox.trim() ? sp.mailbox.trim() : undefined
+  const mailbox: string[] | undefined = ((): string[] | undefined => {
+    const raw = sp.mailbox
+    const arr = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]
+    const flat: string[] = []
+    for (const v of arr) {
+      for (const part of String(v).split(",")) {
+        const t = part.trim()
+        if (t && !flat.includes(t)) flat.push(t)
+      }
+    }
+    return flat.length ? flat : undefined
+  })()
   const [rows, noReply, mailboxes] = await Promise.all([
     inbox.statusBoard(500, { mailbox }),
     inbox.noReply(50, { mailbox }),

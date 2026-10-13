@@ -125,7 +125,7 @@ async function OverviewContent({
 }) {
   const [todayRes, inboxRes, kpiRes] = await Promise.allSettled([
     getToday(),
-    inbox.overviewKpis({ mailbox }),
+    inbox.overviewKpis({ mailbox: mailbox ? [mailbox] : undefined }),
     analysis.getOverviewKpi(filtersToQuery(filters)),
   ])
 

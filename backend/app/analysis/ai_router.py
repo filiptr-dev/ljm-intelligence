@@ -32,6 +32,10 @@ class FeaturesResponse(BaseModel):
     features: dict[str, FeatureChoice]
     allowed_models: dict[str, list[str]]
     keys_present: dict[str, bool]
+    # Shared fallback chain (post-primary) + last-answered-by trace, both
+    # populated by the LLMProvider seam. See ``FeaturesResult``.
+    fallback_order: list[str] = []
+    last_answered_by: dict[str, str] = {}
 
 
 class UsageRow(BaseModel):
@@ -69,6 +73,8 @@ async def get_features(request: Request) -> FeaturesResponse:
         features={k: FeatureChoice(**v.__dict__) for k, v in result.features.items()},
         allowed_models=result.allowed_models,
         keys_present=result.keys_present,
+        fallback_order=list(result.fallback_order),
+        last_answered_by=dict(result.last_answered_by),
     )
 
 

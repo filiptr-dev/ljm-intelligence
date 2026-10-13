@@ -260,6 +260,50 @@ export function AiProvidersPanel() {
             })}
           </div>
 
+          {/* Fallback chain + last-answered trace. Read-only — tuned by env
+              (``AI_FALLBACK_MODELS``). "Last answered by" is in-memory and
+              resets when the backend process restarts, which is exactly
+              what the operator needs at a glance: who's actually carrying
+              the load right now. */}
+          <div className="min-w-0 rounded-sm border border-border bg-background p-3 text-xs">
+            <div className="mb-1 text-[0.68rem] font-medium tracking-wide text-muted-foreground uppercase">
+              Fallback order
+            </div>
+            {features.fallback_order && features.fallback_order.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1 font-mono">
+                <span className="text-muted-foreground">primary →</span>
+                {features.fallback_order.map((entry, i) => (
+                  <React.Fragment key={entry + i}>
+                    <span className="rounded-sm bg-destructive px-1.5 py-0.5 text-white">{entry}</span>
+                    {i < (features.fallback_order?.length ?? 0) - 1 ? (
+                      <span className="text-muted-foreground">→</span>
+                    ) : null}
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">
+                No fallbacks configured — set <code className="font-mono">AI_FALLBACK_MODELS</code> to a CSV like
+                <code className="ml-1 font-mono">gemini:gemini-3.5-flash,claude:claude-sonnet-5-5</code>.
+              </p>
+            )}
+            <div className="mt-3 mb-1 text-[0.68rem] font-medium tracking-wide text-muted-foreground uppercase">
+              Last answered by
+            </div>
+            {Object.keys(features.last_answered_by ?? {}).length === 0 ? (
+              <p className="text-muted-foreground">No AI calls answered yet in this process.</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {Object.entries(features.last_answered_by ?? {}).map(([feature, who]) => (
+                  <li key={feature} className="flex items-center justify-between gap-2">
+                    <span className="truncate">{FEATURE_LABELS[feature]?.label ?? feature}</span>
+                    <span className="font-mono text-muted-foreground">{who}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
             <Button onClick={save} disabled={saving} className="font-semibold">
               <Save /> {saving ? "Saving…" : "Save"}

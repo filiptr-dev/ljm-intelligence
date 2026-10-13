@@ -25,7 +25,31 @@ def _inbound_filter():
     return MailMessage.from_addr != MailMessage.mailbox
 
 
-def _emails_base(intent: str | None, text_query: str | None, mailbox: str | None = None):
+# Accept a single mailbox string, a list of mailboxes, or None (no filter).
+# One helper keeps the SQL in every mailbox-aware query consistent: single →
+# ``col == mb``, multi → ``col IN (…)``. The multi path lets the /emails and
+# /messages pages narrow by any subset of the operator's allowlisted boxes
+# (see the chips UI in ``mailbox-selector.tsx``) without each repository
+# function having to grow a second kwarg.
+Mailboxes = str | list[str] | tuple[str, ...] | None
+
+
+def _mb_where(col, mailbox: Mailboxes):
+    if mailbox is None:
+        return None
+    if isinstance(mailbox, str):
+        if not mailbox:
+            return None
+        return col == mailbox
+    values = [m for m in mailbox if m]
+    if not values:
+        return None
+    if len(values) == 1:
+        return col == values[0]
+    return col.in_(values)
+
+
+def _emails_base(intent: str | None, text_query: str | None, mailbox: Mailboxes = None):
     j = MessageInsight.__table__.c
     m = MailMessage.__table__.c
     base = (
@@ -45,25 +69,26 @@ def _emails_base(intent: str | None, text_query: str | None, mailbox: str | None
     if text_query:
         q = f"%{text_query.lower()}%"
         base = base.where(func.lower(m.subject + " " + m.body_text).like(q))
-    if mailbox:
-        base = base.where(m.mailbox == mailbox)
+    cond = _mb_where(m.mailbox, mailbox)
+    if cond is not None:
+        base = base.where(cond)
     return base, m
 
 
-async def count_emails(session: AsyncSession, *, intent, text_query, mailbox: str | None = None) -> int:
+async def count_emails(session: AsyncSession, *, intent, text_query, mailbox: Mailboxes = None) -> int:
     base, _ = _emails_base(intent, text_query, mailbox)
     return int((await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one())
 
 
 async def fetch_emails_page(
-    session: AsyncSession, *, intent, text_query, offset: int, limit: int, mailbox: str | None = None,
+    session: AsyncSession, *, intent, text_query, offset: int, limit: int, mailbox: Mailboxes = None,
 ) -> list[Any]:
     base, m = _emails_base(intent, text_query, mailbox)
     rows_q = base.order_by(m.sent_at.desc()).offset(offset).limit(limit)
     return list((await session.execute(rows_q)).all())
 
 
-async def fetch_intent_counts(session: AsyncSession, *, mailbox: str | None = None) -> list[Any]:
+async def fetch_intent_counts(session: AsyncSession, *, mailbox: Mailboxes = None) -> list[Any]:
     # When scoped by mailbox we must join to MailMessage — MessageInsight carries
     # its own ``mailbox`` column but we align with the write-side rule that
     # list_emails joins on (mailbox,message_id,tenant_id).
@@ -76,7 +101,7 @@ async def fetch_intent_counts(session: AsyncSession, *, mailbox: str | None = No
                 MailMessage.__table__,
                 and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
             ))
-            .where(m.mailbox == mailbox)
+            .where(_mb_where(m.mailbox, mailbox))
             .group_by(j.intent)
             .order_by(func.count().desc())
         )
@@ -90,7 +115,7 @@ async def fetch_intent_counts(session: AsyncSession, *, mailbox: str | None = No
     ).all())
 
 
-async def fetch_inbound_sentiments(session: AsyncSession, *, mailbox: str | None = None) -> list[Any]:
+async def fetch_inbound_sentiments(session: AsyncSession, *, mailbox: Mailboxes = None) -> list[Any]:
     j = MessageInsight.__table__.c
     m = MailMessage.__table__.c
     base = select(j.sentiment).select_from(
@@ -99,13 +124,14 @@ async def fetch_inbound_sentiments(session: AsyncSession, *, mailbox: str | None
             and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
         )
     ).where(_inbound_filter())
-    if mailbox:
-        base = base.where(m.mailbox == mailbox)
+    cond = _mb_where(m.mailbox, mailbox)
+    if cond is not None:
+        base = base.where(cond)
     return list((await session.execute(base)).all())
 
 
 async def fetch_triage_rows(
-    session: AsyncSession, *, urgent_only: bool, limit: int, mailbox: str | None = None,
+    session: AsyncSession, *, urgent_only: bool, limit: int, mailbox: Mailboxes = None,
 ) -> list[Any]:
     j = MessageInsight.__table__.c
     m = MailMessage.__table__.c
@@ -123,17 +149,17 @@ async def fetch_triage_rows(
     if urgent_only:
         stmt = stmt.where(j.urgency == "urgent")
     if mailbox:
-        stmt = stmt.where(m.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(m.mailbox, mailbox))
     stmt = stmt.order_by(m.sent_at.desc()).limit(limit * 2 if not urgent_only else limit)
     return list((await session.execute(stmt)).all())
 
 
 async def fetch_no_reply_rows(
-    session: AsyncSession, *, limit: int, mailbox: str | None = None,
+    session: AsyncSession, *, limit: int, mailbox: Mailboxes = None,
 ) -> list[NoReplyTracker]:
     stmt = select(NoReplyTracker).order_by(NoReplyTracker.we_sent_at.asc())
     if mailbox:
-        stmt = stmt.where(NoReplyTracker.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(NoReplyTracker.mailbox, mailbox))
     rows = (await session.execute(stmt.limit(limit))).scalars().all()
     return list(rows)
 
@@ -148,32 +174,32 @@ async def fetch_response_time_rows(session: AsyncSession, *, broker_domain: str 
     return list((await session.execute(stmt)).all())
 
 
-async def fetch_staff_rows(session: AsyncSession, *, mailbox: str | None = None) -> list[Any]:
+async def fetch_staff_rows(session: AsyncSession, *, mailbox: Mailboxes = None) -> list[Any]:
     stmt = (
         select(MailMessage.mailbox, MailMessage.from_addr, MailMessage.thread_id, MailMessage.sent_at)
         .order_by(MailMessage.mailbox, MailMessage.thread_id, MailMessage.sent_at)
     )
     if mailbox:
-        stmt = stmt.where(MailMessage.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(MailMessage.mailbox, mailbox))
     return list((await session.execute(stmt)).all())
 
 
-async def count_all_messages(session: AsyncSession, *, mailbox: str | None = None) -> int:
+async def count_all_messages(session: AsyncSession, *, mailbox: Mailboxes = None) -> int:
     m = MailMessage.__table__.c
     stmt = select(func.count(m.message_id)).select_from(MailMessage.__table__)
     if mailbox:
-        stmt = stmt.where(m.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(m.mailbox, mailbox))
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def count_no_reply_rows(session: AsyncSession, *, mailbox: str | None = None) -> int:
+async def count_no_reply_rows(session: AsyncSession, *, mailbox: Mailboxes = None) -> int:
     stmt = select(func.count()).select_from(NoReplyTracker.__table__)
     if mailbox:
-        stmt = stmt.where(NoReplyTracker.__table__.c.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(NoReplyTracker.__table__.c.mailbox, mailbox))
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def count_urgent_insights(session: AsyncSession, *, mailbox: str | None = None) -> int:
+async def count_urgent_insights(session: AsyncSession, *, mailbox: Mailboxes = None) -> int:
     j = MessageInsight.__table__.c
     m = MailMessage.__table__.c
     if mailbox:
@@ -184,14 +210,14 @@ async def count_urgent_insights(session: AsyncSession, *, mailbox: str | None = 
                 and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
             ))
             .where(j.urgency == "urgent")
-            .where(m.mailbox == mailbox)
+            .where(_mb_where(m.mailbox, mailbox))
         )
     else:
         stmt = select(func.count()).select_from(MessageInsight.__table__).where(j.urgency == "urgent")
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def count_negative_insights(session: AsyncSession, *, mailbox: str | None = None) -> int:
+async def count_negative_insights(session: AsyncSession, *, mailbox: Mailboxes = None) -> int:
     j = MessageInsight.__table__.c
     m = MailMessage.__table__.c
     if mailbox:
@@ -202,7 +228,7 @@ async def count_negative_insights(session: AsyncSession, *, mailbox: str | None 
                 and_(j.mailbox == m.mailbox, j.message_id == m.message_id, j.tenant_id == m.tenant_id),
             ))
             .where(j.sentiment < -0.1)
-            .where(m.mailbox == mailbox)
+            .where(_mb_where(m.mailbox, mailbox))
         )
     else:
         stmt = select(func.count()).select_from(MessageInsight.__table__).where(j.sentiment < -0.1)
@@ -245,7 +271,7 @@ async def fetch_thread_rows(session: AsyncSession, *, thread_id: str) -> list[An
     ).all())
 
 
-async def fetch_status_board_rows(session: AsyncSession, *, mailbox: str | None = None) -> list[Any]:
+async def fetch_status_board_rows(session: AsyncSession, *, mailbox: Mailboxes = None) -> list[Any]:
     stmt = (
         select(
             MailMessage.thread_id, MailMessage.mailbox, MailMessage.subject,
@@ -254,7 +280,7 @@ async def fetch_status_board_rows(session: AsyncSession, *, mailbox: str | None 
         .order_by(MailMessage.thread_id, MailMessage.sent_at.asc())
     )
     if mailbox:
-        stmt = stmt.where(MailMessage.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(MailMessage.mailbox, mailbox))
     return list((await session.execute(stmt)).all())
 
 

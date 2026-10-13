@@ -140,6 +140,14 @@ class Settings(BaseSettings):
     claude_default_model: str = "claude-sonnet-5-5"
     claude_cheaper_model: str = "claude-haiku-4-5-20251001"
 
+    # Ordered fallback chain for the LLM seam. Comma-separated
+    # ``provider:model`` entries that come AFTER the per-feature primary.
+    # Default: a second (cheaper/different) Gemini model, then Claude's
+    # default. When ``anthropic_api_key`` is unset the Claude entry resolves
+    # to NullProvider and the chain just skips over it — never raises.
+    # Example override: ``AI_FALLBACK_MODELS=gemini:gemini-3.5-flash,claude:claude-sonnet-5-5``.
+    ai_fallback_models: str = "gemini:gemini-3.5-flash,claude:claude-sonnet-5-5"
+
     # FMCSA paginator knobs — see plan `2026-09-30-fmcsa-crawl-depth`.
     # `fmcsa_app_token` lifts us from the shared SODA throttle bucket to a per-app one;
     # optional (the paginator works keyless). `fmcsa_page_size` is the SODA `$limit`.
