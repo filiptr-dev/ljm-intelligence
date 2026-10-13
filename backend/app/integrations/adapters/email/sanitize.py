@@ -64,6 +64,11 @@ _ALLOWED_ATTRS: dict[str, frozenset[str]] = {
     "th": frozenset({"colspan", "rowspan"}),
 }
 
+# Void elements never get an end tag, so they must not open a "drop
+# subtree" depth (an unclosed <meta>/<link> in <head> would otherwise
+# swallow the whole document).
+_VOID_DROP_TAGS = frozenset({"meta", "link", "embed"})
+
 _URL_SAFE_SCHEMES = ("http://", "https://", "mailto:", "tel:")
 
 
@@ -94,6 +99,8 @@ class _Sanitizer(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
+        if tag in _VOID_DROP_TAGS:
+            return
         if tag in _DROP_SUBTREE_TAGS:
             self._drop_depth += 1
             return
@@ -123,6 +130,8 @@ class _Sanitizer(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
+        if tag in _VOID_DROP_TAGS:
+            return
         if tag in _DROP_SUBTREE_TAGS:
             if self._drop_depth:
                 self._drop_depth -= 1
@@ -133,8 +142,11 @@ class _Sanitizer(HTMLParser):
             self.out.append(f"</{tag}>")
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        # <br/>, <hr/>, etc.
+        # <br/>, <hr/>, etc. A self-closed drop tag (<script/>) must not
+        # leak depth: close it in the same step.
         self.handle_starttag(tag, attrs)
+        if tag.lower() in _DROP_SUBTREE_TAGS and tag.lower() not in _VOID_DROP_TAGS:
+            self.handle_endtag(tag)
 
     def handle_data(self, data: str) -> None:
         if self._drop_depth:
@@ -191,7 +203,10 @@ def clean_html(html: str | None) -> str:
 _QP_SOFT_BREAK = re.compile(r"=\r?\n")
 # ``=NN`` hex followed by anything (quopri handles decoding) — we probe
 # cheaply to avoid round-tripping clean text through quopri.
-_QP_SIGNAL = re.compile(r"=[0-9A-Fa-f]{2}|=\r?\n")
+# QP mandates UPPERCASE hex, so a lowercase ``=ab`` in a URL query
+# (``?token=deadbeef``) is NOT an escape. Require a soft line break or a
+# high-signal escape (=20 =3D =0A =0D =09 =A0 =C2 =C3 =E2) to decode.
+_QP_SIGNAL = re.compile(r"=\r?\n|=(?:20|3D|0A|0D|09|A0|C2|C3|E2)")
 
 
 def _decode_qp_if_needed(text: str) -> str:

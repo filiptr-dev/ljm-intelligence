@@ -111,3 +111,15 @@ def test_triage_classify_stable_across_qp_cleanup() -> None:
     r_clean = _classify(_msg("Load offer tomorrow", cleaned_body))
     assert r_raw.intent == r_clean.intent
     assert r_raw.sentiment == r_clean.sentiment
+
+
+def test_clean_html_void_meta_link_do_not_swallow_body() -> None:
+    html = "<html><head><meta charset=utf-8><title>x</title><link rel=a href=b></head><body><p>Hello <b>world</b></p><script/>tail</body></html>"
+    out = clean_html(html)
+    assert "Hello" in out and "world" in out and "tail" in out
+    assert clean_html(out) == out
+
+
+def test_clean_text_leaves_lowercase_hex_in_urls_alone() -> None:
+    s = "https://x.com/r?token=deadbeef&id=ab12"
+    assert clean_text(s) == s
