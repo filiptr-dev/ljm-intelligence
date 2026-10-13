@@ -46,6 +46,25 @@ export async function listTriage(
   return unwrap(res, "/inbox/triage")
 }
 
+export type SuggestedQuestion = components["schemas"]["SuggestionItem"]
+export type SuggestedQuestions = components["schemas"]["SuggestionsOut"]
+
+/**
+ * Fetch 0-6 AI-suggested chip questions for the Ask-your-inbox strip.
+ * Backend grounds every string in real mailbox facts (named brokers,
+ * lanes, dates, counts) and never 500s — empty mailbox returns `[]`.
+ */
+export async function suggestQuestions(
+  opts: { mailbox?: string } = {},
+  signal?: AbortSignal,
+): Promise<SuggestedQuestion[]> {
+  const res = await api.GET("/inbox/ask/suggestions", {
+    params: { query: { mailbox: opts.mailbox } },
+    signal,
+  })
+  return unwrap(res, "/inbox/ask/suggestions").suggestions
+}
+
 export async function listMailboxes(signal?: AbortSignal): Promise<MailboxItem[]> {
   const res = await api.GET("/inbox/mailboxes", { signal })
   return unwrap(res, "/inbox/mailboxes").items

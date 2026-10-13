@@ -12,12 +12,9 @@ import type { AskOut } from "@/lib/api/inbox"
 import { dateTime, money, pct } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
-/** Three canned prompts that run the exact same real AI path as a free-text ask. */
-const ASK_EXAMPLES = [
-  "Why do we lose loads on price?",
-  "Overdue invoices",
-  "Late delivery complaints",
-] as const
+// Suggested-question chips are no longer hardcoded — the backend mines
+// 0-6 concrete prompts (named brokers / lanes / dates / counts) from the
+// real mailbox and we render whatever it returns. Empty inbox → no strip.
 
 /**
  * Emails — real inbox view, backed by `/inbox/emails`.
@@ -55,6 +52,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const mailbox = typeof sp.mailbox === "string" && sp.mailbox.trim() ? sp.mailbox.trim() : undefined
   const page = Math.max(1, Number(sp.page) || 1)
   const mailboxes = await inbox.listMailboxes().catch(() => [])
+  const suggestions = await inbox.suggestQuestions({ mailbox }).catch(() => [])
 
   // When the operator submits a question, hand it to the AI first. The
   // server runs Gemini over a bounded slice of real mail and returns
@@ -132,17 +130,20 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
             className="h-10 border-0 bg-transparent pl-8 text-base shadow-none focus-visible:ring-0 sm:pl-0"
           />
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {ASK_EXAMPLES.map((ex) => (
-            <Link
-              key={ex}
-              href={`/emails?q=${encodeURIComponent(ex)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ""}`}
-              className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
-            >
-              {ex}
-            </Link>
-          ))}
-        </div>
+        {suggestions.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((s) => (
+              <Link
+                key={s.text}
+                href={`/emails?q=${encodeURIComponent(s.text)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ""}`}
+                className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
+                title={s.kind}
+              >
+                {s.text}
+              </Link>
+            ))}
+          </div>
+        ) : null}
         <button className={cn(buttonVariants(), "font-semibold")}>Ask</button>
       </form>
 

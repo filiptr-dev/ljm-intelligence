@@ -8,7 +8,7 @@ projects/ljm-intelligence/plan/2026-10-01-inbox-analysis-gmail-connector.md.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -480,6 +480,43 @@ class AskOutModel(BaseModel):
     citations: list[AskCitationModel] = []
     ok: bool = False
     error: str | None = None
+
+
+class SuggestionItem(BaseModel):
+    text: str
+    kind: str
+
+
+class SuggestionsOut(BaseModel):
+    """Payload for the /inbox/ask/suggestions endpoint.
+
+    ``generated_at`` is the server timestamp of the response (not the
+    cache insert) — the UI uses it only for debugging; the in-process
+    TTL cache is the actual freshness contract.
+    """
+
+    suggestions: list[SuggestionItem]
+    generated_at: datetime
+
+
+@router.get("/ask/suggestions", response_model=SuggestionsOut)
+async def ask_suggestions_endpoint(
+    session: Session,
+    request: Request,
+    mailbox: str | None = Query(default=None, max_length=320),
+) -> SuggestionsOut:
+    """Return 0-6 concrete AI-suggested chip questions for the Ask-your-inbox
+    strip, grounded in the real mailbox (named brokers, lanes, dates, counts).
+
+    Never 500s — the service wraps each fact miner, and an empty mailbox
+    just yields ``{suggestions: []}`` so the UI can render nothing.
+    """
+    mb = _validate_mailbox(request, mailbox)
+    items = await svc.suggest_questions(session, mailbox=mb)
+    return SuggestionsOut(
+        suggestions=[SuggestionItem(text=s.text, kind=s.kind) for s in items],
+        generated_at=datetime.now(UTC),
+    )
 
 
 @router.post("/ask", response_model=AskOutModel)

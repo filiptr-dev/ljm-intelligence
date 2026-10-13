@@ -1229,6 +1229,424 @@ async def ask_question(
     )
 
 
+# ---- Suggested questions (Ask-your-inbox chips) ---------------------------
+#
+# The /emails page used to ship 3 hardcoded prompts ("Overdue invoices", …).
+# The user wants concrete chips grounded in the real mailbox — named
+# brokers, lanes, dates, counts. We mine the facts from SQL deterministically
+# (so the LLM can never invent broker names) and compose plain-English
+# templates. The whole call is wrapped so a bad miner can never 500.
+
+
+@dataclass
+class Suggestion:
+    text: str
+    kind: str
+
+
+# In-process TTL cache. v1 scope: no Redis, no cross-process coordination.
+# A page reload after 10 min is the refresh.
+_SUGGESTIONS_TTL_S = 600.0
+_SUGGESTIONS_CACHE: dict[str, tuple[float, list[Suggestion]]] = {}
+
+
+# Local-part prefixes that mark a sender as automated / no-reply / notification.
+# A complaint miner that counts Highway monitoring alerts as "complaints from
+# Highway" is wrong; a payment nudge named for a bounce-robot is wrong. We dedup
+# these out of every broker-named chip. Keep the list small, single-source, and
+# matched on the local-part prefix (before the first dot/plus) so variants like
+# "notifications+123@" and "no.reply@" are both caught.
+_AUTOMATED_LOCAL_PREFIXES: frozenset[str] = frozenset({
+    "noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "do_not_reply",
+    "notifications", "notification", "notify", "notice", "notices",
+    "alerts", "alert", "alerting",
+    "mailer-daemon", "mailerdaemon", "mailer",
+    "bounce", "bounces", "postmaster", "auto-reply", "autoreply", "automated",
+    "system", "support-noreply", "updates", "digest", "newsletter",
+})
+
+# Known notification / monitoring / vendor-automation domains whose mail is
+# never from a human broker, even when the local-part looks ordinary (e.g.
+# Highway's carrier-monitoring alerts, DAT's load-board notifications). Kept
+# tight — expand only when a real case lands in review.
+_AUTOMATED_DOMAINS: frozenset[str] = frozenset({
+    "highway.com",
+    "dat.com",
+    "truckstop.com",
+})
+
+# Bulk-mail / ESP relay suffixes — any address whose domain ends in one of
+# these is a bulk sender, not a human broker (Constant Contact's
+# "shared1.ccsend.com", Mailchimp's "mail.sendgrid.net", etc.).
+_AUTOMATED_DOMAIN_SUFFIXES: tuple[str, ...] = (
+    ".ccsend.com",
+    "ccsend.com",
+    ".mailchimp.com",
+    ".mailchimpapp.com",
+    ".sendgrid.net",
+    ".mcsv.net",
+    ".constantcontact.com",
+    ".mktomail.com",
+    ".hubspotemail.net",
+    ".campaignmonitor.com",
+    ".cmail19.com",
+    ".cmail20.com",
+)
+
+
+def _domain_of(email: str | None) -> str:
+    if not email:
+        return ""
+    at = email.find("@")
+    if at == -1 or at == len(email) - 1:
+        return ""
+    return email[at + 1 :].lower().strip()
+
+
+def _own_domain() -> str:
+    """Our own company's mail domain — derived from Gmail impersonate / outreach-from.
+
+    Used to drop "unanswered threads with Ljminternational" style chips: a
+    thread with ourselves is noise, not a broker relationship.
+    """
+    from app.config import get_settings
+    try:
+        s = get_settings()
+        # Prefer the mail-sending identity; fall back to outreach-from.
+        src = getattr(s.gmail, "impersonate", "") or getattr(s, "outreach_from_email", "")
+        return _domain_of(src)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _is_free_mail(domain: str) -> bool:
+    """Public free-mail provider? Reuse the single source in prospecting."""
+    if not domain:
+        return False
+    try:
+        from app.prospecting.pipeline.shipper_merge import FREE_MAIL_DOMAINS
+        return domain in FREE_MAIL_DOMAINS
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _is_automated_sender(email: str | None) -> bool:
+    """True if the address is a no-reply / notification / monitoring sender.
+
+    Checked both by local-part prefix (noreply, notifications, alerts, …) and
+    by known monitoring/vendor domains (Highway, DAT, Truckstop). A chip saying
+    "Review the 39 complaints from Highway" is the exact failure this guards.
+    """
+    if not email:
+        return False
+    at = email.find("@")
+    if at == -1:
+        return False
+    local = email[:at].lower().strip()
+    domain = email[at + 1 :].lower().strip()
+    # Strip + and . suffixes/parts to catch "notifications+123@" or "no.reply@".
+    head = local.split("+", 1)[0]
+    tokens = {head, head.replace(".", "-"), head.replace(".", "")}
+    if any(t in _AUTOMATED_LOCAL_PREFIXES for t in tokens):
+        return True
+    if domain in _AUTOMATED_DOMAINS:
+        return True
+    return any(domain == suf.lstrip(".") or domain.endswith(suf) for suf in _AUTOMATED_DOMAIN_SUFFIXES)
+
+
+def _is_excluded_broker(email: str | None) -> bool:
+    """Compose: own-domain OR free-mail OR automated sender → not a broker chip."""
+    dom = _domain_of(email)
+    if not dom:
+        return True
+    if dom == _own_domain():
+        return True
+    if _is_free_mail(dom):
+        return True
+    return _is_automated_sender(email)
+
+
+def _broker_label(email: str | None, broker_name: str | None = None) -> str:
+    """Human-friendly broker label: prefer stored name, else the domain."""
+    if broker_name and broker_name.strip():
+        return broker_name.strip()
+    if not email:
+        return "Unknown"
+    at = email.find("@")
+    if at == -1 or at == len(email) - 1:
+        return email
+    dom = email[at + 1 :].lower().strip()
+    # Chop the trailing TLD so "acme-logistics.com" renders as
+    # "Acme-Logistics" — closer to how an operator reads it.
+    head = dom.rsplit(".", 1)[0] if "." in dom else dom
+    # Title-case the parts separated by - or _ but keep internal dashes.
+    parts = [p.capitalize() for p in head.replace("_", "-").split("-") if p]
+    return "-".join(parts) if parts else dom
+
+
+def _fmt_date_short(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    return dt.strftime("%b %-d") if hasattr(datetime, "strftime") else dt.isoformat()[:10]
+
+
+async def _mine_unanswered(session: AsyncSession, *, mailbox: str | None) -> list[Suggestion]:
+    """Top brokers we owe a reply to — reuse the no_reply_tracker view."""
+    try:
+        rows = await fetch_no_reply_rows(session, limit=200, mailbox=mailbox)
+    except Exception:  # noqa: BLE001
+        return []
+    buckets: dict[str, list[Any]] = defaultdict(list)
+    for r in rows:
+        email = (r.to_email_normalized or "").lower()
+        # Drop own-domain, free-mail and automated senders — none of them read
+        # as "the broker we owe a reply to" in a chip.
+        if _is_excluded_broker(email):
+            continue
+        at = email.find("@")
+        key = email[at + 1 :] if at != -1 else email
+        if not key:
+            continue
+        buckets[key].append(r)
+    ranked = sorted(buckets.items(), key=lambda kv: len(kv[1]), reverse=True)
+    out: list[Suggestion] = []
+    for domain, group in ranked[:2]:
+        n = len(group)
+        if n < 1:
+            continue
+        broker = _broker_label(f"x@{domain}")
+        oldest = min((_as_utc(r.we_sent_at) for r in group if r.we_sent_at), default=None)
+        when = f" since {_fmt_date_short(oldest)}" if oldest else ""
+        out.append(Suggestion(
+            text=f"Which {n} thread{'s' if n != 1 else ''} with {broker}{when} are still unanswered?",
+            kind="unanswered",
+        ))
+    return out
+
+
+async def _mine_insights_by_broker(
+    session: AsyncSession,
+    *,
+    mailbox: str | None,
+    intent: str | None,
+    sentiment_below: float | None,
+    days: int,
+    build_text: Any,  # (n, broker, when) -> str
+    kind: str,
+    limit: int = 1,
+) -> list[Suggestion]:
+    """Shared miner: top brokers for an insight filter in the recent window."""
+    from datetime import timedelta
+
+    from sqlalchemy import and_, func, select
+
+    from app.inbox.models import MailMessage, MessageInsight
+
+    m = MailMessage.__table__.c
+    j = MessageInsight.__table__.c
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+
+    stmt = (
+        select(
+            m.from_addr,
+            m.email_lower,
+            j.broker_name,
+            func.count().label("n"),
+            func.min(m.sent_at).label("earliest"),
+        )
+        .select_from(
+            MailMessage.__table__.join(
+                MessageInsight.__table__,
+                and_(
+                    j.mailbox == m.mailbox,
+                    j.message_id == m.message_id,
+                    j.tenant_id == m.tenant_id,
+                ),
+            )
+        )
+        .where(m.sent_at >= cutoff)
+        .where(m.from_addr != m.mailbox)  # inbound only
+        .group_by(m.from_addr, m.email_lower, j.broker_name)
+        .order_by(func.count().desc())
+        .limit(limit * 10)  # over-fetch so we can dedup by domain
+    )
+    if mailbox:
+        stmt = stmt.where(m.mailbox == mailbox)
+    if intent:
+        stmt = stmt.where(j.intent == intent)
+    if sentiment_below is not None:
+        stmt = stmt.where(j.sentiment < sentiment_below)
+
+    try:
+        rows = list((await session.execute(stmt)).all())
+    except Exception:  # noqa: BLE001
+        return []
+
+    # Collapse rows that share a domain (same broker, different senders).
+    # Drop own-domain, free-mail and automated senders before collapsing — a
+    # miner that names "Highway" (carrier-monitoring alerts) or "Yahoo"
+    # (free-mail bucket) as a broker is the exact failure this guards.
+    by_dom: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        email = (r.email_lower or r.from_addr or "").lower()
+        if _is_excluded_broker(email):
+            continue
+        at = email.find("@")
+        dom = email[at + 1 :] if at != -1 else email
+        if not dom:
+            continue
+        slot = by_dom.setdefault(dom, {"n": 0, "earliest": None, "broker_name": None, "email": email})
+        slot["n"] += int(r.n or 0)
+        earliest = r.earliest
+        if earliest is not None and (slot["earliest"] is None or earliest < slot["earliest"]):
+            slot["earliest"] = earliest
+        if not slot["broker_name"] and r.broker_name:
+            slot["broker_name"] = r.broker_name
+
+    ranked = sorted(by_dom.items(), key=lambda kv: kv[1]["n"], reverse=True)
+    out: list[Suggestion] = []
+    for _dom, info in ranked[:limit]:
+        if info["n"] < 1:
+            continue
+        broker = _broker_label(info["email"], info["broker_name"])
+        when = f" since {_fmt_date_short(info['earliest'])}" if info["earliest"] else ""
+        out.append(Suggestion(text=build_text(info["n"], broker, when), kind=kind))
+    return out
+
+
+async def _mine_rate_hotspot(session: AsyncSession, *, mailbox: str | None) -> list[Suggestion]:
+    """Top origin→dest lane for recent rate requests."""
+    from datetime import timedelta
+
+    from sqlalchemy import and_, func, select
+
+    from app.inbox.models import MailMessage, MessageInsight
+
+    m = MailMessage.__table__.c
+    j = MessageInsight.__table__.c
+    cutoff = datetime.now(UTC) - timedelta(days=14)
+
+    stmt = (
+        select(j.lane_from, j.lane_to, func.count().label("n"))
+        .select_from(
+            MailMessage.__table__.join(
+                MessageInsight.__table__,
+                and_(
+                    j.mailbox == m.mailbox,
+                    j.message_id == m.message_id,
+                    j.tenant_id == m.tenant_id,
+                ),
+            )
+        )
+        .where(m.sent_at >= cutoff)
+        .where(m.from_addr != m.mailbox)
+        .where(j.intent == "rate_request")
+        .where(j.lane_from.isnot(None))
+        .where(j.lane_to.isnot(None))
+        .group_by(j.lane_from, j.lane_to)
+        .order_by(func.count().desc())
+        .limit(1)
+    )
+    if mailbox:
+        stmt = stmt.where(m.mailbox == mailbox)
+
+    try:
+        row = (await session.execute(stmt)).first()
+    except Exception:  # noqa: BLE001
+        return []
+    if not row or not row.n:
+        return []
+    return [Suggestion(
+        text=f"Show the {row.n} rate request{'s' if row.n != 1 else ''} on {row.lane_from} → {row.lane_to} this week.",
+        kind="rate_hotspot",
+    )]
+
+
+async def suggest_questions(
+    session: AsyncSession | None, *, mailbox: str | None = None,
+) -> list[Suggestion]:
+    """Return 0-6 concrete chip suggestions grounded in the real mailbox.
+
+    Deterministic grounding — every string names at least one real broker,
+    lane, date or integer count from SQL. The LLM is intentionally NOT in
+    the loop (plan-gate decision): a model asked to invent specifics
+    hallucinates broker names, and the user's whole ask here is "not
+    vague". Never raises; a failing miner is skipped silently.
+
+    Results are cached in-process for 10 minutes per mailbox.
+    """
+    import logging as _log
+    import time
+
+    _l = _log.getLogger(__name__)
+
+    key = (mailbox or "__all__").lower()
+    now = time.monotonic()
+    cached = _SUGGESTIONS_CACHE.get(key)
+    if cached is not None and (now - cached[0]) < _SUGGESTIONS_TTL_S:
+        return cached[1]
+
+    if session is None:
+        _SUGGESTIONS_CACHE[key] = (now, [])
+        return []
+
+    def _plural(n: int, word: str) -> str:
+        return f"{word}" if n == 1 else f"{word}s"
+
+    out: list[Suggestion] = []
+    try:
+        out.extend(await _mine_unanswered(session, mailbox=mailbox))
+    except Exception as exc:  # noqa: BLE001
+        _l.info("suggest_questions: unanswered miner failed: %s", type(exc).__name__)
+    try:
+        out.extend(await _mine_insights_by_broker(
+            session, mailbox=mailbox, intent=None, sentiment_below=-0.3, days=14,
+            build_text=lambda n, b, w: f"What is {b} unhappy about across {n} {_plural(n, 'email')}{w}?",
+            kind="negative",
+        ))
+    except Exception as exc:  # noqa: BLE001
+        _l.info("suggest_questions: negative miner failed: %s", type(exc).__name__)
+    try:
+        out.extend(await _mine_rate_hotspot(session, mailbox=mailbox))
+    except Exception as exc:  # noqa: BLE001
+        _l.info("suggest_questions: rate hotspot miner failed: %s", type(exc).__name__)
+    try:
+        out.extend(await _mine_insights_by_broker(
+            session, mailbox=mailbox, intent="complaint", sentiment_below=None, days=14,
+            build_text=lambda n, b, w: f"Review the {n} {_plural(n, 'complaint')} from {b}{w}.",
+            kind="complaint",
+        ))
+    except Exception as exc:  # noqa: BLE001
+        _l.info("suggest_questions: complaint miner failed: %s", type(exc).__name__)
+    try:
+        out.extend(await _mine_insights_by_broker(
+            session, mailbox=mailbox, intent="payment", sentiment_below=None, days=30,
+            build_text=lambda n, b, w: f"Which invoices from {b} are overdue? ({n} payment {_plural(n, 'email')}{w})",
+            kind="payment",
+        ))
+    except Exception as exc:  # noqa: BLE001
+        _l.info("suggest_questions: payment miner failed: %s", type(exc).__name__)
+
+    # Dedup identical strings (one broker can land in two miners).
+    cleaned: list[Suggestion] = []
+    seen: set[str] = set()
+    for s in out:
+        if s.text in seen:
+            continue
+        seen.add(s.text)
+        cleaned.append(s)
+
+    # Cap at 6 to match the plan contract.
+    cleaned = cleaned[:6]
+    _SUGGESTIONS_CACHE[key] = (now, cleaned)
+    return cleaned
+
+
+def _reset_suggestions_cache() -> None:
+    """Test seam — clear the in-process cache between scenarios."""
+    _SUGGESTIONS_CACHE.clear()
+
+
 async def _render_and_wrap(
     *,
     session: AsyncSession,
