@@ -1526,12 +1526,23 @@ def _is_automated_sender(email: str | None) -> bool:
     return any(domain == suf.lstrip(".") or domain.endswith(suf) for suf in _AUTOMATED_DOMAIN_SUFFIXES)
 
 
+# Domains that are internal to the product/team — never freight brokers even
+# when mail threads exist. xgate.io is the development agency that built LJM;
+# filip.tr@xgate.io and other team addresses surface in demo / dev mailboxes
+# and must never appear as broker chips.
+_INTERNAL_PARTNER_DOMAINS: frozenset[str] = frozenset({
+    "xgate.io",
+})
+
+
 def _is_excluded_broker(email: str | None) -> bool:
-    """Compose: own-domain OR free-mail OR automated sender → not a broker chip."""
+    """Compose: own-domain OR internal-partner OR free-mail OR automated sender → not a broker chip."""
     dom = _domain_of(email)
     if not dom:
         return True
     if dom == _own_domain():
+        return True
+    if dom in _INTERNAL_PARTNER_DOMAINS:
         return True
     if _is_free_mail(dom):
         return True
