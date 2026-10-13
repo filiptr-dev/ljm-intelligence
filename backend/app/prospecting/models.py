@@ -417,6 +417,14 @@ class Load(TenantMixin, Base):
     dedupe_group_hash: Mapped[str] = mapped_column(
         String(32), nullable=False, default="", server_default=text("''")
     )
+    # Subject-regex-derived fields (migration 0048, filled by
+    # ``app.analysis.rate_backfill``). Mirror of
+    # ``MessageInsight.derived_*`` so the broker overview can read a
+    # rate without a secondary join on every row. Never overwrites
+    # the authoritative ``rate_usd``/``origin_city``/``dest_city``.
+    derived_rate_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    derived_origin: Mapped[str | None] = mapped_column(String(128))
+    derived_dest: Mapped[str | None] = mapped_column(String(128))
 
     __table_args__ = (
         Index("loads_source_ref_uq", "source", "source_ref", unique=True),

@@ -18,13 +18,29 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.models import LeadAiSummary
 from app.inbox.models import MailMessage, MessageInsight
 from app.prospecting.models import Lead, LeadContact
+from app.prospecting.pipeline.shipper_merge import FREE_MAIL_DOMAINS
 from app.shared.untrusted import FENCE_CLOSE, FENCE_OPEN, neutralize as _neutralize, security_instruction
+
+
+def _domain_of(email: str | None) -> str | None:
+    """Return the lowercased @-tail of ``email`` or None.
+
+    Returns ``None`` for free-mail domains (gmail, yahoo, …) because they
+    corroborate nothing — two different brokers sharing a gmail would
+    cross-leak threads if we matched on domain.
+    """
+    if not email or "@" not in email:
+        return None
+    d = email.rsplit("@", 1)[-1].strip().lower()
+    if not d or d in FREE_MAIL_DOMAINS:
+        return None
+    return d
 
 log = logging.getLogger(__name__)
 
@@ -167,7 +183,20 @@ async def get_lead_summary(
         )
     ).scalars().all()
     emails |= {e.strip().lower() for e in contact_emails if e}
-    if not emails:
+    # Broker-level domains (minus free-mail). A broker whose primary_email is
+    # ``alice@acme.com`` still matches ``ops@acme.com`` even if we never
+    # recorded that contact. ``lead.domain`` seeds the set so a lead with
+    # only a gmail primary but a stamped company domain still matches real
+    # threads. See the plan § "Honest `/analysis/lead/{id}` empty states".
+    domains: set[str] = set()
+    for e in emails:
+        d = _domain_of(e)
+        if d is not None:
+            domains.add(d)
+    ld = (lead.domain or "").strip().lower().removeprefix("www.")
+    if ld and ld not in FREE_MAIL_DOMAINS:
+        domains.add(ld)
+    if not emails and not domains:
         return LeadSummaryResult(status="empty")
 
     # An address shared with another lead (primary or contact) is ambiguous:
@@ -188,14 +217,33 @@ async def get_lead_summary(
     ).scalars().all()
     shared = {e.strip().lower() for e in [*other_primary, *other_contact] if e}
     emails -= shared
-    if not emails:
+    # Same for domains: a corporate domain pointed at by another lead can't
+    # be exclusively attributed, so drop it from the match set. This keeps
+    # the "never leak thread content across brokers" guard honest when we
+    # widen matching from address to domain.
+    if domains:
+        shared_domains_rows = (
+            await session.execute(
+                select(Lead.domain).where(
+                    Lead.id != lead_id,
+                    func.lower(Lead.domain).in_(sorted(domains)),
+                )
+            )
+        ).scalars().all()
+        domains -= {(d or "").strip().lower() for d in shared_domains_rows if d}
+    if not emails and not domains:
         return LeadSummaryResult(status="empty")
 
+    where_clauses = []
+    if emails:
+        where_clauses.append(MailMessage.email_lower.in_(sorted(emails)))
+    if domains:
+        where_clauses.append(MailMessage.email_domain.in_(sorted(domains)))
     msgs = list(
         (
             await session.execute(
                 select(MailMessage)
-                .where(MailMessage.email_lower.in_(sorted(emails)))
+                .where(or_(*where_clauses))
                 .order_by(MailMessage.sent_at.desc(), MailMessage.message_id)
                 .limit(MAX_MESSAGES)
             )

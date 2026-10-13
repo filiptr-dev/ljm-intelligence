@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.inbox.models import MessageInsight
+from app.inbox.models import MailMessage, MessageInsight
 from app.outreach.models import CallOutcome, SentLog, Suppression
 from app.prospecting.broker_health import (
     TONE_WINDOW_DAYS,
@@ -34,6 +34,7 @@ from app.prospecting.pipeline.broker_next_action import (
     NextActionInput,
     compute,
 )
+from app.prospecting.pipeline.shipper_merge import FREE_MAIL_DOMAINS
 
 
 class NotFoundError(Exception):
@@ -185,6 +186,29 @@ class EmailAnalyticsRow:
 
 
 @dataclass
+class CommunicationItem:
+    """One real thread rendered on the broker detail Communication card.
+
+    Honest-by-design: these are messages matched by address *or* corporate
+    domain (minus free-mail), joined to ``MessageInsight`` for intent /
+    sentiment / rate / lane. The card hides when the list is empty rather
+    than showing "no data" — a broker we've never corresponded with
+    shouldn't get a conversation card at all.
+    """
+
+    sent_at: str
+    from_addr: str
+    to_addr: str | None
+    subject: str
+    intent: str | None
+    sentiment: float | None
+    rate_usd: float | None
+    lane_from: str | None
+    lane_to: str | None
+    direction: str  # "inbound" | "outbound"
+
+
+@dataclass
 class BrokerDetailResult:
     broker: BrokerRowData
     address: ContactField
@@ -196,6 +220,7 @@ class BrokerDetailResult:
     main_lane: MainLaneRow | None
     overview_metrics: OverviewMetricsRow | None = None
     email_analytics: EmailAnalyticsRow | None = None
+    communication: list[CommunicationItem] = field(default_factory=list)
     loadstop: dict | None = None
 
 
@@ -688,6 +713,118 @@ async def list_brokers(
 
 _MAX_CONTACTS = 100
 _RECENT_ACTIVITY = 25
+_RECENT_COMMUNICATION = 25
+
+
+def _lead_emails_and_domains(
+    primary_email: str | None,
+    lead_domain: str | None,
+    contact_emails: list[str],
+) -> tuple[set[str], set[str]]:
+    """Return (emails, domains) usable to match a broker's mail.
+
+    Address matching stays precise; domain matching lets a shared
+    corporate domain (e.g. ``acme.com``) match a thread even when the
+    specific address wasn't in ``lead_contacts``. Free-mail domains are
+    dropped — two different brokers sharing a gmail would cross-leak.
+    """
+    emails: set[str] = set()
+    if primary_email:
+        emails.add(primary_email.strip().lower())
+    emails |= {e.strip().lower() for e in contact_emails if e}
+    emails.discard("")
+    domains: set[str] = set()
+    for e in emails:
+        if "@" in e:
+            d = e.rsplit("@", 1)[-1]
+            if d and d not in FREE_MAIL_DOMAINS:
+                domains.add(d)
+    if lead_domain:
+        d = lead_domain.strip().lower().removeprefix("www.")
+        if d and d not in FREE_MAIL_DOMAINS:
+            domains.add(d)
+    return emails, domains
+
+
+async def _load_communication(
+    session: AsyncSession,
+    *,
+    primary_email: str | None,
+    lead_domain: str | None,
+    contact_emails: list[str],
+    mailbox_owner: str | None = None,
+    limit: int = _RECENT_COMMUNICATION,
+) -> list[CommunicationItem]:
+    """Fetch newest ``limit`` real threads matched by address or domain.
+
+    Pure read: joins ``MailMessage`` to ``MessageInsight`` so the UI gets
+    intent / sentiment / rate / lane without a second roundtrip. Returns
+    an empty list for a broker with no matching mail — the UI hides the
+    card rather than rendering "no data".
+    """
+    emails, domains = _lead_emails_and_domains(primary_email, lead_domain, contact_emails)
+    if not emails and not domains:
+        return []
+    where_clauses = []
+    if emails:
+        where_clauses.append(MailMessage.email_lower.in_(sorted(emails)))
+    if domains:
+        where_clauses.append(MailMessage.email_domain.in_(sorted(domains)))
+    rows = (
+        await session.execute(
+            select(MailMessage, MessageInsight)
+            .outerjoin(
+                MessageInsight,
+                and_(
+                    MessageInsight.mailbox == MailMessage.mailbox,
+                    MessageInsight.message_id == MailMessage.message_id,
+                ),
+            )
+            .where(or_(*where_clauses))
+            .order_by(MailMessage.sent_at.desc(), MailMessage.message_id)
+            .limit(limit)
+        )
+    ).all()
+    out: list[CommunicationItem] = []
+    for m, ins in rows:
+        # Direction: outbound if the mailbox owner (gmail account) is the
+        # sender; inbound otherwise. We don't have the mailbox owner here
+        # by default, so fall back to the from vs mailbox field.
+        is_outbound = (
+            (mailbox_owner is not None and (m.email_lower or "").lower() == mailbox_owner.lower())
+            or (m.mailbox and m.email_lower and m.mailbox.lower() == (m.email_lower or "").lower())
+        )
+        to_addr = None
+        if isinstance(m.to_addrs, list) and m.to_addrs:
+            to_addr = str(m.to_addrs[0])
+        rate = None
+        lane_from = None
+        lane_to = None
+        intent = None
+        sentiment: float | None = None
+        if ins is not None:
+            intent = ins.intent
+            sentiment = float(ins.sentiment) if ins.sentiment is not None else None
+            rate = float(ins.rate_usd) if ins.rate_usd is not None else None
+            if rate is None and ins.derived_rate_usd is not None:
+                rate = float(ins.derived_rate_usd)
+            lane_from = ins.lane_from or ins.derived_lane_from
+            lane_to = ins.lane_to or ins.derived_lane_to
+        out.append(
+            CommunicationItem(
+                sent_at=m.sent_at.isoformat() if m.sent_at else "",
+                from_addr=m.from_addr or "",
+                to_addr=to_addr,
+                subject=m.subject or "",
+                intent=intent,
+                sentiment=sentiment,
+                rate_usd=rate,
+                lane_from=lane_from,
+                lane_to=lane_to,
+                direction="outbound" if is_outbound else "inbound",
+            )
+        )
+    return out
 
 
 async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
@@ -829,6 +966,14 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
 
     email_analytics = await get_email_analytics(sessionmaker, lead.id)
 
+    async with sessionmaker() as s:
+        communication = await _load_communication(
+            s,
+            primary_email=lead.primary_email,
+            lead_domain=lead.domain,
+            contact_emails=[c.email for c in contact_rows if c.email],
+        )
+
     return BrokerDetailResult(
         broker=broker_row,
         address=_field(lead.address, lead.address_source),
@@ -840,6 +985,7 @@ async def get_detail(sessionmaker: Any, broker_id: str) -> BrokerDetailResult:
         main_lane=main_lane,
         overview_metrics=overview_map.get(lead.id),
         email_analytics=email_analytics,
+        communication=communication,
         loadstop=((lead.raw or {}).get("loadstop") if isinstance(lead.raw, dict) else None),
     )
 
@@ -1004,7 +1150,11 @@ class OverviewMetricsRow:
     last_contact_at: str | None
     days_since_last_contact: int | None
     segment: Segment
-    revenue_usd: float = 0.0
+    # ``None`` signals "we have no data yet" to the UI (brand-new broker,
+    # no booked loads, no derived rate-con dollars). ``0.0`` means we
+    # looked and the sum is really zero. The UI must render these two
+    # cases differently: a brand-new broker shouldn't look dead.
+    revenue_usd: float | None = 0.0
 
 
 # Available server-side sorts (`sort=` query param). The deterministic
@@ -1141,10 +1291,18 @@ async def get_overview_metrics(
             )
         ).all()
 
-        # Revenue: sum(rate_usd) of booked loads per broker (one grouped query).
+        # Revenue: sum(COALESCE(rate_usd, derived_rate_usd)) of booked loads
+        # per broker. The derived column is filled by
+        # ``app.analysis.rate_backfill`` from rate-con subjects (73/73 of
+        # the inbox-sourced loads carry a NULL ``rate_usd``); using
+        # COALESCE here means revenue starts reflecting rate-con dollars
+        # without any send/triage/LoadStop write-path change.
         revenue_rows = (
             await s.execute(
-                select(Load.broker_lead_id, func.sum(Load.rate_usd))
+                select(
+                    Load.broker_lead_id,
+                    func.sum(func.coalesce(Load.rate_usd, Load.derived_rate_usd)),
+                )
                 .where(Load.broker_lead_id.in_(lead_ids))
                 .where(Load.status == "booked")
                 .group_by(Load.broker_lead_id)
@@ -1380,7 +1538,16 @@ async def get_overview_metrics(
             last_contact_at=_iso(la),
             days_since_last_contact=days_since,
             segment=segment,
-            revenue_usd=revenue_by_lead.get(lid, 0.0),
+            # Null-when-truly-empty: a broker with no booked loads *and* no
+            # revenue sum returns ``None`` (UI: "No revenue data yet") so
+            # the operator doesn't read "$0" as "we tried to book them and
+            # failed". A real zero (booked > 0 but all rates NULL) still
+            # renders as ``0.0``.
+            revenue_usd=(
+                revenue_by_lead.get(lid, 0.0)
+                if (revenue_by_lead.get(lid, 0.0) > 0 or booked_12m[lid] > 0)
+                else None
+            ),
         )
     await _cache.set(tenant, "brokers_overview", variant, copy.deepcopy(result))
     return result

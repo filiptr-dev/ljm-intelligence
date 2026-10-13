@@ -63,6 +63,11 @@ class LoadGroupOut(BaseModel):
     status: str
     status_at: datetime | None
     is_demo: bool = False
+    # When the lane is still unknown after the subject-regex backfill,
+    # the UI renders "Lane not found in email" with a link straight to
+    # the inbox thread. ``None`` for non-inbox sources (e.g. LoadStop).
+    inbox_message_id: str | None = None
+    inbox_mailbox: str | None = None
 
 
 class LoadsListOut(BaseModel):

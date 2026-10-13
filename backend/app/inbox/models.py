@@ -38,6 +38,11 @@ class MailMessage(TenantMixin, Base):
     # Normalised, indexed from_email (0016 added column + composite index; 0018 adds a
     # plain index). Stamped by ingest on every new row.
     email_lower: Mapped[str | None] = mapped_column(String(320))
+    # Pre-split @-tail of ``email_lower`` (migration 0048). Lets the broker
+    # read-side match on corporate domain without a per-row LIKE. Nullable
+    # because free-mail rows (gmail, yahoo, …) and legacy rows may be NULL;
+    # callers filter those out via FREE_MAIL_DOMAINS.
+    email_domain: Mapped[str | None] = mapped_column(String(255))
     to_addrs: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     cc_addrs: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     subject: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
@@ -58,6 +63,7 @@ class MailMessage(TenantMixin, Base):
         Index("mail_messages_from_idx", "from_addr"),
         Index("mail_messages_sent_at_idx", "sent_at"),
         Index("mail_messages_mbx_hist_idx", "mailbox", "history_id"),
+        Index("ix_mail_messages_email_domain", "email_domain"),
     )
 
 
@@ -104,6 +110,15 @@ class MessageInsight(TenantMixin, Base):
     equipment: Mapped[str | None] = mapped_column(String(64))
     broker_name: Mapped[str | None] = mapped_column(String(255))
     evidence: Mapped[str | None] = mapped_column(Text)
+    # Subject-regex-derived fields (migration 0048, filled by
+    # ``app.analysis.rate_backfill``). Separate from the triage-written
+    # ``rate_usd``/``lane_from``/``lane_to`` so triage keeps full ownership
+    # of its own columns; a derivation never overwrites triage.
+    derived_rate_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    derived_lane_from: Mapped[str | None] = mapped_column(String(128))
+    derived_lane_to: Mapped[str | None] = mapped_column(String(128))
+    derived_order_no: Mapped[str | None] = mapped_column(String(64))
+    derived_source: Mapped[str | None] = mapped_column(String(32))
     model: Mapped[str] = mapped_column(String(64), nullable=False, default="demo", server_default=text("'demo'"))
     model_version: Mapped[str] = mapped_column(
         String(32), nullable=False, default="demo-v1", server_default=text("'demo-v1'")

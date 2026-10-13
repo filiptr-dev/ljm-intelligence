@@ -496,13 +496,135 @@ async def _update_no_reply(session: AsyncSession, msg: RawMessage) -> None:
 
 
 async def triage_message(session: AsyncSession, msg: RawMessage) -> TriageOutcome:
-    """Full on-ingest triage. One session, no commit (caller owns the UoW)."""
+    """Full on-ingest triage. One session, no commit (caller owns the UoW).
+
+    Additive step at the tail: the lane/rate extractor
+    (:mod:`app.inbox.load_extract`) runs after triage has written its
+    own insight row. It never touches ``intent/urgency/sentiment`` — it
+    fills the ``derived_*`` columns and populates the inbox-sourced
+    ``loads`` row with a lane so /loads stops rendering "? → ?". A
+    no-op when the deterministic pass finds nothing.
+    """
     outcome = _classify(msg)
     await _upsert_insight(session, msg, outcome)
     await _upsert_load_from_offer(session, msg, outcome)
     await _maybe_extract_contact(session, msg, outcome.broker_name)
     await _update_no_reply(session, msg)
+    await _apply_load_extract(session, msg, outcome)
     return outcome
+
+
+async def _apply_load_extract(
+    session: AsyncSession, msg: RawMessage, outcome: TriageOutcome
+) -> None:
+    """Deterministic lane/rate pass; writes to derived_* only.
+
+    Scoped to intents that could carry a lane (booked / load_offer /
+    rate_request). We never AI-call from the ingest hot path — AI
+    extraction only runs from the backfill job's per-run cap.
+    """
+    from app.inbox.load_extract import LOAD_INTENTS, extract_from_message
+    from app.prospecting.models import Load
+
+    if outcome.intent not in LOAD_INTENTS:
+        return
+    ex = extract_from_message(msg.subject, msg.body_text)
+    if ex.is_empty:
+        return
+    # Update the insight row we just wrote.
+    ins = (
+        await session.execute(
+            select(MessageInsight).where(
+                MessageInsight.mailbox == msg.mailbox,
+                MessageInsight.message_id == msg.message_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if ins is not None and ins.derived_source is None:
+        ins.derived_rate_usd = ex.rate_usd
+        ins.derived_lane_from = (
+            f"{ex.origin_city}, {ex.origin_state}"
+            if ex.origin_city and ex.origin_state
+            else None
+        )
+        ins.derived_lane_to = (
+            f"{ex.dest_city}, {ex.dest_state}"
+            if ex.dest_city and ex.dest_state
+            else None
+        )
+        ins.derived_order_no = ex.order_no
+        ins.derived_source = ex.source
+
+    # If triage already created a Load (intent='load_offer' path), fill
+    # the derived_* columns on it. Otherwise, if we recovered a lane +
+    # the intent is in LOAD_INTENTS, create one so /loads shows it.
+    source_ref = f"{msg.mailbox}:{msg.message_id}"
+    load = (
+        await session.execute(
+            select(Load).where(Load.source == "inbox", Load.source_ref == source_ref)
+        )
+    ).scalar_one_or_none()
+    if load is not None:
+        if load.derived_rate_usd is None and ex.rate_usd is not None:
+            load.derived_rate_usd = ex.rate_usd
+        if load.derived_origin is None and ex.origin_city and ex.origin_state:
+            load.derived_origin = f"{ex.origin_city}, {ex.origin_state}"
+        if load.derived_dest is None and ex.dest_city and ex.dest_state:
+            load.derived_dest = f"{ex.dest_city}, {ex.dest_state}"
+        # Rehash so a now-lane-known row escapes the empty-lane bucket.
+        from app.analysis.rate_backfill import _group_hash
+
+        origin_state = load.origin_state or ex.origin_state
+        dest_state = load.dest_state or ex.dest_state
+        new_hash = _group_hash(
+            broker_name=load.broker_name,
+            origin_state=origin_state,
+            dest_state=dest_state,
+            pickup_date=load.pickup_date,
+            equipment=load.equipment or ex.equipment,
+            source=load.source,
+            source_ref=load.source_ref,
+        )
+        if new_hash != load.dedupe_group_hash:
+            load.dedupe_group_hash = new_hash
+    elif ex.has_lane:
+        from app.analysis.rate_backfill import _group_hash
+        from app.prospecting.broker_matching import match_broker_lead
+
+        broker_lead_id = await match_broker_lead(
+            session, email=msg.from_addr or None, name=outcome.broker_name
+        )
+        gh = _group_hash(
+            broker_name=outcome.broker_name,
+            origin_state=ex.origin_state,
+            dest_state=ex.dest_state,
+            pickup_date=ex.pickup_date,
+            equipment=ex.equipment,
+            source="inbox",
+            source_ref=source_ref,
+        )
+        session.add(
+            Load(
+                source="inbox",
+                source_ref=source_ref,
+                broker_name=outcome.broker_name or "",
+                broker_email=msg.from_addr or None,
+                origin_city=None,
+                origin_state=None,
+                dest_city=None,
+                dest_state=None,
+                pickup_date=None,
+                equipment=ex.equipment,
+                rate_usd=None,
+                posted_at=msg.sent_at,
+                raw={"message_id": msg.message_id, "mailbox": msg.mailbox, "derived": True},
+                broker_lead_id=broker_lead_id,
+                dedupe_group_hash=gh,
+                derived_rate_usd=ex.rate_usd,
+                derived_origin=f"{ex.origin_city}, {ex.origin_state}",
+                derived_dest=f"{ex.dest_city}, {ex.dest_state}",
+            )
+        )
 
 
 async def retriage_all(session: AsyncSession) -> int:

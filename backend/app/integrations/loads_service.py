@@ -104,17 +104,28 @@ def _group_hash(raw: RawLoad) -> str:
 
     Same inputs → same hash → group URL survives a re-ingest. Mirrors the
     backfill in migration 0025.
+
+    Null-lane escape hatch (plan 2026-10-13-loads-inbox-null-lane-collapsed):
+    when both ``origin_state`` and ``dest_state`` are missing — the shape
+    of every real inbox-sourced load today — we group by
+    ``source|source_ref`` instead so unknown-lane rows don't all collapse
+    into one hash of empty strings on /loads. The rate-con backfill then
+    recomputes the hash to the authoritative lane key once a lane shows
+    up, so a correctly-hashed row at ingest stays correct after backfill.
     """
-    pickup = ""
-    if raw.pickup_date is not None:
-        pickup = str(raw.pickup_date)[:10]
-    key = "|".join([
-        (raw.broker_name or "").strip().lower(),
-        (raw.origin_state or "").strip().lower(),
-        (raw.dest_state or "").strip().lower(),
-        pickup,
-        (raw.equipment or "").strip().lower(),
-    ])
+    if not (raw.origin_state or "").strip() and not (raw.dest_state or "").strip():
+        key = f"__nolane__|{raw.source}|{raw.source_ref}"
+    else:
+        pickup = ""
+        if raw.pickup_date is not None:
+            pickup = str(raw.pickup_date)[:10]
+        key = "|".join([
+            (raw.broker_name or "").strip().lower(),
+            (raw.origin_state or "").strip().lower(),
+            (raw.dest_state or "").strip().lower(),
+            pickup,
+            (raw.equipment or "").strip().lower(),
+        ])
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 
 
@@ -222,9 +233,17 @@ async def list_loads_deduped(session: AsyncSession, *, limit: int = 100) -> list
     out: list[LoadGroupRow] = []
     for gh in order[:limit]:
         bucket = groups[gh]
-        # Pick the lowest rate_usd (bands if multi); newest posted_at.
-        rates = [r.rate_usd for r in bucket if r.rate_usd is not None]
-        min_rate = float(min(rates)) if rates else None
+        # Rate: authoritative ``rate_usd`` wins; fall back to the
+        # subject-regex-derived ``derived_rate_usd`` (migration 0048 /
+        # :mod:`app.inbox.load_extract`). COALESCE here means an inbox
+        # rate-con shows a dollar amount without rewriting the triage
+        # write-path.
+        rates = [
+            float(r.rate_usd if r.rate_usd is not None else r.derived_rate_usd)
+            for r in bucket
+            if r.rate_usd is not None or r.derived_rate_usd is not None
+        ]
+        min_rate = min(rates) if rates else None
         miles_vals = [r.miles for r in bucket if r.miles is not None]
         miles = int(min(miles_vals)) if miles_vals else None
         posted = max((r.posted_at for r in bucket if r.posted_at is not None), default=None)
@@ -238,24 +257,60 @@ async def list_loads_deduped(session: AsyncSession, *, limit: int = 100) -> list
         is_demo = any((r.source or "") == "demo" for r in bucket) or any(
             ((r.raw or {}).get("demo") is True) for r in bucket
         )
-        out.append(
-            LoadGroupRow(
-                group_hash=gh,
-                broker=contact,
-                origin={"city": anchor.origin_city, "state": anchor.origin_state or ""},
-                dest={"city": anchor.dest_city, "state": anchor.dest_state or ""},
-                pickup_date=pickup,
-                equipment=anchor.equipment,
-                rate_usd=min_rate,
-                miles=miles,
-                rate_per_mile=rpm,
-                posted_at=posted,
-                sources=[{"kind": k, "count": c} for k, c in sorted(src_counts.items())],
-                status=anchor.status,
-                status_at=anchor.status_at,
-                is_demo=is_demo,
-            )
+
+        # Origin/dest: authoritative city+state win; else parse the
+        # derived "City, ST" string. Empty when we truly have no lane —
+        # the frontend renders "Lane not found in email" with a link.
+        def _coalesce_origin(a: Any) -> tuple[str | None, str]:
+            if a.origin_city or a.origin_state:
+                return a.origin_city, a.origin_state or ""
+            if a.derived_origin and "," in a.derived_origin:
+                city, st = a.derived_origin.rsplit(",", 1)
+                return city.strip() or None, st.strip()
+            return None, ""
+
+        def _coalesce_dest(a: Any) -> tuple[str | None, str]:
+            if a.dest_city or a.dest_state:
+                return a.dest_city, a.dest_state or ""
+            if a.derived_dest and "," in a.derived_dest:
+                city, st = a.derived_dest.rsplit(",", 1)
+                return city.strip() or None, st.strip()
+            return None, ""
+
+        o_city, o_state = _coalesce_origin(anchor)
+        d_city, d_state = _coalesce_dest(anchor)
+
+        # Inbox threads carry a message_id in raw — surface it so the UI
+        # can link "Lane not found in email" straight to the thread.
+        inbox_message_id: str | None = None
+        inbox_mailbox: str | None = None
+        if (anchor.source or "") == "inbox" and isinstance(anchor.raw, dict):
+            inbox_message_id = anchor.raw.get("message_id")
+            inbox_mailbox = anchor.raw.get("mailbox")
+
+        row = LoadGroupRow(
+            group_hash=gh,
+            broker=contact,
+            origin={"city": o_city, "state": o_state},
+            dest={"city": d_city, "state": d_state},
+            pickup_date=pickup,
+            equipment=anchor.equipment,
+            rate_usd=min_rate,
+            miles=miles,
+            rate_per_mile=rpm,
+            posted_at=posted,
+            sources=[{"kind": k, "count": c} for k, c in sorted(src_counts.items())],
+            status=anchor.status,
+            status_at=anchor.status_at,
+            is_demo=is_demo,
         )
+        # Attach the inbox pointer so the UI can render a link when the
+        # lane is still unknown. Done on the dataclass instance rather
+        # than widening the public dataclass signature so existing
+        # callers that don't know about it stay source-compatible.
+        row.inbox_message_id = inbox_message_id  # type: ignore[attr-defined]
+        row.inbox_mailbox = inbox_mailbox  # type: ignore[attr-defined]
+        out.append(row)
     return out
 
 

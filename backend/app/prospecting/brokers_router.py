@@ -101,7 +101,11 @@ class OverviewMetricsOut(BaseModel):
     segment: Literal[
         "all", "hot", "warm", "payment_issues", "dormant", "not_interested", "neutral"
     ]
-    revenue_usd: float = 0.0
+    # Null means "we have no revenue data yet" (brand-new broker). The UI
+    # must distinguish null from 0 — a brand-new broker shouldn't look
+    # like a dead one. See ``OverviewMetricsRow.revenue_usd`` for the
+    # server-side split.
+    revenue_usd: float | None = None
 
 
 class BrokerRowOut(BaseModel):
@@ -269,12 +273,30 @@ class BrokerDetailBody(BrokerRowOut):
     loadstop: LoadstopBrokerPanelOut | None = None
 
 
+class CommunicationItemOut(BaseModel):
+    sent_at: str
+    from_addr: str
+    to_addr: str | None = None
+    subject: str
+    intent: str | None = None
+    sentiment: float | None = None
+    rate_usd: float | None = None
+    lane_from: str | None = None
+    lane_to: str | None = None
+    direction: Literal["inbound", "outbound"]
+
+
 class BrokerDetailOut(BaseModel):
     broker: BrokerDetailBody
     activity: list[ActivityCallOut | ActivityEmailOut]
     summary: BrokerSummaryOut
     overview_metrics: OverviewMetricsOut | None = None
     email_analytics: EmailAnalyticsOut | None = None
+    # Real inbound+outbound threads matched by address OR corporate domain
+    # (see ``brokers_service._load_communication``). Empty list → UI hides
+    # the card; a broker we've never corresponded with shouldn't get a
+    # conversation card.
+    communication: list[CommunicationItemOut] = []
 
 
 # ---------- cursor helpers --------------------------------------------------
@@ -750,6 +772,7 @@ async def get_broker(request: Request, broker_id: str) -> BrokerDetailOut:
             if result.email_analytics is not None
             else None
         ),
+        communication=[CommunicationItemOut(**c.__dict__) for c in result.communication],
     )
 
 

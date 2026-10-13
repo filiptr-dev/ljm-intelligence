@@ -53,6 +53,10 @@ class BrokerPredictionRow:
     reply_speed_lift: float
     first_touch_latency_days: float | None
     computed_at: datetime
+    # Linked ``Lead.id`` — the row only exists when a real Broker lead
+    # exists for ``broker_domain`` (see ``list_broker_predictions_rows``),
+    # so the UI can always route to ``/brokers/{lead_id}``.
+    lead_id: str | None = None
 
 
 @dataclass
@@ -506,8 +510,9 @@ async def list_broker_predictions(
                 float(r.first_touch_latency_days) if r.first_touch_latency_days is not None else None
             ),
             computed_at=r.computed_at,
+            lead_id=lead_id,
         )
-        for r in rows
+        for (r, lead_id) in rows
     ]
 
 

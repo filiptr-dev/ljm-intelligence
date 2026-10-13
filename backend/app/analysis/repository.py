@@ -21,6 +21,7 @@ from app.analysis.models import (
     ObjectionCluster,
 )
 from app.inbox.models import MailMessage, MessageInsight
+from app.prospecting.models import Lead
 
 
 async def fetch_messages_for_corpus(session: AsyncSession) -> list[Any]:
@@ -70,12 +71,26 @@ async def fetch_insights_for_corpus(session: AsyncSession) -> list[Any]:
 
 async def list_broker_predictions_rows(
     session: AsyncSession, *, broker_domain: str | None, limit: int
-) -> list[BrokerPrediction]:
-    stmt = select(BrokerPrediction).order_by(BrokerPrediction.health_score.desc())
+) -> list[tuple[BrokerPrediction, str | None]]:
+    """Return (prediction, lead_id) pairs filtered to real Broker leads.
+
+    The nightly fan-out walks every inbound domain (correctly — we don't
+    want to re-shape ingest). The whitelist happens here on the read seam
+    so wexinc.com / coxautoinc.com / remotelyplushire.com never reach the
+    UI, and if ops later points a Lead at a domain nothing in the write
+    path has to change. We expose ``lead_id`` alongside so each insight
+    card can link to ``/brokers/[id]``.
+    """
+    stmt = (
+        select(BrokerPrediction, Lead.id)
+        .join(Lead, func.lower(Lead.domain) == BrokerPrediction.broker_domain)
+        .where(Lead.kind == "Broker")
+        .order_by(BrokerPrediction.health_score.desc())
+    )
     if broker_domain:
         stmt = stmt.where(BrokerPrediction.broker_domain == broker_domain.lower())
     stmt = stmt.limit(limit)
-    return list((await session.execute(stmt)).scalars().all())
+    return [(row[0], row[1]) for row in (await session.execute(stmt)).all()]
 
 
 async def list_lane_predictions_rows(

@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.analysis import kpi_service as kpi, service as svc
+from app.analysis.rate_backfill import backfill_subject_rates
 from app.db import Session
 from app.shared.tenant import current_tenant
 
@@ -33,6 +34,7 @@ class BrokerPredictionOut(BaseModel):
     reply_speed_lift: float
     first_touch_latency_days: float | None
     computed_at: datetime
+    lead_id: str | None = None
 
 
 class LanePredictionOut(BaseModel):
@@ -506,3 +508,40 @@ async def broker_kpi_endpoint(
     if out.get("error") == "not_found":
         raise HTTPException(status_code=404, detail="broker_not_found")
     return out
+
+
+class BackfillSubjectRatesOut(BaseModel):
+    insights_scanned: int
+    insights_filled: int
+    insights_filled_by_ai: int
+    loads_created: int
+    loads_updated: int
+    loads_rehashed: int
+
+
+@router.post("/jobs/backfill-subject-rates", response_model=BackfillSubjectRatesOut)
+async def backfill_subject_rates_endpoint(request: Request) -> BackfillSubjectRatesOut:
+    """Admin-only, idempotent. Writes to derived_* columns only.
+
+    Gated by the shared ``user_only`` dependency chain on the analysis
+    router — a cron key alone cannot flip rate-con dollars onto a lead.
+    An AI provider is passed in when ``inbox_analysis`` has one wired;
+    otherwise the deterministic pass runs and the AI fallback is skipped.
+    """
+    provider = None
+    try:
+        from app.integrations.adapters.ai.provider import get_for
+
+        provider = get_for("inbox_analysis")
+    except Exception:  # noqa: BLE001
+        provider = None
+    async with request.app.state.sessionmaker() as session:
+        stats = await backfill_subject_rates(session, provider=provider)
+    return BackfillSubjectRatesOut(
+        insights_scanned=stats.insights_scanned,
+        insights_filled=stats.insights_filled,
+        insights_filled_by_ai=stats.insights_filled_by_ai,
+        loads_created=stats.loads_created,
+        loads_updated=stats.loads_updated,
+        loads_rehashed=stats.loads_rehashed,
+    )
