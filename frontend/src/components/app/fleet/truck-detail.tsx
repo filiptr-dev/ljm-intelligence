@@ -89,13 +89,14 @@ export function TruckDetailView({ detail, wide = false }: { detail: TruckDetail;
             <div className="min-w-0">
               {t.last_lat != null && t.last_lng != null ? (
                 <>
-                  <TruckLocationMap lat={t.last_lat} lng={t.last_lng} label={`Last known location of ${t.unit_number}`} />
+                  <TruckLocationMap lat={t.last_lat} lng={t.last_lng} label={`Approximate location of ${t.unit_number}`} />
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Last known location{t.last_seen_at ? `, seen ${timeAgo(t.last_seen_at)}` : ""}. Demo position: where its latest haul started.
+                    Approximate location (state-level centroid parsed from LoadStop&apos;s location string).
+                    {t.last_seen_at ? ` Seen ${timeAgo(t.last_seen_at)}.` : ""}
                   </p>
                 </>
               ) : (
-                <EmptyChart title="No location yet" hint="This unit has not reported a position." className="h-56" />
+                <EmptyChart title="No location from LoadStop" hint="LoadStop has no location string on this unit yet." className="h-56" />
               )}
             </div>
           </div>

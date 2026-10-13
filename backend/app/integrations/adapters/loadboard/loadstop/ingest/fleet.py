@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.fleet.models import Truck
+from app.integrations.adapters.loadboard.loadstop.ingest.geocode import geocode
 from app.shared.orm import LJM_TENANT_ID
 
 SOURCE = "loadstop"
@@ -50,6 +51,15 @@ def _project(row: dict[str, Any]) -> dict[str, Any]:
     out_of_service = bool(inner.get("outOfOrder"))
     status = "out_of_service" if out_of_service else ("active" if status_bool else "inactive" if status_bool is False else None)
     loc_desc = row.get("locationDescription") or inner.get("locationDescription") or ""
+    # City-string → approximate state-centroid pin (no tracking API,
+    # no network call). ``geocode`` never raises; it returns ``None``
+    # when the string is unparseable or carries no US state code —
+    # ingest must never fail on a bad location string.
+    coords: tuple[float, float] | None
+    try:
+        coords = geocode(loc_desc) if loc_desc else None
+    except Exception:  # noqa: BLE001
+        coords = None
     return {
         "source_ref": str(inner.get("id") or row.get("id") or ""),
         "unit_number": str(inner.get("number") or inner.get("unitNumber") or row.get("truckNumber") or "").strip(),
@@ -60,11 +70,12 @@ def _project(row: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "odometer_miles": inner.get("currentMileage") or inner.get("odometer"),
         "assigned_driver_name": row.get("assignedDriverName") or inner.get("assignedDriverName"),
-        # No lat/lng in the paged envelope — only a human string. Store the
-        # string on `raw` so the fleet view can show it; coordinates come
-        # from a tracking endpoint we don't call read-only.
-        "last_lat": None,
-        "last_lng": None,
+        # No lat/lng in the paged envelope — only a human string. We
+        # parse it into a state-centroid pin (``geocode()`` in the
+        # sibling module); real coordinates would come from a tracking
+        # endpoint we don't call read-only.
+        "last_lat": coords[0] if coords else None,
+        "last_lng": coords[1] if coords else None,
         "last_seen_at": None,
         "location_description": loc_desc or None,
     }
