@@ -383,14 +383,28 @@ async def runs_page(
     rows = rows[:limit]
     items = []
     for r in rows:
-        rev = float(r.revenue_usd)
-        parts = [float(x) for x in (r.cost_fuel_usd, r.cost_driver_usd, r.cost_load_usd, r.cost_dispatch_usd)]
-        margin = rev - sum(parts)
+        # Real-data rows may lack revenue or any cost line (migration
+        # 0050 made the columns nullable). Only compute margin when
+        # every piece is actually there, so partial trips render as
+        # "no revenue data" / "no cost data" instead of a fabricated 0.
+        rev = float(r.revenue_usd) if r.revenue_usd is not None else None
+        parts: list[float | None] = [
+            float(x) if x is not None else None
+            for x in (r.cost_fuel_usd, r.cost_driver_usd, r.cost_load_usd, r.cost_dispatch_usd)
+        ]
+        if rev is not None and all(p is not None for p in parts):
+            margin_val = rev - sum(p or 0.0 for p in parts)
+            margin: float | None = round(margin_val, 2)
+            margin_pct: float | None = round(margin_val / rev * 100, 1) if rev else None
+        else:
+            margin = None
+            margin_pct = None
         items.append(RunRow(
             id=r.id, pickup_at=r.pickup_at.isoformat(), origin=f"{r.origin_city}, {r.origin_state}",
-            dest=f"{r.dest_city}, {r.dest_state}", equipment=r.equipment, miles=r.miles, revenue=round(rev, 2),
+            dest=f"{r.dest_city}, {r.dest_state}", equipment=r.equipment, miles=r.miles,
+            revenue=round(rev, 2) if rev is not None else None,
             cost_fuel=parts[0], cost_driver=parts[1], cost_load=parts[2], cost_dispatch=parts[3],
-            margin=round(margin, 2), margin_pct=round(margin / rev * 100, 1) if rev else None,
+            margin=margin, margin_pct=margin_pct,
         ))
     nxt = _enc(rows[-1].pickup_at, rows[-1].id) if more and rows else None
     return RunsPage(items=items, next_cursor=nxt, total=total)

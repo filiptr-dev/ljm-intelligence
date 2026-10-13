@@ -98,6 +98,11 @@ async def loadstop_ingest_tick(tenant_id: str = LJM_TENANT_ID) -> None:
                 await _run_one(sm, client, "contacts", _run_contacts)
                 await _run_one(sm, client, "loads", _run_loads)
                 await _run_one(sm, client, "rates", _run_rates)
+                # Trips = completed-trip history. Same LoadStop grids
+                # as ``loads``, promoted into ``freight_runs`` for the
+                # lanes-history page. Also folds in inbox rate-con rows
+                # that have a lane + rate (``source='inbox'``).
+                await _run_one(sm, client, "trips", _run_trips)
         except LoadstopAuthRequired as exc:
             LOG.warning("loadstop ingest aborted: %s", exc)
     finally:
@@ -153,3 +158,20 @@ async def _run_rates(session, client):
     from app.integrations.adapters.loadboard.loadstop.ingest.rates import ingest_rates
 
     return await ingest_rates(session, client)
+
+
+async def _run_trips(session, client):
+    """Promote completed LoadStop trips + eligible inbox rate-cons
+    into ``freight_runs``. See ``app.analysis.ingest_freight_runs``.
+
+    Return shape matches ``_record_run``'s expectation (``rows_in`` +
+    ``rows_upserted``) — ``rows_upserted = inserted + updated``.
+    """
+    from app.analysis.ingest_freight_runs import backfill_runs
+
+    totals = await backfill_runs(session, client)
+    rows_in = totals["loadstop"]["rows_in"] + totals["inbox"]["rows_in"]
+    upserted = sum(
+        totals[k]["inserted"] + totals[k]["updated"] for k in ("loadstop", "inbox")
+    )
+    return {"rows_in": rows_in, "rows_upserted": upserted}

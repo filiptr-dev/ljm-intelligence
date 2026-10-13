@@ -223,6 +223,10 @@ class FreightRun(TenantMixin, Base):
         BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=True
     )
     source: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Stable dedupe anchor from the upstream feed (``splitLoads:12345``,
+    # ``loads:98765``, ``inbox:<loads.id>``). Partial-unique on
+    # ``(tenant_id, source, source_ref)`` — see migration 0050.
+    source_ref: Mapped[str | None] = mapped_column(String(128))
     broker_name: Mapped[str | None] = mapped_column(String(255))
     broker_lead_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("leads.id", ondelete="SET NULL"))
     origin_city: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -233,16 +237,20 @@ class FreightRun(TenantMixin, Base):
     origin_lng: Mapped[float] = mapped_column(Numeric(9, 5), nullable=False)
     dest_lat: Mapped[float] = mapped_column(Numeric(8, 5), nullable=False)
     dest_lng: Mapped[float] = mapped_column(Numeric(9, 5), nullable=False)
-    miles: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Nullable from 0050 onward — a trip we hauled off a LoadStop grid
+    # may land without miles / costs / even revenue when the feed is
+    # thin. The lanes page coalesces NULLs to 0 at aggregate time and
+    # the UI labels partial rows honestly.
+    miles: Mapped[int | None] = mapped_column(Integer)
     deadhead_miles: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     equipment: Mapped[str | None] = mapped_column(String(32))
     pickup_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     delivery_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    revenue_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    cost_fuel_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    cost_driver_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    cost_load_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    cost_dispatch_usd: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    revenue_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    cost_fuel_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    cost_driver_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    cost_load_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
+    cost_dispatch_usd: Mapped[float | None] = mapped_column(Numeric(10, 2))
     # Which unit hauled it (0038). Nullable on purpose: history that predates the
     # fleet, or loads run on a partner carrier, simply have no truck.
     truck_id: Mapped[int | None] = mapped_column(
