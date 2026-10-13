@@ -19,11 +19,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from app.analysis.analysis_router import LeadNextStepOut
 from app.prospecting.broker_rank_service import (
     RankFilters,
     rank_brokers as svc_rank_brokers,
 )
-from app.analysis.analysis_router import LeadNextStepOut
 from app.prospecting.brokers_service import (
     ActivityCallEvent,
     ActivityEmailEvent,

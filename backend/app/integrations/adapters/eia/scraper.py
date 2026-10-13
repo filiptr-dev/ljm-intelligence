@@ -92,7 +92,7 @@ def _parse_latest(html: str) -> tuple[date, Decimal] | None:
         return None
     try:
         # EIA writes the two-digit year with a 2000 base ("26" → 2026).
-        week_of = datetime.strptime(dates[-1], "%m/%d/%y").date()
+        week_of = datetime.strptime(dates[-1], "%m/%d/%y").date()  # noqa: DTZ007 — date-only; .date() strips tz immediately
     except ValueError:
         return None
     return week_of, price

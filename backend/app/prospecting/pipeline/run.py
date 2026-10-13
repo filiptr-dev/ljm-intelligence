@@ -11,8 +11,8 @@ from typing import Literal
 
 import httpx
 from sqlalchemy import func, select, text, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.config import Settings

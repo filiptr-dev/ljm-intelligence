@@ -17,7 +17,6 @@ import logging
 from typing import Any
 
 from app.integrations.adapters.loadboard.agent_browser import AgentSource
-from app.integrations.adapters.loadboard.agent_browser.config import resolve as resolve_agent_browser
 from app.integrations.adapters.loadboard.base import ConnectionTest, RawLoad
 
 log = logging.getLogger(__name__)

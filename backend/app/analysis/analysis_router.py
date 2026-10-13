@@ -290,7 +290,7 @@ async def lead_ai_summary_endpoint(
         )
     except LeadNotFound:
         raise HTTPException(status_code=404, detail="lead not found") from None
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         # Belt-and-suspenders — the panel renders a Retry on every "unavailable"
         # status, so a surprise bug (e.g. legacy row shape, DB-level glitch) is
         # recoverable UX rather than a hard 500. Log with traceback so prod
@@ -299,7 +299,7 @@ async def lead_ai_summary_endpoint(
         return LeadAiSummaryOut(status="unavailable", ai_error=f"server_error:{type(exc).__name__}")
     try:
         return LeadAiSummaryOut(**r.__dict__)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logging.getLogger(__name__).exception("lead summary response shape error for %s", lead_id)
         return LeadAiSummaryOut(status="unavailable", ai_error=f"shape_error:{type(exc).__name__}")
 

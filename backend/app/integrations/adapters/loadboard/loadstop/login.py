@@ -230,7 +230,7 @@ async def perform_login(
             if parsed.get("success") is True:
                 cookies = {c.name: c.value for c in client.cookies.jar}
                 has_session = any(
-                    name.startswith(".AspNetCore.Identity") or name.startswith(".AspNet") or name.lower() == "abp.auth"
+                    name.startswith((".AspNetCore.Identity", ".AspNet")) or name.lower() == "abp.auth"
                     for name in cookies
                 )
                 if has_session:
