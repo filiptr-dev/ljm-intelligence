@@ -457,8 +457,24 @@ async def ai_draft_compose_endpoint(payload: AiDraftComposeIn) -> AiDraftOutMode
     return AiDraftOutModel(**draft.__dict__)
 
 
+class ChipFilterIn(BaseModel):
+    """Structured recipe the chip miner used to count — replayed by Ask so the
+    retrieved emails match the count the chip advertised. All fields optional;
+    unknown keys / wrong types are dropped server-side (``_sanitise_chip_filter``).
+    """
+
+    broker_domain: str | None = None
+    intent: str | None = None
+    sentiment_below: float | None = None
+    lane_from: str | None = None
+    lane_to: str | None = None
+    days: int | None = None
+    pending_only: bool | None = None
+
+
 class AskIn(BaseModel):
     question: constr(min_length=1, max_length=500)
+    chip: ChipFilterIn | None = None
 
 
 class AskCitationModel(BaseModel):
@@ -485,6 +501,10 @@ class AskOutModel(BaseModel):
 class SuggestionItem(BaseModel):
     text: str
     kind: str
+    # The structured recipe behind the chip's count. Replayed on click
+    # (POST /inbox/ask with ``chip``) so the retrieved emails match the
+    # count the chip shows — see ``service._sanitise_chip_filter``.
+    chip_filter: ChipFilterIn | None = None
 
 
 class SuggestionsOut(BaseModel):
@@ -514,7 +534,14 @@ async def ask_suggestions_endpoint(
     mb = _validate_mailbox(request, mailbox)
     items = await svc.suggest_questions(session, mailbox=mb)
     return SuggestionsOut(
-        suggestions=[SuggestionItem(text=s.text, kind=s.kind) for s in items],
+        suggestions=[
+            SuggestionItem(
+                text=s.text,
+                kind=s.kind,
+                chip_filter=ChipFilterIn(**s.chip_filter) if s.chip_filter else None,
+            )
+            for s in items
+        ],
         generated_at=datetime.now(UTC),
     )
 
@@ -532,7 +559,10 @@ async def ask_endpoint(
     ``ok=false`` with ``error`` naming the reason and ``answer`` a
     human-readable message, so the UI can always say *why*."""
     mb = _validate_mailbox(request, mailbox)
-    out = await svc.ask_question(session=session, question=payload.question, mailbox=mb)
+    chip = payload.chip.model_dump(exclude_none=True) if payload.chip else None
+    out = await svc.ask_question(
+        session=session, question=payload.question, mailbox=mb, chip_filter=chip,
+    )
     return AskOutModel(
         intent=out.intent, keywords=out.keywords,
         sentiment=out.sentiment, summary=out.summary,

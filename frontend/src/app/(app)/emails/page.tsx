@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import type { Intent } from "@/lib/ai/types"
 import * as inbox from "@/lib/api/inbox"
-import type { AskOut } from "@/lib/api/inbox"
+import type { AskOut, ChipFilter } from "@/lib/api/inbox"
 import { dateTime, money, pct } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -53,6 +53,22 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const page = Math.max(1, Number(sp.page) || 1)
   const mailboxes = await inbox.listMailboxes().catch(() => [])
   const suggestions = await inbox.suggestQuestions({ mailbox }).catch(() => [])
+  // A chip click carries its structured filter in the URL as `chip=<json>`
+  // (base64url-encoded). We replay it on `/inbox/ask` so the AI answers over
+  // the SAME rows the chip counted — otherwise the AI contradicts us
+  // ("the emails don't contain 6 complaints") when its keyword retrieval
+  // misses the chip's SQL recipe.
+  let chipFromUrl: ChipFilter | null = null
+  if (typeof sp.chip === "string" && sp.chip) {
+    try {
+      const json = Buffer.from(sp.chip, "base64url").toString("utf8")
+      const parsed = JSON.parse(json) as unknown
+      if (parsed && typeof parsed === "object") chipFromUrl = parsed as ChipFilter
+    } catch {
+      // Malformed chip = ignore; the question text still flows through as a
+      // free-text ask.
+    }
+  }
 
   // When the operator submits a question, hand it to the AI first. The
   // server runs Gemini over a bounded slice of real mail and returns
@@ -65,7 +81,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   let effectiveQ: string | undefined = q || undefined
   if (q && !intent) {
     try {
-      ask = await inbox.ask(q, { mailbox })
+      ask = await inbox.ask(q, { mailbox, chip: chipFromUrl })
     } catch {
       ask = {
         intent: null, keywords: [], sentiment: null, summary: "",
@@ -132,16 +148,26 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         </div>
         {suggestions.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {suggestions.map((s) => (
-              <Link
-                key={s.text}
-                href={`/emails?q=${encodeURIComponent(s.text)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ""}`}
-                className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
-                title={s.kind}
-              >
-                {s.text}
-              </Link>
-            ))}
+            {suggestions.map((s) => {
+              // Carry the chip's structured filter through the URL so the
+              // Ask layer retrieves the SAME rows the chip counted. Encoded
+              // as base64url JSON — short, URL-safe, no quoting pain.
+              const chipParam = s.chip_filter
+                ? `&chip=${encodeURIComponent(
+                    Buffer.from(JSON.stringify(s.chip_filter), "utf8").toString("base64url"),
+                  )}`
+                : ""
+              return (
+                <Link
+                  key={s.text}
+                  href={`/emails?q=${encodeURIComponent(s.text)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ""}${chipParam}`}
+                  className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
+                  title={s.kind}
+                >
+                  {s.text}
+                </Link>
+              )
+            })}
           </div>
         ) : null}
         <button className={cn(buttonVariants(), "font-semibold")}>Ask</button>

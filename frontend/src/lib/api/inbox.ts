@@ -220,14 +220,19 @@ export type AskOut = {
  * list uses to narrow down. Never 500s — ``ok=false`` + ``error``
  * tells the UI exactly why we don't have a real answer.
  */
+/** Structured chip recipe — the exact filter a suggested chip was built from.
+ * When the operator clicks a chip we pass it through to `/inbox/ask` so the
+ * retrieved emails match the count the chip advertised. */
+export type ChipFilter = NonNullable<components["schemas"]["ChipFilterIn"]>
+
 export async function ask(
   question: string,
-  opts: { mailbox?: string } = {},
+  opts: { mailbox?: string; chip?: ChipFilter | null } = {},
   signal?: AbortSignal,
 ): Promise<AskOut> {
   const res = await api.POST("/inbox/ask", {
     params: { query: { mailbox: opts.mailbox } },
-    body: { question },
+    body: { question, chip: opts.chip ?? undefined },
     signal,
   })
   return unwrap(res, "/inbox/ask") as AskOut

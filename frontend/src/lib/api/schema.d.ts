@@ -2672,6 +2672,7 @@ export interface components {
         AskIn: {
             /** Question */
             question: string;
+            chip?: components["schemas"]["ChipFilterIn"] | null;
         };
         /** AskOutModel */
         AskOutModel: {
@@ -3190,6 +3191,28 @@ export interface components {
             /** Tiles */
             tiles: components["schemas"]["KpiBlockOut"][];
             funnel: components["schemas"]["FunnelOut"];
+        };
+        /**
+         * ChipFilterIn
+         * @description Structured recipe the chip miner used to count — replayed by Ask so the
+         *     retrieved emails match the count the chip advertised. All fields optional;
+         *     unknown keys / wrong types are dropped server-side (``_sanitise_chip_filter``).
+         */
+        ChipFilterIn: {
+            /** Broker Domain */
+            broker_domain?: string | null;
+            /** Intent */
+            intent?: string | null;
+            /** Sentiment Below */
+            sentiment_below?: number | null;
+            /** Lane From */
+            lane_from?: string | null;
+            /** Lane To */
+            lane_to?: string | null;
+            /** Days */
+            days?: number | null;
+            /** Pending Only */
+            pending_only?: boolean | null;
         };
         /** CityEntity */
         CityEntity: {
@@ -6204,6 +6227,7 @@ export interface components {
             text: string;
             /** Kind */
             kind: string;
+            chip_filter?: components["schemas"]["ChipFilterIn"] | null;
         };
         /** SuggestionList */
         SuggestionList: {

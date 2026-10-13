@@ -8,7 +8,7 @@ dataclasses/dicts so the router stays a dumb serialiser.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -889,8 +889,41 @@ _ASK_CTX_DAYS = 120
 _ASK_SNIPPET_CHARS = 220
 
 
+def _sanitise_chip_filter(cf: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Keep only the known keys from a chip's structured recipe.
+
+    The chip filter arrives from the client (chip href → query string), so
+    treat it like untrusted input: whitelist keys, coerce types, cap sizes.
+    An empty dict after sanitising means "no chip" — return None so the
+    retrieval falls back to the free-text keyword path.
+    """
+    if not isinstance(cf, dict):
+        return None
+    out: dict[str, Any] = {}
+    bd = cf.get("broker_domain")
+    if isinstance(bd, str) and 1 < len(bd) <= 253 and "@" not in bd:
+        out["broker_domain"] = bd.lower().strip()
+    it = cf.get("intent")
+    if isinstance(it, str) and it in _ASK_INTENTS:
+        out["intent"] = it
+    sb = cf.get("sentiment_below")
+    if isinstance(sb, int | float) and -1.0 <= float(sb) <= 1.0:
+        out["sentiment_below"] = float(sb)
+    for k in ("lane_from", "lane_to"):
+        v = cf.get(k)
+        if isinstance(v, str) and 1 <= len(v) <= 120:
+            out[k] = v.strip()
+    d = cf.get("days")
+    if isinstance(d, int) and 1 <= d <= 365:
+        out["days"] = d
+    if cf.get("pending_only") is True:
+        out["pending_only"] = True
+    return out or None
+
+
 async def _fetch_ask_context(
     session: AsyncSession, *, keywords: list[str], mailbox: str | None = None,
+    chip_filter: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Pull a bounded slice of recent mail+insights for the AI prompt.
 
@@ -898,16 +931,37 @@ async def _fetch_ask_context(
     always about what *they* said. If any keywords are supplied we try to
     bias toward subjects/bodies containing them; otherwise we fall back
     to the most recent window.
+
+    When ``chip_filter`` is provided (the structured recipe behind a
+    suggested chip) we replay the miner's SQL deterministically — same
+    sender domain, same intent/sentiment/lane, same recency window — so
+    the retrieved emails match the count the chip advertised. Without
+    this, the AI often answered a question like "Review the 6 complaints
+    from Epeslogistics" against a keyword LIKE on "epeslogistics" that
+    missed `from@epeslogistics.com` entirely and had no intent filter,
+    producing the "only 4 emails, two rate confirmations" contradiction.
     """
     from datetime import timedelta
 
     from sqlalchemy import and_, func, or_, select
 
-    from app.inbox.models import MailMessage, MessageInsight
+    from app.inbox.models import MailMessage, MessageInsight, NoReplyTracker
 
     m = MailMessage.__table__.c
     j = MessageInsight.__table__.c
-    cutoff = datetime.now(UTC) - timedelta(days=_ASK_CTX_DAYS)
+    cf = chip_filter or {}
+    days = int(cf.get("days") or _ASK_CTX_DAYS)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+
+    # When the chip pins an intent / sentiment / lane we need the insight row,
+    # so switch to an inner join. Otherwise keep the legacy outer join so a
+    # free-text question still sees messages that lack an insight row.
+    needs_insight = any(
+        cf.get(k) is not None for k in ("intent", "sentiment_below", "lane_from", "lane_to")
+    )
+    join = (
+        MailMessage.__table__.join if needs_insight else MailMessage.__table__.outerjoin
+    )
 
     stmt = (
         select(
@@ -915,7 +969,7 @@ async def _fetch_ask_context(
             j.intent, j.sentiment, j.evidence, j.lane_from, j.lane_to, j.rate_usd,
         )
         .select_from(
-            MailMessage.__table__.outerjoin(
+            join(
                 MessageInsight.__table__,
                 and_(
                     j.mailbox == m.mailbox,
@@ -925,14 +979,59 @@ async def _fetch_ask_context(
             )
         )
         .where(m.sent_at >= cutoff)
-        .where(m.from_addr != m.mailbox)  # inbound only
         .order_by(m.sent_at.desc())
         .limit(_ASK_CTX_ROWS * 3)  # over-fetch, then filter in Python
     )
     if mailbox:
         stmt = stmt.where(m.mailbox == mailbox)
 
-    if keywords:
+    # Inbound only — unless the chip is specifically about unanswered threads,
+    # where the "last message" is ours and dropping outbound would hide the
+    # whole thread.
+    if not cf.get("pending_only"):
+        stmt = stmt.where(m.from_addr != m.mailbox)
+
+    # Chip-driven exact filters. Keep them additive on top of the base shape.
+    broker_domain = cf.get("broker_domain")
+    if broker_domain and not cf.get("pending_only"):
+        # Match on sender domain. For `pending_only` chips we filter by the
+        # tracker's recipient domain instead (see below) because many
+        # unanswered threads are first-contacts — no inbound mail at all —
+        # and a sender-domain filter would wipe them out.
+        stmt = stmt.where(func.lower(m.email_lower).like(f"%@{broker_domain.lower()}"))
+    chip_intent = cf.get("intent")
+    if chip_intent:
+        stmt = stmt.where(j.intent == chip_intent)
+    sentiment_below = cf.get("sentiment_below")
+    if sentiment_below is not None:
+        stmt = stmt.where(j.sentiment < float(sentiment_below))
+    lane_from = cf.get("lane_from")
+    if lane_from:
+        stmt = stmt.where(j.lane_from == lane_from)
+    lane_to = cf.get("lane_to")
+    if lane_to:
+        stmt = stmt.where(j.lane_to == lane_to)
+    if cf.get("pending_only"):
+        # NoReplyTracker rows are DELETED when the broker replies, so
+        # "pending" is simply membership in the table. Filter the tracker
+        # itself by broker-domain here so a chip about broker X only pulls
+        # threads addressed to X — the message-side domain filter above is
+        # bypassed because many unanswered threads have NO inbound mail.
+        nr = NoReplyTracker.__table__.c
+        pending = (
+            select(nr.thread_id)
+            .where(nr.tenant_id == m.tenant_id)
+            .where(nr.mailbox == m.mailbox)
+        )
+        if broker_domain:
+            pending = pending.where(
+                func.lower(nr.to_email_normalized).like(f"%@{broker_domain.lower()}")
+            )
+        stmt = stmt.where(m.thread_id.in_(pending))
+
+    if keywords and not cf:
+        # Only apply keyword LIKE when there is no chip-driven recipe — a
+        # structured filter is always sharper than a bag of words.
         clauses = []
         for kw in keywords[:3]:
             like = f"%{kw.lower()}%"
@@ -943,7 +1042,11 @@ async def _fetch_ask_context(
     rows = list((await session.execute(stmt)).all())
     # If the keyword filter zeroed the result, drop it and retry — a blank
     # context is worse than a loosely-related one.
-    if not rows and keywords:
+    # If a free-text keyword filter zeroed the result, drop it and retry — a
+    # blank context is worse than a loosely-related one. Chip-driven filters
+    # are intentionally NOT loosened: a chip saying "6 complaints from Epes"
+    # must only answer against those exact rows, even if the set is small.
+    if not rows and keywords and not cf:
         fallback = (
             select(
                 m.thread_id, m.subject, m.body_text, m.sent_at, m.from_addr,
@@ -1021,6 +1124,7 @@ async def ask_question(
     session: AsyncSession | None = None,
     provider: Any | None = None,
     mailbox: str | None = None,
+    chip_filter: dict[str, Any] | None = None,
 ) -> AskOut:
     """Answer a natural-language inbox question with real AI over real mail.
 
@@ -1077,6 +1181,7 @@ async def ask_question(
     try:
         context_rows = await _fetch_ask_context(
             session, keywords=_naive_keywords(q), mailbox=mailbox,
+            chip_filter=_sanitise_chip_filter(chip_filter),
         )
     except Exception as exc:  # noqa: BLE001
         _l.warning("ask_question: context fetch failed: %s", type(exc).__name__, exc_info=True)
@@ -1240,8 +1345,23 @@ async def ask_question(
 
 @dataclass
 class Suggestion:
+    """One chip. ``text`` is the human-visible string; ``chip_filter`` is the
+    structured, deterministic recipe the miner used to count — the Ask layer
+    replays it so the retrieved emails match the count the chip shows.
+
+    Keys honoured by :func:`_fetch_ask_context`:
+
+    * ``broker_domain`` — sender domain substring (``m.email_lower`` endswith ``@domain``).
+    * ``intent`` — one of :data:`_ASK_INTENTS`; forces inner-join + ``j.intent =``.
+    * ``sentiment_below`` — numeric upper bound on ``j.sentiment``.
+    * ``days`` — recency window in days (overrides the default 120d).
+    * ``lane_from`` / ``lane_to`` — exact-match lane filter for rate chips.
+    * ``pending_only`` — restrict to open threads in the no-reply tracker.
+    """
+
     text: str
     kind: str
+    chip_filter: dict[str, Any] = field(default_factory=dict)
 
 
 # In-process TTL cache. v1 scope: no Redis, no cross-process coordination.
@@ -1420,6 +1540,7 @@ async def _mine_unanswered(session: AsyncSession, *, mailbox: str | None) -> lis
         out.append(Suggestion(
             text=f"Which {n} thread{'s' if n != 1 else ''} with {broker}{when} {'are' if n != 1 else 'is'} still unanswered?",
             kind="unanswered",
+            chip_filter={"broker_domain": domain, "pending_only": True, "days": 30},
         ))
     return out
 
@@ -1505,12 +1626,19 @@ async def _mine_insights_by_broker(
 
     ranked = sorted(by_dom.items(), key=lambda kv: kv[1]["n"], reverse=True)
     out: list[Suggestion] = []
-    for _dom, info in ranked[:limit]:
+    for dom, info in ranked[:limit]:
         if info["n"] < 1:
             continue
         broker = _broker_label(info["email"], info["broker_name"])
         when = f" since {_fmt_date_short(info['earliest'])}" if info["earliest"] else ""
-        out.append(Suggestion(text=build_text(info["n"], broker, when), kind=kind))
+        chip_filter: dict[str, Any] = {"broker_domain": dom, "days": days}
+        if intent:
+            chip_filter["intent"] = intent
+        if sentiment_below is not None:
+            chip_filter["sentiment_below"] = sentiment_below
+        out.append(Suggestion(
+            text=build_text(info["n"], broker, when), kind=kind, chip_filter=chip_filter,
+        ))
     return out
 
 
@@ -1559,6 +1687,12 @@ async def _mine_rate_hotspot(session: AsyncSession, *, mailbox: str | None) -> l
     return [Suggestion(
         text=f"Show the {row.n} rate request{'s' if row.n != 1 else ''} on {row.lane_from} → {row.lane_to} this week.",
         kind="rate_hotspot",
+        chip_filter={
+            "intent": "rate_request",
+            "lane_from": row.lane_from,
+            "lane_to": row.lane_to,
+            "days": 14,
+        },
     )]
 
 
