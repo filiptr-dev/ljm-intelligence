@@ -1418,7 +1418,7 @@ async def _mine_unanswered(session: AsyncSession, *, mailbox: str | None) -> lis
         oldest = min((_as_utc(r.we_sent_at) for r in group if r.we_sent_at), default=None)
         when = f" since {_fmt_date_short(oldest)}" if oldest else ""
         out.append(Suggestion(
-            text=f"Which {n} thread{'s' if n != 1 else ''} with {broker}{when} are still unanswered?",
+            text=f"Which {n} thread{'s' if n != 1 else ''} with {broker}{when} {'are' if n != 1 else 'is'} still unanswered?",
             kind="unanswered",
         ))
     return out
