@@ -107,31 +107,114 @@ async def write_fmcsa_cache(s: AsyncSession, dot: str, payload: dict) -> None:
     await s.commit()
 
 
-async def live_fmcsa_fetch(dot: str) -> dict | None:
-    """One snapshot GET. Returns the raw payload or None on any failure.
+def _soda_row_to_snapshot_payload(row: dict) -> dict:
+    """Wrap a SODA ``az4n-8mr2`` row in the ``content.carrier`` shape that
+    ``extract_snapshot_fields`` already understands.
 
-    Reuses the exact URL template from the existing FMCSA adapter so there
-    is one place that calls the public endpoint.
+    Kept here (next to the live fetch) so there is one translation point
+    between the SODA schema and the vetting domain shape. SODA ships
+    ``snake_case`` field names; we re-key only what the domain cares about
+    and leave the raw row under ``_soda_raw`` for future audit.
     """
+    def _nz(v):
+        return v if (v is not None and str(v).strip() != "") else None
+
+    carrier = {
+        "legalName": _nz(row.get("legal_name")),
+        "dbaName": _nz(row.get("dba_name")),
+        # SODA ships status_code as "A" (active) / "I" (inactive).
+        # The az4n-8mr2 Company Census does NOT carry a revoked bit; a
+        # separate authority dataset would be needed. We never fabricate
+        # "A" — if the field is missing/blank, extract_snapshot_fields
+        # yields authority_status=None which the rule table flags as
+        # authority_unverified (caution), by design.
+        "statusCode": _nz(row.get("status_code")),
+        "addDate": _nz(row.get("add_date")),
+        # Census file has no out-of-service date column; leave unknown
+        # rather than invent one.
+        "oosDate": None,
+        "telephone": _nz(row.get("phone")),
+        "emailAddress": _nz(row.get("email_address")),
+        "dotNumber": _nz(row.get("dot_number")),
+        "docket1prefix": _nz(row.get("docket1prefix")),
+        "docket1": _nz(row.get("docket1")),
+    }
+    return {"content": {"carrier": carrier}, "_soda": {"dataset": "az4n-8mr2", "row": row}}
+
+
+async def _soda_get(params: dict) -> list[dict]:
+    """One keyless SODA GET against ``data.transportation.gov`` az4n-8mr2.
+
+    Bounded 5s read, 2s connect — a user is watching a spinner. Optional
+    ``FMCSA_APP_TOKEN`` only raises the throttle ceiling; never required.
+    """
+    import os
+
     import httpx
 
-    from app.integrations.adapters.enrichment.fmcsa import SNAPSHOT_URL_TMPL
-
+    url = "https://data.transportation.gov/resource/az4n-8mr2.json"
     headers = {"User-Agent": "LJM-Intelligence-Bot/1.0 (+https://ljminternational.com)"}
-    url = SNAPSHOT_URL_TMPL.format(dot=dot)
-    # Short budget on the interactive path — a user is watching a spinner.
-    # Prod audit hung 15s before 404; 5s connect+read keeps the fallback
-    # (cache / lead row) warm instead of blocking the request.
+    token = os.environ.get("FMCSA_APP_TOKEN") or ""
+    if token:
+        headers["X-App-Token"] = token
     timeout = httpx.Timeout(connect=2.0, read=5.0, write=5.0, pool=5.0)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await client.get(url, params=params, headers=headers)
             if resp.status_code != 200:
-                return None
-            return resp.json()
+                return []
+            data = resp.json()
+            return data if isinstance(data, list) else []
     except Exception as exc:  # noqa: BLE001
-        log.info("vetting: live FMCSA fetch failed for dot=%s: %s", dot, exc)
+        log.info("vetting: SODA fetch failed params=%s: %s", params, exc)
+        return []
+
+
+async def live_fmcsa_fetch(dot: str) -> dict | None:
+    """Fetch the FMCSA Company Census row for a DOT via SODA (keyless).
+
+    Replaces the 2026-10 SAFER snapshot path (``mobile.fmcsa.dot.gov/qc``)
+    which now 403s. SODA ``az4n-8mr2`` is the public, licence-clean,
+    keyless FMCSA census — same source the prospecting pipeline already
+    uses (see ``integrations/adapters/enrichment/fmcsa.py``).
+
+    Returns a payload shaped as ``{"content": {"carrier": {...}}}`` so
+    ``extract_snapshot_fields`` keeps working unchanged. Never fabricates
+    an authority_status; missing fields stay ``None``.
+    """
+    if not dot or not str(dot).strip().isdigit():
         return None
+    rows = await _soda_get(
+        {
+            "$select": "dot_number,legal_name,dba_name,status_code,add_date,phone,email_address,docket1prefix,docket1",
+            "$where": f"dot_number={int(str(dot).strip())}",
+            "$limit": "1",
+        }
+    )
+    if not rows:
+        return None
+    return _soda_row_to_snapshot_payload(rows[0])
+
+
+async def live_fmcsa_fetch_by_mc(mc: str) -> dict | None:
+    """SODA lookup by MC docket (``docket1prefix='MC' AND docket1=<mc>``).
+
+    Used when the caller has an MC but no DOT in local leads. On success
+    the returned payload embeds ``dotNumber`` so the service can key the
+    cache row by DOT (unchanged cache schema).
+    """
+    if not mc or not str(mc).isdigit():
+        return None
+    rows = await _soda_get(
+        {
+            "$select": "dot_number,legal_name,dba_name,status_code,add_date,phone,email_address,docket1prefix,docket1",
+            "$where": f"docket1prefix='MC' AND docket1='{str(mc).strip()}'",
+            "$limit": "1",
+        }
+    )
+    if not rows:
+        return None
+    return _soda_row_to_snapshot_payload(rows[0])
 
 
 async def prior_contact(s: AsyncSession, lead_id: str) -> PriorContact:

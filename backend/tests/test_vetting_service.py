@@ -303,9 +303,16 @@ async def test_mc_prefix_is_honoured_even_for_8_digit_numbers(
         # Should never be called — no DOT to look up, lead fallback takes over.
         raise AssertionError(f"live called with dot={dot}; should have used lead fallback")
 
+    async def _dead_live_mc(mc):
+        # SODA-by-MC is bypassed in this test — the goal is to prove the
+        # explicit MC- prefix routes to the MC leads column, not to
+        # exercise the SODA path. Return None so the lead fallback runs.
+        return None
+
     from app.vetting import repository as vrepo
 
     monkeypatch.setattr(vrepo, "live_fmcsa_fetch", _dead_live)
+    monkeypatch.setattr(vrepo, "live_fmcsa_fetch_by_mc", _dead_live_mc)
     r = await client.get("/vetting/MC-50975720")
     assert r.status_code == 200, r.text
     body = r.json()

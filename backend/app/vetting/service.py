@@ -101,6 +101,26 @@ async def _lookup_snapshot(
         if lead and lead.dot:
             dot = str(lead.dot)
 
+    if not dot and mc:
+        # Still no DOT after the leads lookup — try FMCSA SODA directly by
+        # MC docket. This is the keyless public endpoint, so it's safe to
+        # call on the interactive path (bounded 5s read in repo._soda_get).
+        soda_payload = await repo.live_fmcsa_fetch_by_mc(mc)
+        if soda_payload:
+            carrier = (soda_payload.get("content") or {}).get("carrier") or {}
+            dot_from_soda = carrier.get("dotNumber")
+            if dot_from_soda:
+                dot = str(dot_from_soda)
+                await repo.write_fmcsa_cache(s, dot, soda_payload)
+                snap = repo.extract_snapshot_fields(soda_payload, mc=mc, dot=dot)
+                evidence_url = SNAPSHOT_URL_TMPL.format(dot=dot)
+                return (
+                    replace(snap, source="fmcsa_live"),
+                    evidence_url,
+                    False,
+                    datetime.now(UTC),
+                )
+
     if not dot:
         # No DOT — but if we have a lead on file (matched by MC), use it as
         # a stale snapshot. Nothing to query, so no upstream call.
@@ -111,7 +131,7 @@ async def _lookup_snapshot(
                 True,
                 _lead_as_of(lead),
             )
-        raise FmcsaUnreachableError("no DOT to look up (MC not in local leads)")
+        raise FmcsaUnreachableError("no DOT to look up (MC not in local leads or SODA)")
 
     cached_payload, cached_at = await repo.read_fmcsa_cache(s, dot)
     now = datetime.now(UTC)
