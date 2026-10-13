@@ -24,6 +24,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import create_engine, create_sessionmaker
 from app.inbox.models import MailMessage, NoReplyTracker
+from app.integrations.adapters.email.credentials import ensure_vault_primed
 from app.integrations.adapters.email.mailbox import GmailMailbox
 from app.shared.db import uow
 from app.shared.orm import LJM_TENANT_ID
@@ -32,15 +33,17 @@ from app.shared.tenant import TenantId
 
 async def _main(dry_run: bool) -> None:
     settings = get_settings()
-    mailbox_client = GmailMailbox(settings)
+    # Built after the vault is primed (GmailMailbox resolves its SA at init).
+    mailbox_client: GmailMailbox | None = None
     services: dict[str, object] = {}
 
     def _gmail_thread_id(mailbox: str, message_id: str) -> str | None:
         svc = services.get(mailbox)
         if svc is None:
+            assert mailbox_client is not None
             svc = services[mailbox] = mailbox_client._service(mailbox)
         if svc is None:
-            return None
+            raise RuntimeError(f"no Gmail service for {mailbox}")
         resp = (
             svc.users()  # type: ignore[attr-defined]
             .messages()
@@ -53,6 +56,8 @@ async def _main(dry_run: bool) -> None:
     updated = skipped = failed = 0
     try:
         sm = create_sessionmaker(engine)
+        await ensure_vault_primed(sm)
+        mailbox_client = GmailMailbox(settings)
         async with uow(sm, TenantId(LJM_TENANT_ID)) as session:
             rows = (
                 await session.execute(
