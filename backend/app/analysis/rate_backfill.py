@@ -210,14 +210,23 @@ async def _upsert_load_from_extracted(
 
 
 async def backfill_subject_rates(
-    session: AsyncSession, *, provider: Any = None, ai_cap: int = AI_PER_RUN_CAP
+    session: AsyncSession,
+    *,
+    provider: Any = None,
+    ai_cap: int = AI_PER_RUN_CAP,
+    ai_min_interval_s: float = 2.0,
 ) -> BackfillStats:
     """Fill ``derived_*`` on every eligible row in one pass.
 
     * Eligibility: ``derived_source IS NULL`` AND ``intent IN LOAD_INTENTS``.
     * AI fallback: only when the deterministic pass misses the lane AND
-      a provider was passed in. Capped at ``ai_cap`` calls per run.
+      a provider was passed in. Capped at ``ai_cap`` calls per run AND
+      throttled to one call every ``ai_min_interval_s`` seconds. The whole
+      AI loop stops on the first ``429`` / rate-limit signal so the live
+      app's AI budget is never starved by this maintenance job.
     """
+    import asyncio
+    import time
     stats = BackfillStats()
     rows = (
         await session.execute(
@@ -236,16 +245,33 @@ async def backfill_subject_rates(
     stats.insights_scanned = len(rows)
 
     ai_calls = 0
+    ai_disabled = False
+    last_ai_at = 0.0
     for ins, m in rows:
         ex = extract_from_message(m.subject, m.body_text)
         if (
             not ex.has_lane
             and provider is not None
+            and not ai_disabled
             and ai_calls < ai_cap
             and (ins.intent in LOAD_INTENTS)
         ):
-            ai_ex = await ai_extract_from_message(provider, m.subject, m.body_text)
+            # Throttle: ≥ ai_min_interval_s between calls.
+            now = time.monotonic()
+            wait = ai_min_interval_s - (now - last_ai_at)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                ai_ex = await ai_extract_from_message(provider, m.subject, m.body_text)
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc).lower()
+                if "429" in msg or "rate" in msg or "quota" in msg:
+                    log.warning("rate-backfill: AI 429/quota — stopping AI loop for the rest of this run")
+                    ai_disabled = True
+                    continue
+                raise
             ai_calls += 1
+            last_ai_at = time.monotonic()
             if ai_ex is not None and (ai_ex.has_lane or ai_ex.rate_usd is not None):
                 ex = ai_ex
                 stats.insights_filled_by_ai += 1
@@ -308,17 +334,32 @@ async def backfill_subject_rates(
 # ---- CLI entry point ------------------------------------------------------
 
 
-async def _run_cli(tenant_id: str | None) -> None:
-    """``python -m app.analysis.rate_backfill`` entry point."""
+async def _run_cli(tenant_id: str | None, *, with_ai: bool = False) -> None:
+    """``python -m app.analysis.rate_backfill`` entry point.
+
+    Default: deterministic-only (no provider passed). ``--with-ai`` opts the
+    run back into the AI fallback with the throttle + 429 kill-switch active.
+    The default was flipped after a background run of this job starved the
+    live Ask / draft paths of their AI budget (Gemini 429'd for hours).
+    """
     from app.config import get_settings
     from app.db import create_engine, create_sessionmaker
 
     settings = get_settings()
     engine = create_engine(settings)
     sm = create_sessionmaker(engine)
+    provider: Any = None
+    if with_ai:
+        try:
+            from app.integrations.adapters.ai.provider import get_for
+
+            provider = get_for("inbox_draft_reply", settings=settings)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("rate-backfill: provider resolve failed, running deterministic-only: %s", exc)
+            provider = None
     try:
         async with sm() as session:
-            stats = await backfill_subject_rates(session)
+            stats = await backfill_subject_rates(session, provider=provider)
         print(
             f"rate-backfill ok: scanned={stats.insights_scanned} "
             f"filled={stats.insights_filled} ai={stats.insights_filled_by_ai} "
@@ -337,5 +378,11 @@ if __name__ == "__main__":
         description="Backfill derived rate/lane/order from mail subjects + body."
     )
     parser.add_argument("--tenant", default=None, help="Tenant id (default: 'default')")
+    parser.add_argument(
+        "--with-ai",
+        action="store_true",
+        help="Enable AI fallback for lane extraction (throttled, 429-stop). "
+             "Default off so the live app's AI budget is never starved.",
+    )
     args = parser.parse_args()
-    asyncio.run(_run_cli(args.tenant))
+    asyncio.run(_run_cli(args.tenant, with_ai=args.with_ai))
