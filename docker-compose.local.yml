@@ -50,16 +50,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
+      # .env.local-docker is the single local secrets file: it carries
+      # CRON_SECRET (same value as backend/.env — keep them in sync).
+      # The frontend only needs CRON_SECRET to sign "Start now" POSTs;
+      # it must NEVER see backend/.env (which holds GEMINI_API_KEY,
+      # GMAIL_SA_JSON, TENANT_CRED_KEY, load-board passwords, etc.).
       - .env.local-docker
-      # backend/.env carries CRON_SECRET (same source the `api` service reads
-      # from above). The frontend's "Start now" POST signs itself with
-      # CRON_SECRET and the api compares them — they MUST come from the same
-      # file. The previous `CRON_SECRET: "${CRON_SECRET:-}"` override under
-      # `environment:` silently blanked the value whenever compose ran without
-      # that shell var exported, which is why Start now returned
-      # "invalid cron secret". Dropping the override + reading backend/.env
-      # keeps the two services in lockstep by construction.
-      - backend/.env
     environment:
       # API_URL is the server-side base URL read by client.ts and the proxy/login
       # BFF routes (process.env.API_URL || process.env.NEXT_PUBLIC_API_URL).
