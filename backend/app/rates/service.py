@@ -89,7 +89,10 @@ async def quote_lane(session: AsyncSession, body: RateQuoteIn) -> RateQuoteOut:
     evidence: list[str] = []
     evidence.append(f"Great-circle miles: {gc:.0f} · highway factor {domain.HIGHWAY_FACTOR} → {hw} mi")
     if diesel is None:
-        evidence.append("Diesel: not configured — add an EIA API key in Settings.")
+        evidence.append(
+            "Diesel: no cached row yet — the weekly EIA scrape (Mondays 10:00 UTC, "
+            "keyless) hasn't populated this PADD. Band is a fuel-free fallback until it lands."
+        )
     else:
         tag = " (stale)" if diesel_stale else ""
         fb = " (fallback PADD)" if diesel.fallback_padd else ""
