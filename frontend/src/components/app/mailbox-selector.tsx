@@ -38,6 +38,31 @@ export function MailboxSelector({ options }: { options: MailboxOption[] }) {
 
   const shortLabel = (addr: string) => addr.split("@")[0] || addr
 
+  // Pill row is readable up to ~8 mailboxes; once the real allowlist opens
+  // to all 31 LJM inboxes it wraps into a wall of chips that eats the whole
+  // page. Switch to a native select at that threshold — same ?mailbox= param,
+  // same behavior, just denser.
+  const USE_SELECT_FROM = 8
+  if (options.length > USE_SELECT_FROM) {
+    return (
+      <div className="mb-3 flex items-center gap-2 rounded-sm border border-border bg-card p-1 text-sm">
+        <span className="px-2 text-xs uppercase tracking-wide text-muted-foreground">Inbox:</span>
+        <select
+          value={current}
+          onChange={(e) => update(e.target.value || null)}
+          className="rounded-sm bg-transparent px-2 py-1 outline-none"
+        >
+          <option value="">All ({options.length})</option>
+          {options.map((o) => (
+            <option key={o.address} value={o.address}>
+              {o.address}
+            </option>
+          ))}
+        </select>
+      </div>
+    )
+  }
+
   return (
     <div className="mb-3 flex flex-wrap items-center gap-1 rounded-sm border border-border bg-card p-1 text-sm">
       <span className="px-2 text-xs uppercase tracking-wide text-muted-foreground">Inbox:</span>
