@@ -510,7 +510,15 @@ async def triage_message(session: AsyncSession, msg: RawMessage) -> TriageOutcom
     await _upsert_load_from_offer(session, msg, outcome)
     await _maybe_extract_contact(session, msg, outcome.broker_name)
     await _update_no_reply(session, msg)
-    await _apply_load_extract(session, msg, outcome)
+    try:
+        await _apply_load_extract(session, msg, outcome)
+    except Exception:
+        log.warning(
+            "_apply_load_extract failed for mailbox=%r message_id=%r — skipping derived fill",
+            msg.mailbox,
+            msg.message_id,
+            exc_info=True,
+        )
     return outcome
 
 
@@ -621,8 +629,16 @@ async def _apply_load_extract(
                 broker_lead_id=broker_lead_id,
                 dedupe_group_hash=gh,
                 derived_rate_usd=ex.rate_usd,
-                derived_origin=f"{ex.origin_city}, {ex.origin_state}",
-                derived_dest=f"{ex.dest_city}, {ex.dest_state}",
+                derived_origin=(
+                    f"{ex.origin_city}, {ex.origin_state}"
+                    if ex.origin_city and ex.origin_state
+                    else ex.origin_state or None
+                ),
+                derived_dest=(
+                    f"{ex.dest_city}, {ex.dest_state}"
+                    if ex.dest_city and ex.dest_state
+                    else ex.dest_state or None
+                ),
             )
         )
 
