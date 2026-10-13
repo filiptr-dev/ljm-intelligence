@@ -21,16 +21,18 @@ import { Label } from "@/components/ui/label"
 import type { EmailPurpose, OutreachDraft, OutreachTone } from "@/lib/ai/types"
 import type { Segment } from "@/lib/analytics"
 import { PURPOSE_LABEL, type Recipient } from "@/lib/campaigns/types"
-import { LEAD_KIND_LABEL } from "@/lib/data/types"
+import { LEAD_KIND_LABEL, type Lead } from "@/lib/data/types"
 import { nowMs } from "@/lib/use-now"
 import { cn } from "@/lib/utils"
 import { streamInto, type WriteStyle } from "./ai-writer"
 import type { ContactOption } from "./email-composer"
 import { DesignFields, MessageFields, PreviewPanel, Step } from "./email-builder-parts"
 import { renderTemplate } from "./email-preview"
-import { useBackendLeads } from "@/lib/backend-leads"
+import { backendLeadToFrontend } from "@/lib/backend-leads"
+import type { BackendLead } from "@/lib/backend"
+import { api } from "@/lib/api/client"
 import { DEFAULT_DESIGN, toRecipient, useEngine, type EmailDesign } from "./engine"
-import type { EmailSendAdapter } from "@/lib/api/email-send"
+import { describeSendFailure, type EmailSendAdapter } from "@/lib/api/email-send"
 import { rewrite as aiRewrite, aiDraftCompose } from "@/lib/api/inbox"
 import { Segmented } from "./segmented"
 import { RegionTag, SegmentBadge } from "./ui"
@@ -113,23 +115,48 @@ export function SingleEmailBuilder({
 }: SingleEmailBuilderProps) {
   const router = useRouter()
   const { sendEmail } = useEngine()
-  const { real: realLeads } = useBackendLeads(200)
 
   // Fake per-session `liveLeads` are gone (plan 2026-10-06); recipient picker
   // shows the already-synthesised recipient (from `?to=…`), real backend
   // leads, and the existing contacts list.
+  // Server-side search: the old 200-row preload made only 200 of ~11k leads
+  // findable. Debounced so we don't hit /leads on every keystroke.
+  const [q, setQ] = React.useState("")
+  const [searchLeads, setSearchLeads] = React.useState<Lead[]>([])
+  React.useEffect(() => {
+    const term = q.trim()
+    const t = setTimeout(async () => {
+      try {
+        const { data, response } = await api.GET("/leads", {
+          params: { query: { limit: term ? 25 : 200, ...(term ? { q: term } : {}) } },
+        })
+        if (!response.ok || !data) return
+        const fresh = (data.items ?? []).map((it) => backendLeadToFrontend(it as unknown as BackendLead))
+        // Accumulate (don't replace) so an already-picked lead stays resolvable
+        // after the search box is cleared and the list refetches.
+        setSearchLeads((prev) => {
+          const byId = new Map(prev.map((l) => [l.id, l]))
+          for (const l of fresh) byId.set(l.id, l)
+          return [...byId.values()]
+        })
+      } catch {
+        // keep whatever was last loaded; contacts still filter locally
+      }
+    }, term ? 250 : 0)
+    return () => clearTimeout(t)
+  }, [q])
+
   const all = React.useMemo<ContactOption[]>(
     () => [
       ...(initialRecipient ? [initialRecipient] : []),
-      ...realLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
+      ...searchLeads.map((l) => ({ ...toRecipient(l), sub: `${LEAD_KIND_LABEL[l.kind]} · new lead · ${l.hq}` })),
       ...contacts,
     ],
-    [initialRecipient, realLeads, contacts],
+    [initialRecipient, searchLeads, contacts],
   )
 
   const [toId, setToId] = React.useState(initialToId ?? initialRecipient?.id)
   const to = all.find((c) => c.id === toId)
-  const [q, setQ] = React.useState("")
 
   const [purpose, setPurpose] = React.useState<EmailPurpose>(initialPurpose ?? suggestPurpose(to))
   const [tone, setTone] = React.useState<OutreachTone>(defaultTone ?? "friendly")
@@ -244,7 +271,7 @@ export function SingleEmailBuilder({
           design, tone, purpose,
         })
         if (!res.ok) {
-          toast.error(res.reason ?? "Send failed")
+          toast.error(describeSendFailure(res.reason))
           return
         }
         toast.success(`Email sent to ${to.contactName}`, {

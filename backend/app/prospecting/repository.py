@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol  # noqa: F401
 
-from sqlalchemy import Select, desc, func, select
+from sqlalchemy import Select, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.prospecting.models import Lead, LeadContact, LeadSource, Score
@@ -31,7 +31,8 @@ def leads_base_query(
         base = base.where(Lead.current_score >= min_score)
     if q:
         like = f"%{q}%"
-        base = base.where(Lead.name.ilike(like))
+        # Match company name OR primary email (the compose picker searches by either).
+        base = base.where(or_(Lead.name.ilike(like), Lead.primary_email.ilike(like)))
     return base
 
 
