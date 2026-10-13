@@ -200,7 +200,7 @@ export function DesignFields({ design, setDesign }: { design: EmailDesign; setDe
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="cta-url">Button link</Label>
-          <Input id="cta-url" value={design.ctaUrl} onChange={(e) => setDesign((d) => ({ ...d, ctaUrl: e.target.value }))} />
+          <Input id="cta-url" value={design.ctaUrl} onChange={(e) => setDesign((d) => ({ ...d, ctaUrl: e.target.value }))} placeholder="Empty = reply by email" />
         </div>
       </div>
     </div>

@@ -145,7 +145,7 @@ export function buildCampaignHistory(brokers: Broker[], stats: Map<string, Broke
       createdAt: sentAt,
       subject: def.subject,
       body: tpl.body,
-      design: { layout: "branded", accent: def.type === "shipper_direct" ? "#2B2B2B" : "#BC2444", showLogo: true, showTruck: true, ctaLabel: def.type === "shipper_direct" ? "Book a trial load" : "Request a quote", ctaUrl: "https://ljminternational.com/quote", signature: true },
+      design: { layout: "branded", accent: def.type === "shipper_direct" ? "#2B2B2B" : "#BC2444", showLogo: true, showTruck: true, ctaLabel: def.type === "shipper_direct" ? "Book a trial load" : "Request a quote", ctaUrl: "", signature: true },
       goal: def.goal,
       schedule: { mode: "scheduled", at: sentAt },
       followUps,

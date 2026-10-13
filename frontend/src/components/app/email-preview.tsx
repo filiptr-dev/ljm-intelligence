@@ -3,6 +3,7 @@
 import { EUTruck, USTruck } from "@/components/brand/trucks"
 import { LogoMarkCompact } from "@/components/brand/marks"
 import { CLIENT } from "@/lib/data/types"
+import { getSignature, resolveCtaUrl, useSignature } from "@/lib/brand/use-signature"
 import { cn } from "@/lib/utils"
 import type { EmailDesign, Recipient } from "./engine"
 
@@ -17,7 +18,7 @@ export function renderTemplate(tpl: string, r?: Recipient) {
     .replaceAll("{{company}}", r?.name ?? "your company")
     .replaceAll("{{lane}}", r?.lane ?? "your lanes")
     .replaceAll("{{equipment}}", r?.equipment ?? "dry van")
-    .replaceAll("{{sender}}", CLIENT.dispatcher)
+    .replaceAll("{{sender}}", getSignature().name)
 }
 
 const READABLE: Record<string, string> = {
@@ -55,10 +56,13 @@ export function EmailPreview({
   const sub = renderTemplate(subject, recipient)
   const onAccentLight = !isLight(design.accent)
   const paragraphs = text.split(/\n{2,}/)
+  const sig = useSignature()
+  const sigContact = [sig.phone, sig.email].filter(Boolean).join(" · ")
+  const hasSignature = Boolean(sig.name || sig.company || sigContact)
 
   const cta = design.ctaLabel ? (
     <a
-      href={design.ctaUrl}
+      href={resolveCtaUrl(design.ctaLabel, design.ctaUrl, sig.senderEmail)}
       onClick={(e) => e.preventDefault()}
       className="mt-2 inline-block rounded-[3px] px-5 py-2.5 text-sm font-bold"
       style={{ background: design.accent, color: onAccentLight ? "#fff" : "#16171a" }}
@@ -67,13 +71,15 @@ export function EmailPreview({
     </a>
   ) : null
 
-  const signature = design.signature ? (
+  const signature = design.signature && hasSignature ? (
     <div className="mt-5 flex items-center gap-3 border-t border-[#e4e1da] pt-4 text-xs text-[#5c5f66]">
-      <div className="flex size-9 items-center justify-center rounded-full bg-[#BC2444] font-display text-sm font-bold text-white">{CLIENT.dispatcher.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}</div>
+      {sig.name ? (
+        <div className="flex size-9 items-center justify-center rounded-full bg-[#BC2444] font-display text-sm font-bold text-white">{sig.name.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}</div>
+      ) : null}
       <div>
-        <div className="font-semibold text-[#16171a]">{CLIENT.dispatcher} · Dispatch</div>
-        <div>{CLIENT.company} · {CLIENT.fleet}</div>
-        <div>{CLIENT.phone} · {CLIENT.email}</div>
+        {sig.name ? <div className="font-semibold text-[#16171a]">{sig.name}</div> : null}
+        {sig.company ? <div>{sig.company}</div> : null}
+        {sigContact ? <div>{sigContact}</div> : null}
       </div>
     </div>
   ) : null
@@ -91,7 +97,7 @@ export function EmailPreview({
   return (
     <div className="overflow-hidden rounded-sm border border-border bg-white">
       <div className="space-y-1 border-b border-border bg-[#f6f5f2] px-4 py-3 text-xs">
-        <div><span className="inline-block w-14 text-muted-foreground">From</span> {CLIENT.dispatcher} &lt;{CLIENT.email}&gt;</div>
+        <div><span className="inline-block w-14 text-muted-foreground">From</span> {[sig.name, sig.senderEmail ? `<${sig.senderEmail}>` : ""].filter(Boolean).join(" ") || "Not set"}</div>
         <div className="truncate"><span className="inline-block w-14 text-muted-foreground">To</span> {recipient ? `${recipient.contactName} <${recipient.email}>` : "Select recipients"}</div>
         <div className="truncate text-sm font-semibold"><span className="inline-block w-14 text-xs font-normal text-muted-foreground">Subject</span> {sub || "(no subject)"}</div>
       </div>

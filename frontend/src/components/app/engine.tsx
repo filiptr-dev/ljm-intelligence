@@ -61,7 +61,7 @@ export const DEFAULT_DESIGN: EmailDesign = {
   showLogo: true,
   showTruck: true,
   ctaLabel: "Request a quote",
-  ctaUrl: "https://ljminternational.com/quote",
+  ctaUrl: "",
   signature: true,
 }
 

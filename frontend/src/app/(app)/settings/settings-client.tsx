@@ -34,6 +34,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { api } from "@/lib/api/client"
+import { setSignatureCache } from "@/lib/brand/use-signature"
 import { IntegrationsStatus } from "./integrations-status"
 import { OwnerSwitches } from "./owner-switches"
 
@@ -53,6 +54,11 @@ export type SettingsOut = {
   auto_outreach_min_fit: number
   unsub_secret_set: boolean
   unsub_config_ready: boolean
+  brand_dispatcher: string
+  brand_company: string
+  brand_phone: string
+  brand_email: string
+  sender_email: string
 }
 
 const STATUS_FILTERS = [
@@ -115,6 +121,44 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [unsubSecretSet, setUnsubSecretSet] = React.useState(initial?.unsub_secret_set ?? false)
   const [unsubReady, setUnsubReady] = React.useState(initial?.unsub_config_ready ?? false)
+
+  // Email signature (own Save: separate from the crawler settings above).
+  const [sigName, setSigName] = React.useState(initial?.brand_dispatcher ?? "")
+  const [sigCompany, setSigCompany] = React.useState(initial?.brand_company ?? "")
+  const [sigPhone, setSigPhone] = React.useState(initial?.brand_phone ?? "")
+  const [sigEmail, setSigEmail] = React.useState(initial?.brand_email ?? "")
+  const [sigSaving, setSigSaving] = React.useState(false)
+
+  const saveSignature = async () => {
+    setSigSaving(true)
+    try {
+      const { data, response } = await api.PUT("/settings", {
+        body: {
+          brand_dispatcher: sigName,
+          brand_company: sigCompany,
+          brand_phone: sigPhone,
+          brand_email: sigEmail,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+      })
+      if (response.status === 422) {
+        toast.error("Couldn't save signature", { description: "Check the email address." })
+        return
+      }
+      if (!response.ok || !data) throw new Error(`save ${response.status}`)
+      const s = data as unknown as SettingsOut
+      setSigName(s.brand_dispatcher)
+      setSigCompany(s.brand_company)
+      setSigPhone(s.brand_phone)
+      setSigEmail(s.brand_email)
+      setSignatureCache(s)
+      toast.success("Signature saved")
+    } catch (e) {
+      toast.error("Couldn't save", { description: String(e) })
+    } finally {
+      setSigSaving(false)
+    }
+  }
 
   // No mount-time fetch: the SSR shell seeded us. If the server fetch failed
   // (`initial === null`) we surface a toast once; the user can hit Save to
@@ -334,6 +378,35 @@ export default function SettingsClient({ initial }: { initial: SettingsOut | nul
             <div className="mt-5 flex items-center justify-end gap-3 border-t border-border pt-4">
               <Button onClick={save} disabled={!loaded || saving} className="font-semibold">
                 <Save /> {saving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </Panel>
+
+          <Panel
+            title="Email signature"
+            description="Shown at the bottom of every email we send. Leave a field empty and that line is left out."
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="sig-name">Name</Label>
+                <Input id="sig-name" value={sigName} maxLength={128} onChange={(e) => setSigName(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sig-company">Company (optional)</Label>
+                <Input id="sig-company" value={sigCompany} maxLength={128} onChange={(e) => setSigCompany(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sig-phone">Phone</Label>
+                <Input id="sig-phone" value={sigPhone} maxLength={64} onChange={(e) => setSigPhone(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sig-email">Email</Label>
+                <Input id="sig-email" type="email" value={sigEmail} maxLength={320} onChange={(e) => setSigEmail(e.target.value)} />
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-3 border-t border-border pt-4">
+              <Button onClick={saveSignature} disabled={!loaded || sigSaving} className="font-semibold">
+                <Save /> {sigSaving ? "Saving…" : "Save signature"}
               </Button>
             </div>
           </Panel>

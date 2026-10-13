@@ -5998,6 +5998,16 @@ export interface components {
             ai_features: {
                 [key: string]: unknown;
             };
+            /** Brand Dispatcher */
+            brand_dispatcher: string;
+            /** Brand Company */
+            brand_company: string;
+            /** Brand Phone */
+            brand_phone: string;
+            /** Brand Email */
+            brand_email: string;
+            /** Sender Email */
+            sender_email: string;
         };
         /** SettingsPatch */
         SettingsPatch: {
@@ -6029,6 +6039,14 @@ export interface components {
             ai_features?: {
                 [key: string]: unknown;
             } | null;
+            /** Brand Dispatcher */
+            brand_dispatcher?: string | null;
+            /** Brand Company */
+            brand_company?: string | null;
+            /** Brand Phone */
+            brand_phone?: string | null;
+            /** Brand Email */
+            brand_email?: string | null;
         };
         /** ShiftItem */
         ShiftItem: {
