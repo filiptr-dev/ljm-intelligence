@@ -66,6 +66,21 @@ def test_vet_avoid_when_authority_revoked():
     assert RedFlag.authority_revoked in {f.code for f in v.red_flags}
 
 
+def test_vet_avoid_when_authority_inactive():
+    """SODA ships status_code='I' for carriers whose authority is not
+    currently active — they're NOT allowed to operate, so the verdict
+    must be avoid, never safe. Regression guard added 2026-10-13 when a
+    live MC with status=I (MC-1291939) slipped through as 'safe'."""
+    snap = BrokerSnapshot(
+        mc="1291939", dot="3696826", legal_name="Inactive Co", dba_name=None,
+        authority_status="I", add_date=TODAY - timedelta(days=365 * 5),
+        oos_date=None, phone="5551112222", email=None,
+    )
+    v = vet(snap, PriorContact(booked_count=5), suppressed=False, today=TODAY)
+    assert v.band is VerdictBand.avoid
+    assert RedFlag.authority_inactive in {f.code for f in v.red_flags}
+
+
 def test_vet_caution_on_new_authority():
     snap = BrokerSnapshot(
         mc="2", dot="2", legal_name="New Co", dba_name=None,
@@ -75,6 +90,19 @@ def test_vet_caution_on_new_authority():
     v = vet(snap, PriorContact(), suppressed=False, today=TODAY)
     assert v.band is VerdictBand.caution
     assert RedFlag.new_authority_lt_180d in {f.code for f in v.red_flags}
+
+
+def test_normalize_dot_strips_leading_zeros():
+    """LoadStop stores '01031258'; SODA returns '1031258'. One canonical
+    form so cache keys and lead lookups don't drift apart."""
+    from app.vetting.repository import normalize_dot
+
+    assert normalize_dot("01031258") == "1031258"
+    assert normalize_dot("1031258") == "1031258"
+    assert normalize_dot("  0007777777  ") == "7777777"
+    assert normalize_dot(None) is None
+    assert normalize_dot("") is None
+    assert normalize_dot("0") == "0"
 
 
 def test_normalize_key_strips_prefix_and_rejects_nondigits():

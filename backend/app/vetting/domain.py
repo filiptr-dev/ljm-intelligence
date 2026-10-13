@@ -19,6 +19,7 @@ class RedFlag(str, Enum):
     oos_recent = "oos_recent"
     name_mismatch_vs_dba = "name_mismatch_vs_dba"
     authority_revoked = "authority_revoked"
+    authority_inactive = "authority_inactive"
     authority_unverified = "authority_unverified"
 
 
@@ -99,6 +100,19 @@ def vet(
                 "FMCSA authority is revoked — do not haul.",
             )
         )
+    elif status in ("I", "N"):
+        # Inactive authority is NOT allowed to operate. FMCSA ships 'I'
+        # on az4n-8mr2 for carriers whose authority is not currently
+        # active; treat it as a hard reject, same band as revoked.
+        # (Prior behaviour silently fell through to 'safe' because the
+        # rule table only looked for R/V — a dangerous miss on live
+        # SODA data.)
+        flags.append(
+            FlagHit(
+                RedFlag.authority_inactive,
+                "FMCSA authority is inactive — not allowed to operate.",
+            )
+        )
     elif not status:
         # No authority_status means FMCSA never confirmed this carrier for
         # this lookup (lead-only fallback, or an upstream outage with no
@@ -145,7 +159,12 @@ def vet(
         )
 
     codes = {f.code for f in flags}
-    if RedFlag.authority_revoked in codes or RedFlag.oos_recent in codes or suppressed:
+    if (
+        RedFlag.authority_revoked in codes
+        or RedFlag.authority_inactive in codes
+        or RedFlag.oos_recent in codes
+        or suppressed
+    ):
         band = VerdictBand.avoid
     elif codes & {RedFlag.new_authority_lt_180d, RedFlag.name_mismatch_vs_dba, RedFlag.authority_unverified} or RedFlag.no_phone in codes and prior.booked_count == 0:
         band = VerdictBand.caution

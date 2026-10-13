@@ -21,6 +21,23 @@ log = logging.getLogger(__name__)
 SNAPSHOT_TTL = timedelta(days=30)
 
 
+def normalize_dot(dot: str | int | None) -> str | None:
+    """Strip leading zeros so '01031258' and '1031258' hit the same cache row.
+
+    LoadStop stores DOTs as zero-padded strings (legacy ABP shape); FMCSA
+    SODA returns them unpadded. Without normalisation the cache keyed by
+    the padded form never hits on a lookup that came in through SODA, so
+    every refresh re-queries SODA. One canonical digit-only form is enough.
+    """
+    if dot is None:
+        return None
+    raw = str(dot).strip()
+    if not raw:
+        return None
+    stripped = raw.lstrip("0")
+    return stripped or "0"
+
+
 @dataclass(frozen=True, slots=True)
 class SnapshotRow:
     snapshot: BrokerSnapshot
@@ -85,8 +102,9 @@ def extract_snapshot_fields(payload: dict, *, mc: str | None, dot: str | None) -
 
 
 async def read_fmcsa_cache(s: AsyncSession, dot: str) -> tuple[dict | None, datetime | None]:
+    key = normalize_dot(dot) or str(dot)
     row = (
-        await s.execute(select(FmcsaSnapshotCache).where(FmcsaSnapshotCache.dot == str(dot)))
+        await s.execute(select(FmcsaSnapshotCache).where(FmcsaSnapshotCache.dot == key))
     ).scalar_one_or_none()
     if row is None:
         return None, None
@@ -95,12 +113,13 @@ async def read_fmcsa_cache(s: AsyncSession, dot: str) -> tuple[dict | None, date
 
 async def write_fmcsa_cache(s: AsyncSession, dot: str, payload: dict) -> None:
     """Upsert — SQLite-friendly path for tests, PG upsert on Neon."""
+    key = normalize_dot(dot) or str(dot)
     existing = (
-        await s.execute(select(FmcsaSnapshotCache).where(FmcsaSnapshotCache.dot == str(dot)))
+        await s.execute(select(FmcsaSnapshotCache).where(FmcsaSnapshotCache.dot == key))
     ).scalar_one_or_none()
     now = datetime.now(UTC)
     if existing is None:
-        s.add(FmcsaSnapshotCache(dot=str(dot), payload=payload, fetched_at=now))
+        s.add(FmcsaSnapshotCache(dot=key, payload=payload, fetched_at=now))
     else:
         existing.payload = payload
         existing.fetched_at = now
@@ -258,8 +277,15 @@ async def find_lead_by_mc_or_dot(s: AsyncSession, mc: str | None, dot: str | Non
         if row:
             return row
     if dot:
+        # Leads store the LoadStop zero-padded form ("01031258"); callers
+        # often arrive with the SODA unpadded form ("1031258"). Match both.
+        norm = normalize_dot(dot) or str(dot)
         row = (
-            await s.execute(select(Lead).where(Lead.dot == str(dot)).limit(1))
+            await s.execute(
+                select(Lead)
+                .where(Lead.dot.in_([str(dot), norm]))
+                .limit(1)
+            )
         ).scalar_one_or_none()
         if row:
             return row

@@ -99,7 +99,7 @@ async def _lookup_snapshot(
             await s.execute(select(Lead).where(Lead.mc == mc).limit(1))
         ).scalar_one_or_none()
         if lead and lead.dot:
-            dot = str(lead.dot)
+            dot = repo.normalize_dot(lead.dot)
 
     if not dot and mc:
         # Still no DOT after the leads lookup — try FMCSA SODA directly by
@@ -110,7 +110,7 @@ async def _lookup_snapshot(
             carrier = (soda_payload.get("content") or {}).get("carrier") or {}
             dot_from_soda = carrier.get("dotNumber")
             if dot_from_soda:
-                dot = str(dot_from_soda)
+                dot = repo.normalize_dot(dot_from_soda)
                 await repo.write_fmcsa_cache(s, dot, soda_payload)
                 snap = repo.extract_snapshot_fields(soda_payload, mc=mc, dot=dot)
                 evidence_url = SNAPSHOT_URL_TMPL.format(dot=dot)
@@ -227,13 +227,16 @@ async def vet_broker(
         dot = normalized if is_dot_hint else None
 
     port = fmcsa or _DefaultFmcsa()
+    # Canonicalise DOT (strip leading zeros) up-front so one lookup form
+    # drives cache keys, SODA calls, and the snapshot.dot field.
+    dot = repo.normalize_dot(dot)
     async with sessionmaker() as s:
         # Lead lookup first — gives us the complementary id (MC↔DOT) and
         # lets prior-contact work even on MC-only input.
         lead = await repo.find_lead_by_mc_or_dot(s, mc, dot)
         if lead is not None:
             mc = mc or lead.mc
-            dot = dot or (str(lead.dot) if lead.dot else None)
+            dot = dot or repo.normalize_dot(lead.dot)
 
         snapshot, evidence_url, stale, as_of = await _lookup_snapshot(
             s, mc=mc, dot=dot, fmcsa=port, lead=lead
