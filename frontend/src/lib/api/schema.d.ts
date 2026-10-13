@@ -1829,6 +1829,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/analysis/jobs/backfill-subject-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill Subject Rates Endpoint
+         * @description Admin-only, idempotent. Writes to derived_* columns only.
+         *
+         *     Gated by the shared ``user_only`` dependency chain on the analysis
+         *     router — a cron key alone cannot flip rate-con dollars onto a lead.
+         *     An AI provider is passed in when ``inbox_analysis`` has one wired;
+         *     otherwise the deterministic pass runs and the AI fallback is skipped.
+         */
+        post: operations["backfill_subject_rates_endpoint_analysis_jobs_backfill_subject_rates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analysis/lanes/summary": {
         parameters: {
             query?: never;
@@ -2773,6 +2798,21 @@ export interface components {
             /** Hours */
             hours?: number | null;
         };
+        /** BackfillSubjectRatesOut */
+        BackfillSubjectRatesOut: {
+            /** Insights Scanned */
+            insights_scanned: number;
+            /** Insights Filled */
+            insights_filled: number;
+            /** Insights Filled By Ai */
+            insights_filled_by_ai: number;
+            /** Loads Created */
+            loads_created: number;
+            /** Loads Updated */
+            loads_updated: number;
+            /** Loads Rehashed */
+            loads_rehashed: number;
+        };
         /** BackhaulCandidateOut */
         BackhaulCandidateOut: {
             /** Lead Id */
@@ -2968,6 +3008,11 @@ export interface components {
             summary: components["schemas"]["BrokerSummaryOut"];
             overview_metrics?: components["schemas"]["OverviewMetricsOut"] | null;
             email_analytics?: components["schemas"]["EmailAnalyticsOut"] | null;
+            /**
+             * Communication
+             * @default []
+             */
+            communication: components["schemas"]["CommunicationItemOut"][];
         };
         /** BrokerKpiOut */
         BrokerKpiOut: {
@@ -3024,6 +3069,8 @@ export interface components {
              * Format: date-time
              */
             computed_at: string;
+            /** Lead Id */
+            lead_id?: string | null;
         };
         /** BrokerRowOut */
         BrokerRowOut: {
@@ -3246,6 +3293,32 @@ export interface components {
             city: string;
             /** State */
             state: string;
+        };
+        /** CommunicationItemOut */
+        CommunicationItemOut: {
+            /** Sent At */
+            sent_at: string;
+            /** From Addr */
+            from_addr: string;
+            /** To Addr */
+            to_addr?: string | null;
+            /** Subject */
+            subject: string;
+            /** Intent */
+            intent?: string | null;
+            /** Sentiment */
+            sentiment?: number | null;
+            /** Rate Usd */
+            rate_usd?: number | null;
+            /** Lane From */
+            lane_from?: string | null;
+            /** Lane To */
+            lane_to?: string | null;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "inbound" | "outbound";
         };
         /** CompRowOut */
         CompRowOut: {
@@ -4801,6 +4874,10 @@ export interface components {
              * @default false
              */
             is_demo: boolean;
+            /** Inbox Message Id */
+            inbox_message_id?: string | null;
+            /** Inbox Mailbox */
+            inbox_mailbox?: string | null;
         };
         /** LoadboardCredIn */
         LoadboardCredIn: {
@@ -5298,11 +5375,8 @@ export interface components {
              * @enum {string}
              */
             segment: "all" | "hot" | "warm" | "payment_issues" | "dormant" | "not_interested" | "neutral";
-            /**
-             * Revenue Usd
-             * @default 0
-             */
-            revenue_usd: number;
+            /** Revenue Usd */
+            revenue_usd?: number | null;
         };
         /**
          * OverviewSummaryOut
@@ -10380,6 +10454,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrokerKpiOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_subject_rates_endpoint_analysis_jobs_backfill_subject_rates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillSubjectRatesOut"];
                 };
             };
             /** @description Validation Error */

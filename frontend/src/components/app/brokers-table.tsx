@@ -686,6 +686,13 @@ function AiNextStepCell({
         // legacy "ready with null" state so the row doesn't keep offering
         // the button for the same no-signal input.
         setStatus("ready")
+      } else if (r.status === "empty") {
+        // Muted, not red: a broker we've never exchanged mail with isn't an
+        // AI failure, it's a "no signal yet" state. Flipping the status to
+        // "ready" keeps the row from re-offering the button for the same
+        // empty input.
+        toast.message("No emails with this broker yet")
+        setStatus("ready")
       } else {
         toast.error(r.ai_error || "AI summary unavailable")
       }

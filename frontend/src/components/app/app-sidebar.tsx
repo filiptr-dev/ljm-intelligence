@@ -43,7 +43,7 @@ import { useEngine } from "./engine"
 
 const ANALYSE = [
   { href: "/", label: "Overview", icon: Gauge },
-  { href: "/intelligence", label: "Broker Intelligence", icon: ChartColumnBig },
+  { href: "/intelligence", label: "Broker Insights", icon: ChartColumnBig },
   { href: "/intelligence/lanes", label: "Lanes history", icon: Waypoints },
   { href: "/brokers", label: "Brokers", icon: Building2 },
   { href: "/emails", label: "Email Analysis", icon: Mail },

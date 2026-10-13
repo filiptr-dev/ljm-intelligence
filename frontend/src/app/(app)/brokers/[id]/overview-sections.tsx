@@ -120,8 +120,20 @@ export function BrokerStatTiles({ om }: { om: OverviewMetrics | null }) {
       />
       <StatTile
         label="Revenue"
-        value={om && om.revenue_usd > 0 ? `$${Math.round(om.revenue_usd).toLocaleString("en-US")}` : "—"}
-        sub={om && om.revenue_usd > 0 ? "All booked loads" : "no data yet"}
+        value={
+          om && om.revenue_usd != null && om.revenue_usd > 0
+            ? `$${Math.round(om.revenue_usd).toLocaleString("en-US")}`
+            : om && om.revenue_usd === 0
+            ? "$0"
+            : "—"
+        }
+        sub={
+          om && om.revenue_usd != null && om.revenue_usd > 0
+            ? "All booked loads"
+            : om && om.revenue_usd === 0
+            ? "No rate on booked loads"
+            : "No revenue data yet"
+        }
       />
       <StatTile label="Avg booked rate" value="—" sub="no data yet" />
       <StatTile

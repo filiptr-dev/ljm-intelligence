@@ -11,6 +11,7 @@
  */
 
 import * as React from "react"
+import Link from "next/link"
 import { toast } from "sonner"
 import { Panel } from "@/components/app/ui"
 import { Button } from "@/components/ui/button"
@@ -306,13 +307,31 @@ export function LoadsBoard() {
                   }
                   const origin = (g.origin ?? {}) as { state?: string | null; city?: string | null }
                   const dest = (g.dest ?? {}) as { state?: string | null; city?: string | null }
+                  const inboxRef = (g as unknown as { inbox_message_id?: string | null; inbox_mailbox?: string | null })
+                  const hasLane = Boolean(origin.state || origin.city || dest.state || dest.city)
                   const pickup = g.pickup_date ? String(g.pickup_date).slice(0, 10) : "—"
                   return (
                     <tr key={g.group_hash} className="border-t">
                       <td className="py-2 pr-3 font-medium">{broker.name ?? "—"}</td>
                       <td className="py-2 pr-3">
-                        {(origin.city ?? "") || "?"}{origin.state ? `, ${origin.state}` : ""} →{" "}
-                        {(dest.city ?? "") || "?"}{dest.state ? `, ${dest.state}` : ""}
+                        {hasLane ? (
+                          <>
+                            {(origin.city ?? "") || "?"}{origin.state ? `, ${origin.state}` : ""} →{" "}
+                            {(dest.city ?? "") || "?"}{dest.state ? `, ${dest.state}` : ""}
+                          </>
+                        ) : inboxRef.inbox_message_id ? (
+                          <span className="text-muted-foreground">
+                            Lane not found in email
+                            <Link
+                              href={`/emails?thread=${encodeURIComponent(inboxRef.inbox_message_id)}`}
+                              className="ml-2 text-xs underline"
+                            >
+                              open thread
+                            </Link>
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Lane not found</span>
+                        )}
                       </td>
                       <td className="py-2 pr-3">{pickup}</td>
                       <td className="py-2 pr-3">{g.equipment ?? "—"}</td>

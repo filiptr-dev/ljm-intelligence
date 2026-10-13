@@ -1,12 +1,21 @@
+import Link from "next/link"
 import { PageHeader, Panel } from "@/components/app/ui"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import * as analysis from "@/lib/api/analysis"
 
 /**
- * Intelligence — all prediction cards (plan-gate decision: all cards in v1).
+ * Broker Insights — human-readable top cards + the raw tables below.
  *
- * One aggregate fetch (`/analysis/predictions`) renders every card. The
- * backend's nightly fan-out populates the tables; this page is read-only.
+ * The top five cards are the operator's morning read: "who's hot, who's
+ * gone quiet, best time to email, slow payers, usual lane rate". Each is
+ * one sentence + one action; empty cards hide. The old raw tables are
+ * preserved under the collapsible "More details" footer so nothing is
+ * lost — this is a reskin on the read side, not a feature cut.
+ *
+ * Broker whitelist (plan: `list_broker_predictions`) is enforced in the
+ * backend repository, so wexinc.com / coxautoinc.com / remotelyplushire.com
+ * — any inbound domain that was never pointed at a real Lead — never reach
+ * this page.
  */
 export default async function IntelligencePage() {
   const data = await analysis.getPredictions()
@@ -18,18 +27,114 @@ export default async function IntelligencePage() {
   const loss_reasons = data.loss_reasons
   const first_touch = data.first_touch
 
-  const topBrokers = [...brokers].sort((a, b) => b.win_probability - a.win_probability).slice(0, 10)
+  const topBrokers = [...brokers].sort((a, b) => (b.win_probability * (1 - b.churn_risk)) - (a.win_probability * (1 - a.churn_risk))).slice(0, 10)
   const slowPayers = brokers.filter((b) => b.is_slow_payer).slice(0, 10)
-  const churnWarnings = [...brokers].filter((b) => b.churn_risk > 0.3).sort((a, b) => b.churn_risk - a.churn_risk).slice(0, 10)
+  const churnWarnings = [...brokers].filter((b) => b.churn_risk >= 0.3).sort((a, b) => b.churn_risk - a.churn_risk).slice(0, 10)
   const bestHours = brokers.filter((b) => b.best_send_hour !== null && b.best_send_hour !== undefined).slice(0, 10)
+
+  // Rolling "best send hour" over the whole book — the per-broker signal
+  // is thin, so lead with the aggregate (Tuesday 9 AM Eastern feel).
+  const hourCounts = new Map<number, number>()
+  for (const b of brokers) {
+    if (b.best_send_hour == null) continue
+    hourCounts.set(b.best_send_hour, (hourCounts.get(b.best_send_hour) ?? 0) + 1)
+  }
+  let aggregateHourUtc: number | null = null
+  let aggregateHourN = 0
+  for (const [h, n] of hourCounts) {
+    if (n > aggregateHourN) { aggregateHourUtc = h; aggregateHourN = n }
+  }
+  const aggregateHourEt = aggregateHourUtc != null ? utcHourToEt(aggregateHourUtc) : null
+
+  const topLane = [...lanes]
+    .filter((l) => l.price_p50 != null && l.sample_size >= 3)
+    .sort((a, b) => b.sample_size - a.sample_size)[0] || null
 
   return (
     <>
       <PageHeader
         eyebrow="Analyze"
-        title="Intelligence"
+        title="Broker Insights"
         description={`Nightly predictions over the inbox. ${brokers.length} broker${brokers.length === 1 ? "" : "s"} analyzed, ${lanes.length} lane${lanes.length === 1 ? "" : "s"}.`}
       />
+
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        {topBrokers.length > 0 ? (
+          <Panel title="Who's running hot right now" description="Top shippers you're most likely to book this week. Call these first.">
+            <ul className="space-y-2 text-sm">
+              {topBrokers.slice(0, 5).map((b) => (
+                <li key={b.broker_domain} className="flex items-center justify-between gap-3">
+                  <span className="truncate">
+                    {b.lead_id ? (
+                      <Link href={`/brokers/${b.lead_id}`} className="underline">{b.broker_name || b.broker_domain}</Link>
+                    ) : (
+                      <span className="text-muted-foreground">{b.broker_name || b.broker_domain}</span>
+                    )}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{Math.round(b.win_probability * 100)}% win · health {b.health_score}</span>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ) : null}
+
+        {churnWarnings.length > 0 ? (
+          <Panel title="Who's gone quiet" description="A short follow-up usually gets a reply.">
+            <ul className="space-y-2 text-sm">
+              {churnWarnings.slice(0, 5).map((b) => (
+                <li key={b.broker_domain} className="flex items-center justify-between gap-3">
+                  <span className="truncate">
+                    {b.lead_id ? (
+                      <Link href={`/brokers/${b.lead_id}`} className="underline">{b.broker_name || b.broker_domain}</Link>
+                    ) : (
+                      <span className="text-muted-foreground">{b.broker_name || b.broker_domain}</span>
+                    )}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{Math.round(b.churn_risk * 100)}% churn risk</span>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ) : null}
+
+        {aggregateHourEt != null ? (
+          <Panel title="Best time to email" description="Across your inbox, this hour gets you the fastest reply.">
+            <p className="text-sm">
+              Try around <strong>{formatEtHour(aggregateHourEt)} Eastern</strong>. {aggregateHourN >= 3 ? "" : <span className="text-muted-foreground">(thin signal — only {aggregateHourN} broker{aggregateHourN === 1 ? "" : "s"} so far)</span>}
+            </p>
+          </Panel>
+        ) : null}
+
+        {slowPayers.length > 0 ? (
+          <Panel title="Watch out — slow payers" description="These brokers have asked about payment timing more than once. Confirm terms before booking.">
+            <ul className="space-y-2 text-sm">
+              {slowPayers.slice(0, 5).map((b) => (
+                <li key={b.broker_domain} className="truncate">
+                  {b.lead_id ? (
+                    <Link href={`/brokers/${b.lead_id}`} className="underline">{b.broker_name || b.broker_domain}</Link>
+                  ) : (
+                    <span className="text-muted-foreground">{b.broker_name || b.broker_domain}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        ) : null}
+
+        {topLane ? (
+          <Panel title="Usual rate on this lane" description="Based on past accepted quotes.">
+            <p className="text-sm">
+              <strong>{topLane.origin} → {topLane.dest}</strong>{topLane.equipment ? ` · ${topLane.equipment}` : ""} usually pays <strong>${Math.round(topLane.price_p50 || 0).toLocaleString()}</strong>
+              {topLane.price_p90 ? <>, up to <strong>${Math.round(topLane.price_p90).toLocaleString()}</strong></> : null}.
+              <span className="text-muted-foreground"> ({topLane.sample_size} quote{topLane.sample_size === 1 ? "" : "s"})</span>
+            </p>
+          </Panel>
+        ) : null}
+      </div>
+
+      <details className="group mb-6">
+        <summary className="cursor-pointer select-none text-sm text-muted-foreground underline">More details (raw tables)</summary>
+        <div className="mt-4">
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel title="Win probability" description="Likelihood this broker books us on their next load.">
@@ -206,8 +311,36 @@ export default async function IntelligencePage() {
           </Table>
         </Panel>
       </div>
+        </div>
+      </details>
     </>
   )
+}
+
+// --- helpers ---
+
+// Convert a UTC hour-of-day to the equivalent ET hour, using the current
+// America/New_York offset. Simple approach: build a Date at today's UTC
+// hour=h, format in ET, parse back out the hour. Avoids pulling in a
+// dateutil dependency; good enough for a "9 AM Eastern" copy line.
+function utcHourToEt(hourUtc: number): number {
+  const d = new Date()
+  d.setUTCHours(hourUtc, 0, 0, 0)
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    hour12: false,
+    timeZone: "America/New_York",
+  }).formatToParts(d)
+  const h = parts.find((p) => p.type === "hour")?.value ?? "0"
+  return parseInt(h, 10) % 24
+}
+
+function formatEtHour(hourEt: number): string {
+  if (hourEt === 0) return "midnight"
+  if (hourEt === 12) return "noon"
+  const h12 = hourEt > 12 ? hourEt - 12 : hourEt
+  const ampm = hourEt >= 12 ? "PM" : "AM"
+  return `${h12} ${ampm}`
 }
 
 async function LookalikesRow({ brokerDomain, brokerName, health }: { brokerDomain: string; brokerName: string | null | undefined; health: number }) {

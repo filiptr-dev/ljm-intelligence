@@ -31,6 +31,7 @@ import type { ContactOption } from "@/components/app/email-composer"
 import { SingleEmailBuilder } from "@/components/app/single-email-builder"
 import { singleSendAdapter } from "@/lib/api/email-send"
 import { InboxCards } from "./inbox-cards"
+import { CommunicationCard, type CommunicationItem } from "./communication-card"
 import { BrokerEmailAnalyticsPanel } from "./email-analytics"
 import { BrokerKpis } from "./broker-kpis"
 import { AiSummaryCard, BrokerOverviewSections, BrokerStatTiles } from "./overview-sections"
@@ -467,6 +468,9 @@ export default function BrokerDetailPage() {
         <ArrowLeft className="size-4" /> All brokers
       </Link>
       <InboxCards email={b.primary_email?.value ?? null} />
+      <CommunicationCard
+        items={((data as unknown as { communication?: CommunicationItem[] }).communication) ?? []}
+      />
 
       {/* Hero header — unchanged from v1 */}
       <div className="mb-5 flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
