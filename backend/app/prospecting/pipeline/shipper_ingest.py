@@ -281,10 +281,21 @@ async def ingest_osm_incomings(
     """
     started = started or _now_utc()
     counts = {"osm_new": 0, "osm_merged": 0}
+    # In-batch dedupe by osm_ref. Overpass shouldn't return duplicate refs,
+    # but if the upstream mapper ever yields two incomings with the same
+    # ``osm_ref`` in one batch the second insert hits
+    # ``shipper_candidates_osm_ref_key`` before the first flush is visible
+    # to ``_load_state_rows`` on a parallel session. Belt-and-braces with
+    # the scheduler's ``queueing_lock`` (concurrent crawls can't start).
+    seen_refs: set[str] = set()
     for inc in incomings:
         if inc.source.upper() != "OSM":
             # Defensive — this fn is OSM-only. FMCSA goes through the projector above.
             continue
+        if inc.osm_ref:
+            if inc.osm_ref in seen_refs:
+                continue
+            seen_refs.add(inc.osm_ref)
         extra = dict(inc.extra)
         _, inserted = await _upsert_candidate(session, inc, extra=extra, promoted_lead_id=None, started=started)
         await session.flush()

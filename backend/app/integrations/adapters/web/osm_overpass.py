@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -45,7 +46,13 @@ DEFAULT_TIMEOUT = 30.0
 # Overpass usage policy: no more than ~1 request every 2 seconds per client.
 POLITE_INTERVAL_SECONDS = 2.0
 CACHE_TTL_SECONDS = 24 * 60 * 60  # 24h
-DEFAULT_CACHE_DIR = Path(__file__).resolve().parent.parent.parent / ".cache" / "overpass"
+# Cache dir — must be writable by the worker UID. The old default lived under
+# the source tree (`app/.cache/overpass`), which is owned by root in our
+# container (`USER worker` in Dockerfile.worker), so the first `mkdir` fails
+# with PermissionError and every Overpass response bypasses the cache. Put it
+# under `/tmp` by default (always writable; wiped between deploys is fine —
+# the TTL is only 24h anyway) and let an operator override via env on Render.
+DEFAULT_CACHE_DIR = Path(os.environ.get("OVERPASS_CACHE_DIR", "/tmp/ljm-overpass-cache"))
 
 
 # Overpass QL — one query per state, bounded by that state's bbox.

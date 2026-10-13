@@ -33,20 +33,37 @@ _TENANT = LJM_TENANT_ID
 # metadata attachment, not a new task.
 
 
+# Cron fires both EST (19:00 UTC) and EDT (20:00 UTC) every day — only one
+# matches wall-clock 15:00 America/New_York, but after a long worker outage
+# procrastinate backfills everything inside its ``max_delay``, so both can
+# enqueue back-to-back. A ``queueing_lock`` makes the second one a no-op
+# (``AlreadyEnqueued``) instead of a concurrent run — concurrent crawls
+# scanned the same OSM state in parallel and collided on
+# ``shipper_candidates_osm_ref_key``.
+_CRAWL_LOCK = f"prospecting.crawl_leads:{_TENANT}"
+
+
+async def _dispatch_crawl() -> None:
+    from procrastinate.exceptions import AlreadyEnqueued
+
+    from app.shared.queue import dispatch
+
+    try:
+        await dispatch("prospecting.crawl_leads", queueing_lock=_CRAWL_LOCK, tenant_id=_TENANT, trigger="cron")
+    except AlreadyEnqueued:
+        log.info("crawl_daily: another crawl already queued (lock=%s); skipping", _CRAWL_LOCK)
+
+
 @app.periodic(cron="0 19 * * *")  # 15:00 America/New_York during EST (UTC 19)
 @app.task(name="scheduler.crawl_daily_est", queue="default", pass_context=False)
 async def _crawl_daily_est(timestamp: int) -> None:
-    from app.shared.queue import dispatch
-
-    await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron")
+    await _dispatch_crawl()
 
 
 @app.periodic(cron="0 20 * * *")  # 15:00 America/New_York during EDT (UTC 20)
 @app.task(name="scheduler.crawl_daily_edt", queue="default", pass_context=False)
 async def _crawl_daily_edt(timestamp: int) -> None:
-    from app.shared.queue import dispatch
-
-    await dispatch("prospecting.crawl_leads", tenant_id=_TENANT, trigger="cron")
+    await _dispatch_crawl()
 
 
 @app.periodic(cron="5 19 * * *")  # 5min after the EST crawl
