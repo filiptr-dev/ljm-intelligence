@@ -115,12 +115,49 @@ def _price(provider: str, model: str, in_tok: int, out_tok: int) -> Decimal:
 
 
 def _classify_error(exc: Exception) -> str:
+    """Map a raised exception to one of the ProviderCall ``status`` strings.
+
+    The fallback chain reads this value: ``timeout`` / ``rate_limited`` /
+    ``server_error`` / ``model_not_found`` → retry on the next provider;
+    ``bad_request`` (400 or validation) → stop (a malformed prompt would
+    fail everywhere, so trying Claude after Gemini says 400 just burns
+    quota).
+    """
     text = f"{type(exc).__name__}: {exc}".lower()
     if isinstance(exc, asyncio.TimeoutError) or "timeout" in text:
         return "timeout"
     if any(k in text for k in ("rate limit", "rate-limit", "resource_exhausted", "429", "quota")):
         return "rate_limited"
+    # httpx HTTPStatusError prints "Server error '500 Internal Server Error' for url …".
+    if "500 " in text or "502 " in text or "503 " in text or "504 " in text:
+        return "server_error"
+    if "404" in text and ("model" in text or "not found" in text):
+        return "model_not_found"
+    if "400 " in text or "422 " in text or "validation" in text or "bad request" in text:
+        return "bad_request"
     return "error"
+
+
+# Statuses the fallback chain treats as "the next model might answer this".
+# ``bad_request`` is deliberately NOT in here (bad prompt would fail
+# everywhere); plain ``error`` is also non-retryable so a programming bug
+# (e.g. missing SDK) shows up loudly instead of silently rotating keys.
+_RETRYABLE_FALLBACK = frozenset({"timeout", "rate_limited", "server_error", "model_not_found"})
+
+
+# Module-level trace: feature → "provider:model" of the model that produced
+# the last successful answer. In-memory is fine (per the task brief) — the
+# ``/ai/features`` endpoint exposes it so the Settings panel can show
+# "Last answered by". Reset when the process restarts.
+_LAST_ANSWERED_BY: dict[str, str] = {}
+
+
+def record_answered_by(feature: str, provider: str, model: str) -> None:
+    _LAST_ANSWERED_BY[feature] = f"{provider}:{model}"
+
+
+def last_answered_by() -> dict[str, str]:
+    return dict(_LAST_ANSWERED_BY)
 
 
 def _extract_json(text: str) -> Any:
@@ -390,6 +427,132 @@ class LLMProvider(Protocol):
     async def search_grounded(self, prompt: str) -> ProviderCall: ...
 
 
+# --- Fallback chain ---------------------------------------------------------
+
+
+@dataclass(slots=False)
+class FallbackProvider:
+    """Ordered chain of adapters: primary first, then zero or more fallbacks.
+
+    Each verb tries the primary; on a retryable ``ProviderCall.status``
+    (``timeout`` / ``rate_limited`` / ``server_error`` / ``model_not_found``,
+    see ``_RETRYABLE_FALLBACK``) it moves to the next provider. A
+    ``bad_request`` / ``no_api_key`` / plain ``error`` is non-retryable:
+    ``bad_request`` would fail everywhere (same prompt), ``no_api_key``
+    means the primary is a ``NullProvider`` so we SKIP straight to the next
+    without logging as a real failure, and plain ``error`` surfaces a bug
+    (e.g. missing SDK) rather than silently rotating.
+
+    When every adapter is exhausted the LAST ProviderCall is returned —
+    the caller still sees an honest status (``no_api_key`` /
+    ``rate_limited`` / …) and never a 500.
+    """
+
+    providers: list[LLMProvider]
+    feature: str = ""
+    # Match the LLMProvider Protocol surface so static callers (`provider.model`,
+    # `provider.kind`) keep working — they see the primary's identity.
+    kind: str = "fallback"
+
+    @property
+    def model(self) -> str:  # delegated to the primary for logging compat
+        return self.providers[0].model if self.providers else "none"
+
+    @property
+    def status(self) -> ProviderStatus:
+        # "ok" if ANY provider has a key — the chain can answer. All-null → "no_api_key".
+        for p in self.providers:
+            if getattr(p, "status", ProviderStatus(ok=False, status="no_api_key")).ok:
+                return ProviderStatus(ok=True, status="ok")
+        return ProviderStatus(ok=False, status="no_api_key")
+
+    async def _run(self, verb: str, prompt: str, **kw) -> ProviderCall:
+        last: ProviderCall | None = None
+        for p in self.providers:
+            try:
+                method = getattr(p, verb)
+                call: ProviderCall = await method(prompt, **kw)
+            except CapabilityUnavailable as exc:
+                # e.g. Claude asked for search_grounded. Not a failure of the
+                # chain; just skip to the next adapter that can.
+                log.info("ai.fallback.skip feature=%s provider=%s reason=capability:%s", self.feature, getattr(p, "kind", "?"), exc)
+                continue
+            last = call
+            if call.status == "ok":
+                record_answered_by(self.feature or "unknown", call.provider, call.model)
+                log.info("ai.fallback.answered feature=%s provider=%s model=%s", self.feature, call.provider, call.model)
+                return call
+            if call.status == "no_api_key":
+                # Not a real failure — just means this slot isn't configured.
+                log.debug("ai.fallback.skip feature=%s provider=%s reason=no_api_key", self.feature, getattr(p, "kind", "?"))
+                continue
+            if call.status not in _RETRYABLE_FALLBACK:
+                # bad_request / plain error → stop. Trying again on the same
+                # prompt won't help, and this is how a programming bug stays
+                # loud.
+                log.info("ai.fallback.stop feature=%s provider=%s status=%s", self.feature, call.provider, call.status)
+                return call
+            log.info(
+                "ai.fallback.retry feature=%s provider=%s model=%s status=%s",
+                self.feature, call.provider, call.model, call.status,
+            )
+        return last if last is not None else NullProvider()._call()
+
+    async def generate_json(self, prompt: str, *, schema_hint: str | None = None) -> ProviderCall:
+        return await self._run("generate_json", prompt, schema_hint=schema_hint)
+
+    async def generate_text(self, prompt: str) -> ProviderCall:
+        return await self._run("generate_text", prompt)
+
+    async def search_grounded(self, prompt: str) -> ProviderCall:
+        return await self._run("search_grounded", prompt)
+
+
+def _parse_fallback_chain(csv: str) -> list[tuple[str, str]]:
+    """Turn ``gemini:gemini-3.5-flash,claude:claude-sonnet-5-5`` into
+    ``[("gemini", "gemini-3.5-flash"), ("claude", "claude-sonnet-5-5")]``.
+    Unknown provider or model entries are silently dropped so a typo in env
+    can't blow up every AI call."""
+    out: list[tuple[str, str]] = []
+    for raw in (csv or "").split(","):
+        s = raw.strip()
+        if not s or ":" not in s:
+            continue
+        prov, _, mdl = s.partition(":")
+        prov = prov.strip().lower()
+        mdl = mdl.strip()
+        if prov not in ALLOWED_MODELS or mdl not in ALLOWED_MODELS.get(prov, []):
+            continue
+        out.append((prov, mdl))
+    return out
+
+
+def _build_single(provider_name: str, model_name: str, settings: Any) -> LLMProvider:
+    if provider_name == "gemini":
+        key = getattr(settings, "gemini_api_key", None)
+        if key is None or not key.get_secret_value():
+            return NullProvider(model=model_name)
+        return GeminiProvider(api_key=key, model=model_name)
+    if provider_name == "claude":
+        key = getattr(settings, "anthropic_api_key", None)
+        if key is None or not key.get_secret_value():
+            return NullProvider(model=model_name)
+        return ClaudeProvider(api_key=key, model=model_name)
+    return NullProvider(model=model_name)
+
+
+def resolve_fallback_order(settings: Any, primary: tuple[str, str]) -> list[tuple[str, str]]:
+    """Primary + de-duplicated configured fallbacks."""
+    chain: list[tuple[str, str]] = [primary]
+    seen = {primary}
+    for entry in _parse_fallback_chain(getattr(settings, "ai_fallback_models", "") or ""):
+        if entry in seen:
+            continue
+        chain.append(entry)
+        seen.add(entry)
+    return chain
+
+
 # --- Routing ----------------------------------------------------------------
 
 
@@ -435,16 +598,9 @@ def get_for(
     if settings is None:
         return NullProvider(model=model_name)
 
-    if provider_name == "gemini":
-        key = getattr(settings, "gemini_api_key", None)
-        if key is None or not key.get_secret_value():
-            return NullProvider(model=model_name)
-        return GeminiProvider(api_key=key, model=model_name)
-
-    if provider_name == "claude":
-        key = getattr(settings, "anthropic_api_key", None)
-        if key is None or not key.get_secret_value():
-            return NullProvider(model=model_name)
-        return ClaudeProvider(api_key=key, model=model_name)
-
-    return NullProvider(model=model_name)
+    # Build the full chain: primary + configured fallbacks. Even a single
+    # provider goes through FallbackProvider so the "last answered by" trace
+    # is uniform across every feature.
+    chain = resolve_fallback_order(settings, (provider_name, model_name))
+    adapters = [_build_single(p, m, settings) for (p, m) in chain]
+    return FallbackProvider(providers=adapters, feature=feature)

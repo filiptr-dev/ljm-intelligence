@@ -19,7 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.models import AiUsageLog
 from app.identity.models import SettingsRow
-from app.integrations.adapters.ai.provider import ALLOWED_MODELS, DEFAULT_FEATURES
+from app.integrations.adapters.ai.provider import (
+    ALLOWED_MODELS,
+    DEFAULT_FEATURES,
+    last_answered_by,
+    resolve_fallback_order,
+)
 
 
 @dataclass
@@ -33,6 +38,15 @@ class FeaturesResult:
     features: dict[str, FeatureChoiceRow]
     allowed_models: dict[str, list[str]]
     keys_present: dict[str, bool]
+    # Flat ``["gemini:gemini-3.5-flash-lite", "claude:claude-sonnet-5-5"]``
+    # representation of the configured fallback chain shared across every
+    # feature (``AI_FALLBACK_MODELS``), rendered under the Settings panel
+    # so the operator can see what the seam will reach for when the primary
+    # 429s. Does NOT include the per-feature primary — that's in `features`.
+    fallback_order: list[str] = field(default_factory=list)
+    # Feature → "provider:model" of the model that produced the last
+    # successful answer this process has seen. In-memory; resets on restart.
+    last_answered_by: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -98,10 +112,25 @@ async def get_features(session: AsyncSession, settings: Any) -> FeaturesResult:
         and settings.anthropic_api_key.get_secret_value()
     )
 
+    # Fallback order: shared across every feature (we only expose the global
+    # CSV, not each feature's resolved chain — the Settings UI shows one
+    # row). The primary we feed in is the first feature's default just so
+    # ``resolve_fallback_order`` has a seed; we only emit the fallbacks.
+    try:
+        seed = next(iter(DEFAULT_FEATURES.values()))
+        chain = resolve_fallback_order(
+            settings, (seed["provider"], seed["model"])
+        )
+        fallbacks = [f"{p}:{m}" for (p, m) in chain[1:]]
+    except Exception:  # noqa: BLE001
+        fallbacks = []
+
     return FeaturesResult(
         features=out,
         allowed_models={k: list(v) for k, v in ALLOWED_MODELS.items()},
         keys_present={"gemini": gemini_present, "claude": claude_present},
+        fallback_order=fallbacks,
+        last_answered_by=last_answered_by(),
     )
 
 

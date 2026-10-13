@@ -4232,6 +4232,18 @@ export interface components {
             keys_present: {
                 [key: string]: boolean;
             };
+            /**
+             * Fallback Order
+             * @default []
+             */
+            fallback_order: string[];
+            /**
+             * Last Answered By
+             * @default {}
+             */
+            last_answered_by: {
+                [key: string]: string;
+            };
         };
         /** FirstTouchOut */
         FirstTouchOut: {
@@ -9601,7 +9613,7 @@ export interface operations {
                 q?: string | null;
                 page?: number;
                 page_size?: number;
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9636,7 +9648,7 @@ export interface operations {
             query?: {
                 urgent_only?: boolean;
                 limit?: number;
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9670,7 +9682,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9736,7 +9748,7 @@ export interface operations {
     staff_endpoint_inbox_staff_get: {
         parameters: {
             query?: {
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9769,7 +9781,7 @@ export interface operations {
     overview_kpis_endpoint_inbox_overview_kpis_get: {
         parameters: {
             query?: {
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -9902,7 +9914,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -10078,7 +10090,7 @@ export interface operations {
     ask_suggestions_endpoint_inbox_ask_suggestions_get: {
         parameters: {
             query?: {
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -10111,7 +10123,7 @@ export interface operations {
     ask_endpoint_inbox_ask_post: {
         parameters: {
             query?: {
-                mailbox?: string | null;
+                mailbox?: string[] | null;
             };
             header?: {
                 authorization?: string | null;
@@ -10251,7 +10263,7 @@ export interface operations {
     needs_reply_endpoint_inbox_needs_reply_get: {
         parameters: {
             query?: {
-                mailbox?: string | null;
+                mailbox?: string[] | null;
                 limit?: number;
             };
             header?: {

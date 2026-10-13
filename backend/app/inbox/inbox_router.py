@@ -20,22 +20,43 @@ from app.integrations.adapters.email.credentials import resolve_mail_read_allowl
 router = APIRouter(prefix="/inbox", tags=["inbox"])
 
 
-def _validate_mailbox(request: Request, mailbox: str | None) -> str | None:
+def _validate_mailbox(request: Request, mailbox: str | list[str] | None) -> str | list[str] | None:
     """Lowercase + membership-check against the mail-read allowlist.
 
+    Accepts a single mailbox string (back-compat) OR a list of mailboxes
+    (the chips UI in ``mailbox-selector.tsx`` posts repeated ``?mailbox=``
+    params; a single CSV entry like ``?mailbox=a@x,b@x`` also works).
+    Returns ``None`` → no filter; a single string → single-equal filter;
+    a list → IN-filter via the repo's ``_mb_where`` helper.
+
     The allowlist (``settings.mail_read_allowlist`` → vault cache) is the
-    one trust boundary for "which mailboxes the app may touch". Reusing it
-    here keeps us from inventing a second rule that could drift.
+    one trust boundary for "which mailboxes the app may touch".
     """
     if mailbox is None:
         return None
-    normalized = mailbox.strip().lower()
-    if not normalized:
+    if isinstance(mailbox, str):
+        normalized = mailbox.strip().lower()
+        if not normalized:
+            return None
+        allow = resolve_mail_read_allowlist(request.app.state.settings)
+        if allow is None or normalized not in allow:
+            raise HTTPException(status_code=400, detail="mailbox not allowed")
+        return normalized
+    flat: list[str] = []
+    for raw in mailbox:
+        if raw is None:
+            continue
+        for part in str(raw).split(","):
+            v = part.strip().lower()
+            if v and v not in flat:
+                flat.append(v)
+    if not flat:
         return None
     allow = resolve_mail_read_allowlist(request.app.state.settings)
-    if allow is None or normalized not in allow:
-        raise HTTPException(status_code=400, detail="mailbox not allowed")
-    return normalized
+    for v in flat:
+        if allow is None or v not in allow:
+            raise HTTPException(status_code=400, detail="mailbox not allowed")
+    return flat[0] if len(flat) == 1 else flat
 
 
 class MailboxItem(BaseModel):
@@ -180,7 +201,7 @@ async def list_emails_endpoint(
     q: str | None = Query(default=None, max_length=200),
     page: int = Query(default=1, ge=1, le=10000),
     page_size: int = Query(default=40, ge=1, le=200),
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> EmailsPageOut:
     """List emails for the /emails page. Returns the triage counts + sentiment
     bar numbers in one call so the Server Component doesn't need a second trip.
@@ -211,7 +232,7 @@ async def triage_endpoint(
     request: Request,
     urgent_only: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> list[TriageOut]:
     mb = _validate_mailbox(request, mailbox)
     items = await svc.triage_list(session, urgent_only=urgent_only, limit=limit, mailbox=mb)
@@ -223,7 +244,7 @@ async def no_reply_endpoint(
     session: Session,
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> list[NoReplyOut]:
     mb = _validate_mailbox(request, mailbox)
     items = await svc.no_reply_list(session, limit=limit, mailbox=mb)
@@ -243,7 +264,7 @@ async def response_time_endpoint(
 async def staff_endpoint(
     session: Session,
     request: Request,
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> list[StaffOut]:
     mb = _validate_mailbox(request, mailbox)
     items = await svc.staff_performance(session, mailbox=mb)
@@ -254,7 +275,7 @@ async def staff_endpoint(
 async def overview_kpis_endpoint(
     session: Session,
     request: Request,
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> KPIsOut:
     mb = _validate_mailbox(request, mailbox)
     k = await svc.overview_kpis(session, mailbox=mb)
@@ -405,7 +426,7 @@ async def status_board_endpoint(
     session: Session,
     request: Request,
     limit: int = Query(default=200, ge=1, le=1000),
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> list[StatusBoardRowOut]:
     mb = _validate_mailbox(request, mailbox)
     rows = await svc.status_board(session, limit=limit, mailbox=mb)
@@ -553,7 +574,7 @@ class SuggestionsOut(BaseModel):
 async def ask_suggestions_endpoint(
     session: Session,
     request: Request,
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> SuggestionsOut:
     """Return 0-6 concrete AI-suggested chip questions for the Ask-your-inbox
     strip, grounded in the real mailbox (named brokers, lanes, dates, counts).
@@ -581,7 +602,7 @@ async def ask_endpoint(
     session: Session,
     request: Request,
     payload: AskIn,
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
 ) -> AskOutModel:
     """Answer the operator's natural-language question against the real
     inbox via Gemini. Reuses the ``inbox_draft_reply`` AI feature slot.
@@ -689,7 +710,7 @@ class NeedsReplyOut(BaseModel):
 async def needs_reply_endpoint(
     session: Session,
     request: Request,
-    mailbox: str | None = Query(default=None, max_length=320),
+    mailbox: list[str] | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> NeedsReplyOut:
     """Threads whose newest message is inbound and that we owe a reply on.

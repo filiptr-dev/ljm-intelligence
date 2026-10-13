@@ -20,11 +20,18 @@ from pydantic import SecretStr
 
 from app.analysis.ai_usage_service import record
 from app.config import Settings
+
+# ----- get_for routing ------------------------------------------------------
+# ``get_for`` now always returns a FallbackProvider wrapping the primary
+# (and any configured fallbacks). These tests still care about who the
+# PRIMARY is, so they inspect ``providers[0]``. The fallback behaviour is
+# covered end-to-end in ``test_ai_fallback_chain.py``.
 from app.integrations.adapters.ai.provider import (
     ALLOWED_MODELS,
     DEFAULT_FEATURES,
     CapabilityUnavailable,
     ClaudeProvider,
+    FallbackProvider,
     GeminiProvider,
     NullProvider,
     ProviderCall,
@@ -32,37 +39,46 @@ from app.integrations.adapters.ai.provider import (
 )
 from app.main import create_app
 
-# ----- get_for routing ------------------------------------------------------
-
 
 def test_get_for_defaults_to_feature_matrix_and_null_without_keys() -> None:
-    settings = Settings().model_copy(update={"gemini_api_key": None, "anthropic_api_key": None})
+    settings = Settings().model_copy(update={
+        "gemini_api_key": None, "anthropic_api_key": None, "ai_fallback_models": "",
+    })
     p = get_for("email_drafts", settings=settings)
-    # Default is Gemini; no key → NullProvider.
-    assert isinstance(p, NullProvider)
-    assert p.model == DEFAULT_FEATURES["email_drafts"]["model"]
+    assert isinstance(p, FallbackProvider)
+    assert isinstance(p.providers[0], NullProvider)
+    assert p.providers[0].model == DEFAULT_FEATURES["email_drafts"]["model"]
 
 
 def test_get_for_gemini_when_key_present() -> None:
-    settings = Settings().model_copy(update={"gemini_api_key": SecretStr("fake")})
+    settings = Settings().model_copy(update={
+        "gemini_api_key": SecretStr("fake"), "ai_fallback_models": "",
+    })
     p = get_for("email_drafts", settings=settings)
-    assert isinstance(p, GeminiProvider)
-    assert p.model in ALLOWED_MODELS["gemini"]
+    assert isinstance(p, FallbackProvider)
+    assert isinstance(p.providers[0], GeminiProvider)
+    assert p.providers[0].model in ALLOWED_MODELS["gemini"]
 
 
 def test_get_for_claude_via_override() -> None:
-    settings = Settings().model_copy(update={"anthropic_api_key": SecretStr("fake")})
+    settings = Settings().model_copy(update={
+        "anthropic_api_key": SecretStr("fake"), "ai_fallback_models": "",
+    })
     overrides = {"email_drafts": {"provider": "claude", "model": "claude-sonnet-5-5"}}
     p = get_for("email_drafts", settings=settings, ai_features=overrides)
-    assert isinstance(p, ClaudeProvider)
-    assert p.model in ALLOWED_MODELS["claude"]
+    assert isinstance(p, FallbackProvider)
+    assert isinstance(p.providers[0], ClaudeProvider)
+    assert p.providers[0].model in ALLOWED_MODELS["claude"]
 
 
 def test_get_for_overrides_route_feature_to_gemini() -> None:
-    settings = Settings().model_copy(update={"gemini_api_key": SecretStr("g")})
+    settings = Settings().model_copy(update={
+        "gemini_api_key": SecretStr("g"), "ai_fallback_models": "",
+    })
     overrides = {"email_drafts": {"provider": "gemini", "model": "gemini-3.5-flash-lite"}}
     p = get_for("email_drafts", settings=settings, ai_features=overrides)
-    assert isinstance(p, GeminiProvider)
+    assert isinstance(p, FallbackProvider)
+    assert isinstance(p.providers[0], GeminiProvider)
 
 
 # ----- adapter round-trip (mocked) -----------------------------------------

@@ -4,7 +4,6 @@ import Link from "next/link"
 import { AlertCircle, Search, Sparkles } from "lucide-react"
 import { INTENT_META, IntentBadge, SentimentDot } from "@/components/app/intent"
 import { MailboxSelector } from "@/components/app/mailbox-selector"
-import { MailBackfillProgress } from "@/components/app/mail-backfill-progress"
 import { BarList, PageHeader, Panel, StackBar } from "@/components/app/ui"
 import { buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -53,7 +52,18 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const sp = await searchParams
   const q = typeof sp.q === "string" ? sp.q.trim() : ""
   const intent = typeof sp.intent === "string" ? sp.intent : undefined
-  const mailbox = typeof sp.mailbox === "string" && sp.mailbox.trim() ? sp.mailbox.trim() : undefined
+  const mailbox: string[] | undefined = ((): string[] | undefined => {
+    const raw = sp.mailbox
+    const arr = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]
+    const flat: string[] = []
+    for (const v of arr) {
+      for (const part of String(v).split(",")) {
+        const t = part.trim()
+        if (t && !flat.includes(t)) flat.push(t)
+      }
+    }
+    return flat.length ? flat : undefined
+  })()
   const page = Math.max(1, Number(sp.page) || 1)
   const mailboxes = await inbox.listMailboxes().catch(() => [])
   const suggestions = await inbox.suggestQuestions({ mailbox }).catch(() => [])
@@ -98,7 +108,8 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
 
   const href = (p: Record<string, string | number | undefined>) => {
     const u = new URLSearchParams()
-    Object.entries({ intent, q: q || undefined, mailbox, ...p }).forEach(([k, v]) => v !== undefined && v !== "" && u.set(k, String(v)))
+    Object.entries({ intent, q: q || undefined, ...p }).forEach(([k, v]) => v !== undefined && v !== "" && u.set(k, String(v)))
+    if (mailbox) for (const m of mailbox) u.append("mailbox", m)
     return `/emails?${u}`
   }
 
@@ -125,10 +136,8 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
 
       <MailboxSelector options={mailboxes} />
 
-      <div className="mb-3"><MailBackfillProgress /></div>
-
       <Form action="/emails" className="mb-3 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
-        {mailbox ? <input type="hidden" name="mailbox" value={mailbox} /> : null}
+        {mailbox ? mailbox.map((m) => <input key={m} type="hidden" name="mailbox" value={m} />) : null}
         <Sparkles className="hidden size-5 shrink-0 text-chart-2 sm:block" />
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground sm:hidden" />
@@ -154,7 +163,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
               return (
                 <Link
                   key={s.text}
-                  href={`/emails?q=${encodeURIComponent(s.text)}${mailbox ? `&mailbox=${encodeURIComponent(mailbox)}` : ""}${chipParam}`}
+                  href={`/emails?q=${encodeURIComponent(s.text)}${mailbox ? mailbox.map((m) => `&mailbox=${encodeURIComponent(m)}`).join("") : ""}${chipParam}`}
                   className="rounded-sm bg-muted px-2 py-1 text-xs hover:bg-secondary"
                   title={s.kind}
                 >
@@ -199,7 +208,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
 
       {q ? (
         <Suspense
-          key={`${q}:${mailbox ?? ""}:${sp.chip ?? ""}`}
+          key={`${q}:${(mailbox ?? []).join(",")}:${sp.chip ?? ""}`}
           fallback={
             <div className="mb-5 flex items-center gap-2 rounded-sm border border-chart-2/40 bg-chart-2/5 p-4 text-sm">
               <Sparkles className="size-4 animate-pulse text-chart-2" />
@@ -312,7 +321,7 @@ async function AskAnswer({
   q, mailbox, chip,
 }: {
   q: string
-  mailbox: string | undefined
+  mailbox: string[] | undefined
   chip: ChipFilter | null
 }) {
   let ask: AskOut | null = null
