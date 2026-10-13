@@ -496,10 +496,21 @@ async def list_broker_predictions(
     session: AsyncSession, *, broker_domain: str | None = None, limit: int = 500
 ) -> list[BrokerPredictionRow]:
     rows = await list_broker_predictions_rows(session, broker_domain=broker_domain, limit=limit)
+
+    def _display_name(name: str | None, dom: str) -> str | None:
+        # `*.mail.parade.ai` relay — show the preceding label as the broker
+        # name until the lead row carries one. e.g. `ntg.mail.parade.ai` → "NTG".
+        if name:
+            return name
+        if dom.endswith(".mail.parade.ai"):
+            head = dom.rsplit(".mail.parade.ai", 1)[0].split(".")[-1]
+            return head.upper() if len(head) <= 4 else head.title()
+        return None
+
     return [
         BrokerPredictionRow(
             broker_domain=r.broker_domain,
-            broker_name=r.broker_name,
+            broker_name=_display_name(r.broker_name, (r.broker_domain or "").lower()),
             win_probability=float(r.win_probability or 0),
             health_score=int(r.health_score or 50),
             best_send_hour=r.best_send_hour,

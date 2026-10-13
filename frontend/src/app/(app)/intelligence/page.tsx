@@ -58,6 +58,12 @@ export default async function IntelligencePage() {
         description={`Nightly predictions over the inbox. ${brokers.length} broker${brokers.length === 1 ? "" : "s"} analyzed, ${lanes.length} lane${lanes.length === 1 ? "" : "s"}.`}
       />
 
+      {brokers.length === 0 && lanes.length === 0 ? (
+        <div className="mb-6 rounded-sm border border-border bg-card p-4 text-sm text-muted-foreground">
+          Not enough email yet — importing history. Insights appear here once the first inbox sync + nightly analysis complete.
+        </div>
+      ) : null}
+
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         {topBrokers.length > 0 ? (
           <Panel title="Who's running hot right now" description="Top shippers you're most likely to book this week. Call these first.">
