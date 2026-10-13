@@ -39,6 +39,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
     throw e
   }
   const draft = await inbox.getAiDraft(threadId).catch(() => null)
+  const related = await inbox.getRelatedThreads(threadId).catch(() => null)
   const subjectForReply = draft?.subject ?? (thread.subject.toLowerCase().startsWith("re:") ? thread.subject : `Re: ${thread.subject}`)
   const bodyForReply = draft?.body_text ?? ""
   const lastInbound = [...thread.messages].reverse().find((m) => m.direction === "in")
@@ -53,6 +54,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
       />
       <Link href="/emails" className="mb-3 inline-block text-sm text-muted-foreground hover:underline">← Back to inbox</Link>
 
+      <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
       <Panel title="Conversation" description="Newest at the bottom.">
         <Table>
           <TableBody>
@@ -90,6 +92,37 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
           </TableBody>
         </Table>
       </Panel>
+      <aside aria-label="Other conversations with this counterpart" className="min-w-0">
+        <Panel
+          title="Other conversations"
+          description={related && related.counterpart.address ? `With ${related.counterpart.address}` : "No counterpart"}
+        >
+          {related && related.items.length > 0 ? (
+            <ul className="divide-y divide-border text-sm">
+              {related.items.map((r) => {
+                const mapped = INTENT_MAP[r.latest_intent ?? "routine"] ?? "other"
+                return (
+                  <li key={r.thread_id} className="py-2">
+                    <Link href={`/emails/${encodeURIComponent(r.thread_id)}`} className="block hover:underline">
+                      <div className="font-semibold">{r.latest_subject || "(no subject)"}</div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                        <IntentBadge intent={mapped} />
+                        <span>{dateTime(r.latest_received_at as unknown as string)}</span>
+                        <span>· {r.message_count} msg</span>
+                      </div>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              No other conversations with this counterpart.
+            </div>
+          )}
+        </Panel>
+      </aside>
+      </div>
 
       <div className="mt-5">
         <ThreadReply threadId={threadId} initialSubject={subjectForReply} initialBody={bodyForReply} recipientEmail={recipientEmail} />

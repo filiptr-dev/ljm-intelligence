@@ -78,6 +78,18 @@ export async function getThread(threadId: string, signal?: AbortSignal): Promise
   return unwrap(res, `/inbox/threads/${threadId}`)
 }
 
+export type RelatedThreads = components["schemas"]["RelatedThreadsOut"]
+
+export async function getRelatedThreads(
+  threadId: string, signal?: AbortSignal,
+): Promise<RelatedThreads> {
+  const res = await api.GET("/inbox/threads/{thread_id}/related", {
+    params: { path: { thread_id: threadId } },
+    signal,
+  })
+  return unwrap(res, `/inbox/threads/${threadId}/related`)
+}
+
 export async function getAiDraft(threadId: string, signal?: AbortSignal): Promise<AiDraft | null> {
   const res = await api.GET("/inbox/threads/{thread_id}/ai-draft", {
     params: { path: { thread_id: threadId } },

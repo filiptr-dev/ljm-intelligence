@@ -388,6 +388,156 @@ async def relationship_health(session: AsyncSession, broker_domain: str) -> Rela
     )
 
 
+@dataclass
+class CounterpartIdentity:
+    address: str
+    domain: str | None
+
+
+@dataclass
+class RelatedThreadRow:
+    thread_id: str
+    latest_subject: str
+    latest_received_at: datetime
+    latest_intent: str | None
+    message_count: int
+
+
+@dataclass
+class RelatedThreadsResult:
+    counterpart: CounterpartIdentity
+    items: list[RelatedThreadRow]
+
+
+async def list_counterpart_threads(
+    session: AsyncSession, thread_id: str, *, limit: int = 50,
+) -> RelatedThreadsResult | None:
+    """All other threads with the counterpart on ``thread_id``.
+
+    Counterpart = the most recent non-owner ``from_addr`` in the thread
+    (``from_addr != mailbox``). Match other threads by equal
+    ``email_lower`` OR equal ``email_domain`` when the domain is not a
+    free-mail provider — same rule the shipper-merge pipeline uses.
+
+    ORM-only (no ``text(...)``). ``latest_intent`` is pulled with a
+    correlated scalar subquery against ``message_insights``.
+    """
+    from sqlalchemy import and_, desc, func as _func, or_, select as _select
+
+    from app.inbox.models import MailMessage as _MM, MessageInsight as _MI
+    from app.prospecting.pipeline.shipper_merge import FREE_MAIL_DOMAINS
+
+    # Resolve counterpart from the current thread.
+    cp_row = (
+        await session.execute(
+            _select(_MM.email_lower, _MM.email_domain)
+            .where(_MM.thread_id == thread_id)
+            .where(_MM.from_addr != _MM.mailbox)
+            .order_by(desc(_MM.received_at))
+            .limit(1)
+        )
+    ).first()
+    if cp_row is None:
+        return None
+    cp_email = (cp_row[0] or "").strip().lower() or None
+    cp_domain = (cp_row[1] or "").strip().lower() or None
+    if cp_email is None and cp_domain is None:
+        return None
+
+    # Domain is useful only when it's a real company domain.
+    domain_usable = (
+        cp_domain is not None and cp_domain not in FREE_MAIL_DOMAINS
+    )
+
+    predicates = []
+    if cp_email:
+        predicates.append(_MM.email_lower == cp_email)
+    if domain_usable:
+        predicates.append(_MM.email_domain == cp_domain)
+    if not predicates:
+        return RelatedThreadsResult(
+            counterpart=CounterpartIdentity(
+                address=cp_email or "",
+                domain=cp_domain if domain_usable else None,
+            ),
+            items=[],
+        )
+
+    match_clause = or_(*predicates) if len(predicates) > 1 else predicates[0]
+
+    # Correlated subquery: latest intent for a given thread.
+    insight_sq = (
+        _select(_MI.intent)
+        .where(_MI.thread_id == _MM.thread_id)
+        .order_by(desc(_MI.created_at))
+        .limit(1)
+        .scalar_subquery()
+    )
+
+    # Aggregate per thread: latest subject, latest received_at, count.
+    grp = (
+        _select(
+            _MM.thread_id.label("thread_id"),
+            _func.max(_MM.received_at).label("latest_received_at"),
+            _func.count().label("message_count"),
+        )
+        .where(_MM.thread_id != thread_id)
+        .where(match_clause)
+        .group_by(_MM.thread_id)
+        .subquery()
+    )
+
+    # Pick the latest subject for each thread via a correlated subquery
+    # (not a window) — simpler and works on sqlite too.
+    subject_sq = (
+        _select(_MM.subject)
+        .where(_MM.thread_id == grp.c.thread_id)
+        .order_by(desc(_MM.received_at))
+        .limit(1)
+        .scalar_subquery()
+    )
+    intent_sq2 = (
+        _select(_MI.intent)
+        .where(_MI.thread_id == grp.c.thread_id)
+        .order_by(desc(_MI.created_at))
+        .limit(1)
+        .scalar_subquery()
+    )
+    _ = and_, insight_sq  # keep names referenced
+
+    rows = (
+        await session.execute(
+            _select(
+                grp.c.thread_id,
+                subject_sq.label("latest_subject"),
+                grp.c.latest_received_at,
+                intent_sq2.label("latest_intent"),
+                grp.c.message_count,
+            )
+            .order_by(desc(grp.c.latest_received_at))
+            .limit(limit)
+        )
+    ).all()
+
+    items = [
+        RelatedThreadRow(
+            thread_id=r[0],
+            latest_subject=(r[1] or ""),
+            latest_received_at=_as_utc(r[2]) or r[2],
+            latest_intent=r[3],
+            message_count=int(r[4] or 0),
+        )
+        for r in rows
+    ]
+    return RelatedThreadsResult(
+        counterpart=CounterpartIdentity(
+            address=cp_email or "",
+            domain=cp_domain if domain_usable else None,
+        ),
+        items=items,
+    )
+
+
 async def get_thread(session: AsyncSession, thread_id: str) -> list[EmailRow]:
     """All messages in a thread (newest-last), with their insights."""
     rows = await fetch_thread_rows(session, thread_id=thread_id)
