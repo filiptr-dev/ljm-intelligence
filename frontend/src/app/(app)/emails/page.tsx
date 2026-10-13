@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import Form from "next/form"
 import Link from "next/link"
 import { AlertCircle, Search, Sparkles } from "lucide-react"
@@ -73,28 +74,15 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
     }
   }
 
-  // When the operator submits a question, hand it to the AI first. The
-  // server runs Gemini over a bounded slice of real mail and returns
-  // a natural-language answer, cited threads, AND the structured filter
-  // hint we still use to narrow the list below. On AI failure or empty
-  // inbox the response carries ok=false + an error reason so the UI
-  // can always explain *why* there is no answer.
-  let ask: AskOut | null = null
-  let effectiveIntent = intent
-  let effectiveQ: string | undefined = q || undefined
-  if (q && !intent) {
-    try {
-      ask = await inbox.ask(q, { mailbox, chip: chipFromUrl })
-    } catch {
-      ask = {
-        intent: null, keywords: [], sentiment: null, summary: "",
-        answer: "The server couldn't reach the AI service. Please try again.",
-        citations: [], ok: false, error: "ai_error",
-      }
-    }
-    if (ask?.intent) effectiveIntent = ask.intent
-    if (ask && ask.keywords.length > 0) effectiveQ = ask.keywords[0]
-  }
+  // The AI answer used to be awaited inline — 12-25s with no feedback.
+  // We now stream it via a Suspense boundary so the page shell + the row
+  // list render immediately. For row filtering we use whatever the chip
+  // encoded (intent / keyword) so the list still narrows the moment the
+  // chip is clicked; the Gemini-interpreted intent used to overlay this
+  // and now lands later, in-place of "Answering…".
+  const effectiveIntent =
+    intent || (typeof chipFromUrl?.intent === "string" ? chipFromUrl.intent : undefined)
+  const effectiveQ: string | undefined = q || undefined
 
   const data = await inbox.listEmails({ intent: effectiveIntent, q: effectiveQ, page, page_size: PAGE, mailbox })
   const rows = data.items
@@ -178,55 +166,21 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         <AskButton />
       </Form>
 
-      {ask ? (
-        <div
-          className={cn(
-            "mb-5 rounded-sm border p-4",
-            ask.ok
-              ? "border-chart-2/40 bg-chart-2/5"
-              : "border-destructive/40 bg-destructive/5",
-          )}
+      {q ? (
+        <Suspense
+          key={`${q}:${mailbox ?? ""}:${sp.chip ?? ""}`}
+          fallback={
+            <div className="mb-5 flex items-center gap-2 rounded-sm border border-chart-2/40 bg-chart-2/5 p-4 text-sm">
+              <Sparkles className="size-4 animate-pulse text-chart-2" />
+              <span className="font-semibold text-chart-2">Answering…</span>
+              <span className="text-muted-foreground">
+                reading the inbox for "{q}" — this takes 10-25 seconds.
+              </span>
+            </div>
+          }
         >
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
-            {ask.ok ? (
-              <>
-                <Sparkles className="size-3.5 text-chart-2" />
-                <span className="text-chart-2">AI answer</span>
-              </>
-            ) : (
-              <>
-                <AlertCircle className="size-3.5 text-destructive" />
-                <span className="text-destructive">
-                  No AI answer{ask.error ? ` · ${ask.error.replace(/_/g, " ")}` : ""}
-                </span>
-              </>
-            )}
-          </div>
-          <p className="text-sm leading-relaxed text-foreground">{ask.answer}</p>
-          {ask.ok && ask.summary ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Interpreted as:</span> {ask.summary}
-            </p>
-          ) : null}
-          {ask.ok && ask.citations.length > 0 ? (
-            <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
-              {ask.citations.map((c) => (
-                <li key={c.thread_id} className="text-xs">
-                  <Link
-                    href={`/emails/${encodeURIComponent(c.thread_id)}`}
-                    className="font-medium hover:underline"
-                  >
-                    {c.subject || "(no subject)"}
-                  </Link>
-                  <span className="ml-1 text-muted-foreground">
-                    — {c.from_addr}
-                    {c.sent_at ? ` · ${c.sent_at.slice(0, 10)}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+          <AskAnswer q={q} mailbox={mailbox} chip={chipFromUrl} />
+        </Suspense>
       ) : null}
 
       <div className="mb-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -313,5 +267,82 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         </div>
       </div>
     </>
+  )
+}
+
+/**
+ * AI answer block — streamed in via a Suspense boundary so the row list
+ * and the page shell render immediately. Earlier version awaited this
+ * at the top of the page, which stalled the whole route for 10-25s on a
+ * cold Gemini call. The chip's own `intent` filter already narrows the
+ * list below, so dropping the gate doesn't lose the chip semantics.
+ */
+async function AskAnswer({
+  q, mailbox, chip,
+}: {
+  q: string
+  mailbox: string | undefined
+  chip: ChipFilter | null
+}) {
+  let ask: AskOut | null = null
+  try {
+    ask = await inbox.ask(q, { mailbox, chip })
+  } catch {
+    ask = {
+      intent: null, keywords: [], sentiment: null, summary: "",
+      answer: "The server couldn't reach the AI service. Please try again.",
+      citations: [], ok: false, error: "ai_error",
+    }
+  }
+  if (!ask) return null
+  return (
+    <div
+      className={cn(
+        "mb-5 rounded-sm border p-4",
+        ask.ok
+          ? "border-chart-2/40 bg-chart-2/5"
+          : "border-destructive/40 bg-destructive/5",
+      )}
+    >
+      <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+        {ask.ok ? (
+          <>
+            <Sparkles className="size-3.5 text-chart-2" />
+            <span className="text-chart-2">AI answer</span>
+          </>
+        ) : (
+          <>
+            <AlertCircle className="size-3.5 text-destructive" />
+            <span className="text-destructive">
+              No AI answer{ask.error ? ` · ${ask.error.replace(/_/g, " ")}` : ""}
+            </span>
+          </>
+        )}
+      </div>
+      <p className="text-sm leading-relaxed text-foreground">{ask.answer}</p>
+      {ask.ok && ask.summary ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Interpreted as:</span> {ask.summary}
+        </p>
+      ) : null}
+      {ask.ok && ask.citations.length > 0 ? (
+        <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
+          {ask.citations.map((c) => (
+            <li key={c.thread_id} className="text-xs">
+              <Link
+                href={`/emails/${encodeURIComponent(c.thread_id)}`}
+                className="font-medium hover:underline"
+              >
+                {c.subject || "(no subject)"}
+              </Link>
+              <span className="ml-1 text-muted-foreground">
+                — {c.from_addr}
+                {c.sent_at ? ` · ${c.sent_at.slice(0, 10)}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   )
 }
