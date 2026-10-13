@@ -95,13 +95,10 @@ export async function getAiDraft(
   opts: { hint?: string } = {},
   signal?: AbortSignal,
 ): Promise<AiDraft | null> {
-  // `hint` is a new query param (backend `/inbox/threads/{thread_id}/ai-draft`
-  // ships this patch); the generated schema will catch up on the next
-  // `pnpm gen:api`. Cast until then — the shape is validated server-side.
   const res = await api.GET("/inbox/threads/{thread_id}/ai-draft", {
     params: {
       path: { thread_id: threadId },
-      query: (opts.hint ? { hint: opts.hint } : {}) as { tone?: string },
+      query: opts.hint ? { hint: opts.hint } : {},
     },
     signal,
   })
@@ -109,31 +106,17 @@ export async function getAiDraft(
   return res.data as AiDraft
 }
 
-/** Row shape for `GET /inbox/needs-reply`. Backend adds the schema; the
- *  typed path is picked up on the next `pnpm gen:api`. */
-export type NeedsReplyRow = {
-  thread_id: string
-  mailbox: string
-  subject: string
-  from_addr: string
-  broker_name: string | null
-  intent: string
-  urgency: string
-  sent_at: string
-}
+/** Row shape for `GET /inbox/needs-reply`. */
+export type NeedsReplyRow = components["schemas"]["NeedsReplyRowOut"]
 
 export async function needsReply(
   opts: { mailbox?: string; limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<NeedsReplyRow[]> {
-  // Untyped until the schema refresh — the backend validates the shape.
-  const res = await (api.GET as unknown as (
-    url: string,
-    init: { params?: { query?: Record<string, unknown> }; signal?: AbortSignal },
-  ) => Promise<{ data?: { items: NeedsReplyRow[] }; error?: unknown; response: Response }>)(
-    "/inbox/needs-reply",
-    { params: { query: opts }, signal },
-  )
+  const res = await api.GET("/inbox/needs-reply", {
+    params: { query: opts },
+    signal,
+  })
   if (res.data?.items) return res.data.items
   if (res.error) throw new ApiRequestError(res.response.status, "/inbox/needs-reply", res.error)
   return []
@@ -210,7 +193,6 @@ export async function aiDraftCompose(
   signal?: AbortSignal,
 ): Promise<AiDraft> {
   const res = await api.POST("/inbox/ai-draft", {
-    // `hint` is a new field — tolerate until the schema refresh.
     body: {
       to: body.to,
       purpose: body.purpose,
@@ -220,9 +202,6 @@ export async function aiDraftCompose(
       lane: body.lane ?? "",
       equipment: body.equipment ?? "",
       hint: body.hint ?? "",
-    } as unknown as {
-      to: string; purpose: string; tone: string; brief: string;
-      recipient_name: string; lane: string; equipment: string;
     },
     signal,
   })

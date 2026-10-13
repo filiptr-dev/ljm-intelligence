@@ -81,7 +81,7 @@ async def test_analysis_list_broker_predictions_no_db():
         computed_at: datetime = datetime(2026, 10, 8, tzinfo=UTC)
 
     async def _fake(session, *, broker_domain, limit):
-        return [_Pred()]
+        return [(_Pred(), None)]
 
     with patch("app.analysis.service.list_broker_predictions_rows", _fake):
         rows = await svc.list_broker_predictions(session=None, broker_domain=None, limit=10)  # type: ignore[arg-type]

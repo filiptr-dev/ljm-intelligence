@@ -306,6 +306,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/ai-style": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ai Style Get
+         * @description Read ``ai.match_style`` — the "drafts imitate LJM's past sent emails"
+         *     switch. Default ON when the row is absent.
+         */
+        get: operations["ai_style_get_settings_ai_style_get"];
+        /** Ai Style Put */
+        put: operations["ai_style_put_settings_ai_style_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/settings/connectors/gmail/send-switch": {
         parameters: {
             query?: never;
@@ -1471,6 +1493,28 @@ export interface paths {
         };
         /** Related Threads Endpoint */
         get: operations["related_threads_endpoint_inbox_threads__thread_id__related_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/needs-reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Needs Reply Endpoint
+         * @description Threads whose newest message is inbound and that we owe a reply on.
+         *
+         *     Routine-low and auto-reply / OOO threads are excluded in the service.
+         */
+        get: operations["needs_reply_endpoint_inbox_needs_reply_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2751,6 +2795,11 @@ export interface components {
              * @default
              */
             equipment: string;
+            /**
+             * Hint
+             * @default
+             */
+            hint: string;
         };
         /** AiDraftOutModel */
         AiDraftOutModel: {
@@ -2767,6 +2816,16 @@ export interface components {
             ai_used: boolean;
             /** Ai Error */
             ai_error?: string | null;
+        };
+        /** AiStyleIn */
+        AiStyleIn: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** AiStyleOut */
+        AiStyleOut: {
+            /** Enabled */
+            enabled: boolean;
         };
         /** AlertStatement */
         AlertStatement: {
@@ -5327,6 +5386,33 @@ export interface components {
             /** Linkedin Url */
             linkedin_url?: string | null;
         };
+        /** NeedsReplyOut */
+        NeedsReplyOut: {
+            /** Items */
+            items: components["schemas"]["NeedsReplyRowOut"][];
+        };
+        /** NeedsReplyRowOut */
+        NeedsReplyRowOut: {
+            /** Thread Id */
+            thread_id: string;
+            /** Mailbox */
+            mailbox: string;
+            /** Subject */
+            subject: string;
+            /** From Addr */
+            from_addr: string;
+            /** Broker Name */
+            broker_name: string | null;
+            /** Intent */
+            intent: string;
+            /** Urgency */
+            urgency: string;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+        };
         /** NewLeadsTile */
         NewLeadsTile: {
             /** Value */
@@ -7707,6 +7793,72 @@ export interface operations {
             };
         };
     };
+    ai_style_get_settings_ai_style_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiStyleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_style_put_settings_ai_style_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiStyleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiStyleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     send_switch_settings_connectors_gmail_send_switch_post: {
         parameters: {
             query?: never;
@@ -9720,6 +9872,7 @@ export interface operations {
         parameters: {
             query?: {
                 tone?: string;
+                hint?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -10018,6 +10171,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RelatedThreadsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    needs_reply_endpoint_inbox_needs_reply_get: {
+        parameters: {
+            query?: {
+                mailbox?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedsReplyOut"];
                 };
             };
             /** @description Validation Error */

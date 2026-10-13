@@ -28,28 +28,22 @@ export function OwnerSwitches({ sections = ["gmail", "switches", "forget"] }: { 
   const [matchStyle, setMatchStyle] = useState<boolean>(true)
   const [pending, startTransition] = useTransition()
 
-  // These endpoints ship on the same patch — regenerate schema.d.ts after
-  // the merge and the casts can go.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const anyApi = api as any
-
   useEffect(() => {
     void (async () => {
       try {
-        const res = await anyApi.GET("/settings/ai-style", {})
+        const res = await api.GET("/settings/ai-style", {})
         if (res.data && typeof res.data.enabled === "boolean") setMatchStyle(res.data.enabled)
       } catch {
         /* keep default ON */
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function toggleMatchStyle(next: boolean) {
     setMatchStyle(next)
     startTransition(async () => {
       try {
-        const res = await anyApi.PUT("/settings/ai-style", { body: { enabled: next } })
+        const res = await api.PUT("/settings/ai-style", { body: { enabled: next } })
         if (res.data && typeof res.data.enabled === "boolean") {
           setMatchStyle(res.data.enabled)
           flashOk(`Match our writing style: ${res.data.enabled ? "ON" : "OFF"}.`)
