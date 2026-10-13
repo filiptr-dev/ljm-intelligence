@@ -251,6 +251,20 @@ async def run_crawl(
             log.exception("run_crawl: enrichment stage failed; upstream passes persisted")
             counts["errors"] += 1
 
+        # Fit-score backfill — deterministic score (state + contacts) landed on
+        # every lead still missing one so /leads never ranks at 0 for the long
+        # tail the Gemini stage didn't reach. AI-scored leads are left alone
+        # (current_score is only overwritten when NULL).
+        try:
+            from app.prospecting.score_all_leads import score_all_leads
+
+            fit_stats = await score_all_leads(sessionmaker, only_missing=True)
+            counts["fit_scored"] = fit_stats.updated
+            counts["fit_scanned"] = fit_stats.scanned
+        except Exception:
+            log.exception("run_crawl: fit-score backfill failed; upstream passes persisted")
+            counts["errors"] += 1
+
         # Auto-outreach stage — only fires when `settings.auto_outreach_enabled`
         # is True (default False). Own try/except so a bad send-day never rolls
         # back enrichment. Loud status in `crawl_runs.counts`.
