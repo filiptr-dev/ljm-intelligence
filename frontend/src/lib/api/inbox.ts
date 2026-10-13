@@ -78,6 +78,26 @@ export async function getThread(threadId: string, signal?: AbortSignal): Promise
   return unwrap(res, `/inbox/threads/${threadId}`)
 }
 
+export type LatestThread = components["schemas"]["LatestThreadOut"]
+
+/**
+ * Latest inbox thread for a broker — powers the broker-page "Draft this"
+ * shortcut. Backend reuses the lead-summary identity rules (primary +
+ * contact emails + non-free-mail company domain), so it matches threads
+ * our ``q=<email>`` search missed. ``{thread_id: null}`` means no mail
+ * is attributable to this broker yet.
+ */
+export async function latestThreadForLead(
+  leadId: string,
+  signal?: AbortSignal,
+): Promise<LatestThread> {
+  const res = await api.GET("/inbox/threads/latest", {
+    params: { query: { lead_id: leadId } },
+    signal,
+  })
+  return unwrap(res, "/inbox/threads/latest")
+}
+
 export type RelatedThreads = components["schemas"]["RelatedThreadsOut"]
 
 export async function getRelatedThreads(

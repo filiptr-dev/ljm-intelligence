@@ -49,7 +49,13 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env.local-docker
+    env_file:
+      # .env.local-docker is the single local secrets file: it carries
+      # CRON_SECRET (same value as backend/.env — keep them in sync).
+      # The frontend only needs CRON_SECRET to sign "Start now" POSTs;
+      # it must NEVER see backend/.env (which holds GEMINI_API_KEY,
+      # GMAIL_SA_JSON, TENANT_CRED_KEY, load-board passwords, etc.).
+      - .env.local-docker
     environment:
       # API_URL is the server-side base URL read by client.ts and the proxy/login
       # BFF routes (process.env.API_URL || process.env.NEXT_PUBLIC_API_URL).
@@ -58,7 +64,6 @@ services:
       # not the api service — causing 502s on every server-rendered page.
       API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: http://localhost:8001
-      CRON_SECRET: "${CRON_SECRET:-}"
       # CI=true prevents pnpm from asking for TTY confirmation when
       # it detects a mismatch between container node_modules and lockfile.
       CI: "true"

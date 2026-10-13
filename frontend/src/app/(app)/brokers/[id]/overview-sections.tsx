@@ -380,7 +380,7 @@ export function AiSummaryCard({
               Draft email
             </button>
             {step ? (
-              <DraftThisButton brokerId={brokerId} email={email} hint={step.label} />
+              <DraftThisButton brokerId={brokerId} hint={step.label} />
             ) : null}
           </div>
         ) : (
@@ -422,18 +422,22 @@ export function AiSummaryCard({
  * `/emails/compose?broker=<id>&hint=<step>` where the compose page server-
  * side-prefills an AI draft keyed off the hint.
  */
-function DraftThisButton({ brokerId, email, hint }: { brokerId: string; email: string; hint: string }) {
+function DraftThisButton({ brokerId, hint }: { brokerId: string; hint: string }) {
   const router = useRouter()
   const [pending, startTransition] = React.useTransition()
   const go = () => {
     startTransition(async () => {
       try {
-        // Narrow by the broker's email — the fastest way we have today to
-        // find a prior thread without a dedicated endpoint.
-        const page = await inbox.listEmails({ q: email, page_size: 1 })
-        const tid = page.items[0]?.thread_id
-        if (tid) {
-          router.push(`/emails/${encodeURIComponent(tid)}?draft_hint=${encodeURIComponent(hint)}`)
+        // Dedicated endpoint — matches on primary + contact emails and the
+        // broker's non-free-mail company domain, same identity rules the
+        // lead-summary uses. Replaces the old ``q=<email>`` search, which
+        // missed threads that only ever cc'd a contact or routed through
+        // a different corp address on the same domain.
+        const latest = await inbox.latestThreadForLead(brokerId)
+        if (latest.thread_id) {
+          router.push(
+            `/emails/${encodeURIComponent(latest.thread_id)}?draft_hint=${encodeURIComponent(hint)}`,
+          )
           return
         }
       } catch {

@@ -409,6 +409,44 @@ class RelatedThreadsResult:
     items: list[RelatedThreadRow]
 
 
+async def latest_thread_for_lead(
+    session: AsyncSession, lead_id: str,
+) -> str | None:
+    """Return the ``thread_id`` of the most recent mail belonging to a lead.
+
+    Reuses :func:`app.analysis.lead_ai_summary_service.resolve_lead_match_identity`
+    so the broker-page "Draft this" shortcut sees the exact same mail the
+    lead summary sees — primary + contact emails plus the lead's non-free-mail
+    domain, with the ambiguity filter that drops shared-with-another-lead
+    identifiers. Returns ``None`` when the broker has no attributable mail.
+
+    Raises :class:`app.analysis.lead_ai_summary_service.LeadNotFound` when
+    ``lead_id`` is unknown — the router maps that to a 404.
+    """
+    from sqlalchemy import desc as _desc, or_ as _or_, select as _select
+
+    from app.analysis.lead_ai_summary_service import resolve_lead_match_identity
+    from app.inbox.models import MailMessage as _MM
+
+    emails, domains = await resolve_lead_match_identity(session, lead_id)
+    if not emails and not domains:
+        return None
+    where_clauses = []
+    if emails:
+        where_clauses.append(_MM.email_lower.in_(sorted(emails)))
+    if domains:
+        where_clauses.append(_MM.email_domain.in_(sorted(domains)))
+    row = (
+        await session.execute(
+            _select(_MM.thread_id)
+            .where(_or_(*where_clauses))
+            .order_by(_desc(_MM.received_at), _desc(_MM.message_id))
+            .limit(1)
+        )
+    ).first()
+    return str(row[0]) if row is not None else None
+
+
 async def list_counterpart_threads(
     session: AsyncSession, thread_id: str, *, limit: int = 50,
 ) -> RelatedThreadsResult | None:

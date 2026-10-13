@@ -224,9 +224,20 @@ def _fallback_draft(lead: dict, tone: Tone) -> tuple[str, str]:
     return subject, "\n\n".join(paras)
 
 
-def _draft_prompt(lead: dict, tone: Tone, instructions: str | None) -> str:
+def _draft_prompt(
+    lead: dict,
+    tone: Tone,
+    instructions: str | None,
+    *,
+    style: str = "",
+) -> str:
     stance = _stance(lead)
     angle = f"ANGLE: {STANCE_HINT[stance]}\n" if stance else ""
+    # ``style`` is the same few-shot block the inbox drafts receive — same
+    # ``ai.match_style`` gate, same masking (see ``style_examples.py``). We
+    # append it after the LEAD JSON so the model treats it as reference tone,
+    # not content to echo. Empty string is a no-op.
+    style_section = f"\n{style}" if style else ""
     return (
         "You write outreach email drafts for LJM International, a US long-haul dry-van freight "
         "brokerage in Lincoln Park, NJ, serving the eastern US. Sender is Nick Rivera.\n\n"
@@ -240,6 +251,7 @@ def _draft_prompt(lead: dict, tone: Tone, instructions: str | None) -> str:
         "- Do NOT add the LJM footer/address/phone; the app template handles that.\n"
         '- Return STRICT JSON: {"subject":"...","body":"..."} and nothing else.\n\n'
         f"LEAD JSON:\n{json.dumps(lead, default=str)}\n"
+        f"{style_section}"
     )
 
 
@@ -334,7 +346,20 @@ async def draft(
     if isinstance(provider, NullProvider):
         subject, body = _fallback_draft(lead, tone)
     else:
-        prompt = _draft_prompt(lead, tone, instructions)
+        # Same house-style few-shot block the inbox drafts use (same
+        # ``ai.match_style`` tenant flag, same masking). Any failure falls
+        # back to the empty string — style must never block drafting.
+        style = ""
+        try:
+            from app.inbox.style_examples import build_style_block
+
+            to_email = (lead.get("primary_email") or None) if isinstance(lead, dict) else None
+            async with sessionmaker() as s:
+                style = await build_style_block(s, to_email=to_email)
+        except Exception as exc:  # noqa: BLE001
+            log.info("email/draft: style helper failed: %s", type(exc).__name__)
+            style = ""
+        prompt = _draft_prompt(lead, tone, instructions, style=style)
         call = await provider.generate_json(prompt)
         try:
             async with sessionmaker() as s:

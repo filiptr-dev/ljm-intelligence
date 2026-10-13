@@ -1293,6 +1293,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/threads/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest Thread For Lead Endpoint
+         * @description Latest mail thread for a broker — powers the broker-page "Draft this" shortcut.
+         *
+         *     Replaces the frontend's ``q=<email>`` search, which only matched the
+         *     lead's primary address and missed contact-level identifiers plus the
+         *     lead's non-free-mail company domain. Returns ``{thread_id: null}``
+         *     when no mail is attributable to the broker; the frontend falls through
+         *     to the compose page in that case.
+         */
+        get: operations["latest_thread_for_lead_endpoint_inbox_threads_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/inbox/threads/{thread_id}": {
         parameters: {
             query?: never;
@@ -4835,6 +4861,11 @@ export interface components {
             loads?: string | null;
             /** Rates */
             rates?: string | null;
+        };
+        /** LatestThreadOut */
+        LatestThreadOut: {
+            /** Thread Id */
+            thread_id: string | null;
         };
         /** LeadAiSummaryOut */
         LeadAiSummaryOut: {
@@ -9788,6 +9819,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RelationshipOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_thread_for_lead_endpoint_inbox_threads_latest_get: {
+        parameters: {
+            query: {
+                lead_id: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestThreadOut"];
                 };
             };
             /** @description Validation Error */

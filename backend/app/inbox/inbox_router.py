@@ -269,6 +269,31 @@ async def relationship_endpoint(session: Session, broker_domain: str) -> Relatio
     return RelationshipOut(**h.__dict__)
 
 
+class LatestThreadOut(BaseModel):
+    thread_id: str | None
+
+
+@router.get("/threads/latest", response_model=LatestThreadOut, tags=["inbox"])
+async def latest_thread_for_lead_endpoint(
+    session: Session, lead_id: str = Query(..., min_length=1, max_length=64),
+) -> LatestThreadOut:
+    """Latest mail thread for a broker — powers the broker-page "Draft this" shortcut.
+
+    Replaces the frontend's ``q=<email>`` search, which only matched the
+    lead's primary address and missed contact-level identifiers plus the
+    lead's non-free-mail company domain. Returns ``{thread_id: null}``
+    when no mail is attributable to the broker; the frontend falls through
+    to the compose page in that case.
+    """
+    from app.analysis.lead_ai_summary_service import LeadNotFound
+
+    try:
+        tid = await svc.latest_thread_for_lead(session, lead_id)
+    except LeadNotFound as exc:
+        raise HTTPException(status_code=404, detail="lead not found") from exc
+    return LatestThreadOut(thread_id=tid)
+
+
 @router.get("/threads/{thread_id}", response_model=ThreadOut)
 async def thread_endpoint(session: Session, thread_id: str) -> ThreadOut:
     msgs = await svc.get_thread(session, thread_id)

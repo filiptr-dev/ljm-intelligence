@@ -38,6 +38,12 @@ def _configure_logging(settings: Settings) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         force=True,
     )
+    # httpx logs the full request URL at INFO level, which leaks `?key=...`
+    # from the Gemini adapter into our log stream. Clamp httpx + httpcore to
+    # WARNING so the API key never reaches logs — our own `app.*` loggers
+    # are untouched and keep whatever level `settings.log_level` selects.
+    for _noisy in ("httpx", "httpcore"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.inbox.models import MailMessage, Notification
 from app.integrations.adapters.email.mailbox import RawMessage
 from app.prospecting.models import Load
+from app.shared.tenant import current_tenant
 
 log = logging.getLogger(__name__)
 
@@ -120,8 +121,13 @@ def _title_for(kind: str, subject: str, from_addr: str) -> str:
 
 
 async def list_items(session: AsyncSession, *, limit: int = 50) -> list[dict[str, Any]]:
+    # Scope every read to the current tenant. On Postgres RLS already blocks
+    # cross-tenant rows via `app.tenant_id`, but tests + any non-uow caller
+    # bypass that policy; the explicit WHERE makes isolation hold everywhere.
+    tenant = current_tenant()
     res = await session.execute(
         select(Notification)
+        .where(Notification.tenant_id == tenant)
         .order_by(Notification.created_at.desc(), Notification.id.desc())
         .limit(limit)
     )
@@ -144,19 +150,23 @@ async def list_items(session: AsyncSession, *, limit: int = 50) -> list[dict[str
 
 
 async def count_unread(session: AsyncSession) -> int:
+    tenant = current_tenant()
     res = await session.execute(
         select(func.count())
         .select_from(Notification)
+        .where(Notification.tenant_id == tenant)
         .where(Notification.read_at.is_(None))
     )
     return int(res.scalar() or 0)
 
 
 async def mark_read(session: AsyncSession, notification_id: int) -> bool:
+    tenant = current_tenant()
     now = datetime.now(UTC)
     res = await session.execute(
         update(Notification)
         .where(Notification.id == notification_id)
+        .where(Notification.tenant_id == tenant)
         .where(Notification.read_at.is_(None))
         .values(read_at=now)
     )
@@ -164,9 +174,11 @@ async def mark_read(session: AsyncSession, notification_id: int) -> bool:
 
 
 async def mark_all_read(session: AsyncSession) -> int:
+    tenant = current_tenant()
     now = datetime.now(UTC)
     res = await session.execute(
         update(Notification)
+        .where(Notification.tenant_id == tenant)
         .where(Notification.read_at.is_(None))
         .values(read_at=now)
     )
