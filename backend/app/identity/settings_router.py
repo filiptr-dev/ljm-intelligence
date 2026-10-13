@@ -13,10 +13,10 @@ the footer is appended to every outgoing email by the send code.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from app.identity.models import SettingsRow
 from app.identity.platform_service import (
@@ -28,6 +28,11 @@ from app.identity.platform_service import (
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
+# Signature fields: stripped, bounded to the settings-row column widths.
+_Name = Annotated[str, StringConstraints(strip_whitespace=True, max_length=128)]
+_Phone = Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)]
+_Email = Annotated[str, StringConstraints(strip_whitespace=True, max_length=320)]
 
 
 class SettingsOut(BaseModel):
@@ -47,6 +52,13 @@ class SettingsOut(BaseModel):
     unsub_secret_set: bool
     unsub_config_ready: bool
     ai_features: dict
+    # Email signature (empty string = line omitted from sent mail).
+    brand_dispatcher: str
+    brand_company: str
+    brand_phone: str
+    brand_email: str
+    # Read-only: the mailbox the "request a quote" CTA replies to.
+    sender_email: str
 
 
 class SettingsPatch(BaseModel):
@@ -63,6 +75,17 @@ class SettingsPatch(BaseModel):
     auto_outreach_status_filter: str | None = None
     auto_outreach_min_fit: int | None = Field(default=None, ge=0, le=100)
     ai_features: dict | None = None
+    brand_dispatcher: _Name | None = None
+    brand_company: _Name | None = None
+    brand_phone: _Phone | None = None
+    brand_email: _Email | None = None
+
+    @field_validator("brand_email")
+    @classmethod
+    def _validate_brand_email(cls, value: str | None) -> str | None:
+        if value and "@" not in value:
+            raise ValueError("must be empty or a valid email address")
+        return value
 
     @field_validator("ai_features")
     @classmethod
@@ -72,7 +95,7 @@ class SettingsPatch(BaseModel):
         return validate_ai_features(value)
 
 
-def _project(snap: SettingsSnapshot) -> SettingsOut:
+def _project(snap: SettingsSnapshot, sender_email: str = "") -> SettingsOut:
     row: SettingsRow = snap.row
     return SettingsOut(
         threshold=row.threshold,
@@ -91,6 +114,11 @@ def _project(snap: SettingsSnapshot) -> SettingsOut:
         unsub_secret_set=snap.unsub_secret_set,
         unsub_config_ready=snap.unsub_config_ready,
         ai_features=snap.ai_features,
+        brand_dispatcher=row.brand_dispatcher or "",
+        brand_company=row.brand_company or "",
+        brand_phone=row.brand_phone or "",
+        brand_email=row.brand_email or "",
+        sender_email=sender_email,
     )
 
 
@@ -98,7 +126,7 @@ def _project(snap: SettingsSnapshot) -> SettingsOut:
 async def get_settings(request: Request) -> SettingsOut:
     async with request.app.state.sessionmaker() as s:
         snap = await svc_get_settings(s, request.app.state.settings)
-    return _project(snap)
+    return _project(snap, request.app.state.settings.outreach_from_email or "")
 
 
 @router.put("", response_model=SettingsOut)
@@ -119,7 +147,7 @@ async def put_settings(request: Request, patch: SettingsPatch) -> SettingsOut:
                     "message": "Unsubscribe link cannot be built; auto-outreach cannot be armed.",
                 },
             ) from e
-    return _project(snap)
+    return _project(snap, request.app.state.settings.outreach_from_email or "")
 
 
 # ---- Connector settings — Gmail owner-only (plan Step 7) ------------------

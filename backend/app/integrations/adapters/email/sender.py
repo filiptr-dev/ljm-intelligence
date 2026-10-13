@@ -21,6 +21,7 @@ from app.integrations.adapters.email.credentials import (
     resolve_sa_info,
     test_refresh,
 )
+from app.integrations.adapters.email.inline_assets import INLINE_ASSETS
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,16 @@ def _build_mime(
     msg.set_content(body or "")
     if body_html:
         msg.add_alternative(body_html, subtype="html")
+        # Attach every registered ``cid:<name>`` image the html references as an
+        # inline part of the html (multipart/related), which Gmail renders in
+        # place. Html with no cid: refs gets no related part.
+        html_part = msg.get_body(preferencelist=("html",))
+        for name, (path, maintype, subtype) in INLINE_ASSETS.items():
+            if html_part is not None and f"cid:{name}" in body_html:
+                html_part.add_related(
+                    path.read_bytes(), maintype, subtype,
+                    cid=f"<{name}>", disposition="inline",
+                )
     return msg.as_bytes()
 
 

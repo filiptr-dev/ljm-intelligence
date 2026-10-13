@@ -1,14 +1,14 @@
 """LJM branded email HTML template.
 
-Why the logo strategy: hosting the SVG-derived logo from `frontend/public/ljm-logo.png`
-means the frontend deploy (Vercel, HTTPS) serves it, which every modern email client
-renders. If we ever inline base64, quoted-printable and Outlook both bloat and break —
-a hosted PNG is the one path that Just Works across Gmail / Outlook / Apple Mail.
+Why the logo strategy: the logo is a PNG shipped as a CID inline attachment
+(multipart/related), so it needs no public host and renders in Gmail / Outlook / Apple Mail.
 """
 
 from __future__ import annotations
 
 from html import escape
+
+from app.integrations.adapters.email.inline_assets import CID_LOGO
 
 BRAND_RED = "#BC2444"
 CHARCOAL = "#2B2B2B"
@@ -35,14 +35,9 @@ def render_branded_email(
     sender_name: str = LJM_SENDER_DEFAULT,
 ) -> str:
     """Return a full, inline-styled HTML email. Table-based so Outlook can render it."""
-    # Ship the SVG that already lives in frontend/public. Gmail + Apple Mail render
-    # HTTPS-hosted SVGs; for the strictest clients (older Outlook), convert this file
-    # to PNG at deploy time and update this path — no code change needed, it's env-driven.
-    logo_src = (
-        (frontend_origin.rstrip("/") + "/ljm-intelligence.svg")
-        if frontend_origin
-        else "https://ljminternational.com/ljm-intelligence.svg"
-    )
+    # Logo is a CID inline attachment (see integrations/adapters/email/inline_assets.py);
+    # the MIME builder attaches it, so no public host is needed.
+    logo_src = f"cid:{CID_LOGO}"
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

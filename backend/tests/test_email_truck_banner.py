@@ -1,4 +1,4 @@
-from app.inbox.email_render import TRUCK_BANNER_URL, EmailDesignOut, render_email
+from app.inbox.email_render import EmailDesignOut, render_email
 
 
 def _html(**kw) -> str:
@@ -6,9 +6,10 @@ def _html(**kw) -> str:
     return html
 
 
-def test_show_truck_true_includes_banner_after_logo_before_body():
+def test_show_truck_true_includes_cid_banner_before_body():
     html = _html(show_truck=True)
-    assert f'<img src="{TRUCK_BANNER_URL}"' in html
+    assert 'src="cid:truck-banner"' in html
+    assert "vercel.app" not in html
     assert html.index("truck-banner") < html.index("Hello")
 
 

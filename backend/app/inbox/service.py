@@ -1925,6 +1925,7 @@ async def _render_and_wrap(
     html, text = render_email(
         body_text=body_text, subject=subject, design=design_obj, brand=brand,
         footer_html=footer_html, footer_text=footer_text,
+        sender_email=(getattr(settings, "outreach_from_email", "") or "").strip(),
     )
     headers = _unsub_headers(unsub_url) if unsub_url else {}
     return text, html, headers

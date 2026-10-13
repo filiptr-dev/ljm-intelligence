@@ -137,3 +137,43 @@ async def test_gmail_sender_builds_mime_and_sends() -> None:
     assert "References" in raw
     assert "to@ljm" in raw
     assert "from@ljm" in raw
+
+
+def _parse(mime: bytes):
+    from email import message_from_bytes, policy
+
+    return message_from_bytes(mime, policy=policy.default)
+
+
+def _mime(html: str | None) -> bytes:
+    from app.integrations.adapters.email.sender import _build_mime
+
+    return _build_mime(
+        from_addr="a@ljm", to="b@ljm", subject="s", body="t", body_html=html,
+        headers=None, in_reply_to=None, references=None,
+    )
+
+
+def test_build_mime_attaches_cid_images_as_related() -> None:
+    msg = _parse(_mime('<img src="cid:truck-banner"><img src="cid:ljm-logo">'))
+    html_part = msg.get_body(preferencelist=("html",))
+    assert html_part.get_content_type() == "text/html"
+    related = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+    assert sorted(p["Content-ID"] for p in related) == ["<ljm-logo>", "<truck-banner>"]
+    assert all(p.get_content_disposition() == "inline" for p in related)
+    assert any(p.get_content_type() == "multipart/related" for p in msg.walk())
+
+
+def test_build_mime_no_cid_means_no_related_part() -> None:
+    msg = _parse(_mime("<p>hello</p>"))
+    assert not any(p.get_content_type() == "multipart/related" for p in msg.walk())
+    assert not any(p.get_content_maintype() == "image" for p in msg.walk())
+
+
+def test_ai_draft_html_uses_cid_logo_and_attaches_it() -> None:
+    from app.outreach.brand import render_branded_email
+
+    html = render_branded_email(subject="s", body="hi", frontend_origin="https://x.test")
+    assert 'src="cid:ljm-logo"' in html and ".svg" not in html
+    msg = _parse(_mime(html))
+    assert [p["Content-ID"] for p in msg.walk() if p.get_content_type() == "image/png"] == ["<ljm-logo>"]
