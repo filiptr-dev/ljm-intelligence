@@ -75,21 +75,72 @@ async def _upsert(session: AsyncSession, msg: RawMessage) -> bool:
     # unit of work").
     from app.inbox.triage import triage_message
 
+    outcome = None
     try:
-        await triage_message(session, msg)
+        outcome = await triage_message(session, msg)
     except Exception:
         log.exception("mail/ingest: triage failed, continuing with raw message only")
+    # Bell notification — tail of the same UoW. Swallowed on failure so a
+    # notifications bug can never stop mail from landing. 24h recency gate
+    # inside the service keeps backfill traffic off the bell.
+    if outcome is not None:
+        try:
+            from app.inbox.notifications_service import create_from_message
+
+            await create_from_message(
+                session, msg, intent=outcome.intent, urgency=outcome.urgency,
+            )
+        except Exception:
+            log.exception(
+                "mail/ingest: notification write failed, continuing"
+            )
     return True
 
 
-async def _update_cursor(session: AsyncSession, mailbox: str, history_id: str, through_at: datetime | None) -> None:
-    cur = (await session.execute(select(MailCursor).where(MailCursor.mailbox == mailbox))).scalar_one_or_none()
+def _hid_int(s: str | None) -> int:
+    try:
+        return int(s or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _update_cursor(
+    session: AsyncSession,
+    mailbox: str,
+    history_id: str,
+    through_at: datetime | None,
+) -> None:
+    """Advance the mailbox cursor, monotonically.
+
+    ``history_id`` is only ever moved forward (``int(new) > int(existing)``).
+    Yesterday's bug: ``ingest_backfill`` wrote the OLDEST message's
+    ``history_id`` as the last assignment of its loop, stomping the live
+    incremental cursor to a value from months ago and forcing a silent
+    full re-replay the next tick. The guard here is the fix.
+
+    ``backfilled_through_at`` is written whenever a non-None value is
+    passed; the gradual-import step writes the OLDER edge of the window
+    it just walked, so this column marches backwards by design.
+    """
+    cur = (
+        await session.execute(select(MailCursor).where(MailCursor.mailbox == mailbox))
+    ).scalar_one_or_none()
     if cur is None:
-        session.add(MailCursor(mailbox=mailbox, history_id=history_id, backfilled_through_at=through_at))
-    else:
+        session.add(
+            MailCursor(
+                mailbox=mailbox,
+                history_id=history_id,
+                backfilled_through_at=through_at,
+            )
+        )
+        return
+    if _hid_int(history_id) > _hid_int(cur.history_id):
         cur.history_id = history_id
-        if through_at is not None:
-            cur.backfilled_through_at = through_at
+    if through_at is not None:
+        cur.backfilled_through_at = through_at
+
+
+BACKFILL_COMMIT_BATCH = 100
 
 
 async def ingest_backfill(
@@ -99,22 +150,40 @@ async def ingest_backfill(
     months: int = 12,
     days: int | None = None,
     hours: int | None = None,
+    window: tuple[datetime, datetime] | None = None,
 ) -> IngestStats:
-    """Backfill a mailbox since ``months`` ago, or ``days`` / ``hours`` if given.
+    """Backfill a mailbox.
 
-    Precedence (finest wins): ``hours`` > ``days`` > ``months``. ``hours``
-    lets the owner trigger a "last 2 hours for one mailbox" sync during a
-    live Gmail cutover without re-reading days of mail.
+    Window selection — finest wins: ``window`` (``older_than, newer_than``,
+    used by the gradual-import step) > ``hours`` > ``days`` > ``months``.
+    When ``window`` is provided the simulated source ignores the upper
+    bound (its tests use ``since`` only); the Gmail source uses
+    ``before:/after:`` to narrow the query.
+
+    Transaction model: commits every ``BACKFILL_COMMIT_BATCH`` upserts and
+    once more at the end for the tail. Single-transaction backfills held
+    row locks and blocked ``ALTER TABLE`` during the day's migration;
+    these batched commits remove that pressure. ``_update_cursor`` is
+    monotone, so repeated commits never roll the live incremental cursor
+    backwards.
     """
     stats = IngestStats(mailbox=mailbox)
-    if hours is not None and hours > 0:
+    if window is not None:
+        older_than, _newer_than = window
+        since = older_than
+    elif hours is not None and hours > 0:
         since = datetime.now(UTC) - timedelta(hours=hours)
     elif days is not None and days > 0:
         since = datetime.now(UTC) - timedelta(days=days)
     else:
         since = datetime.now(UTC) - timedelta(days=30 * months)
+
+    # Track monotone max separately from the per-message last_history_id
+    # that the stats row reports.
+    max_hid = 0
+    uncommitted = 0
     try:
-        async for msg in source.backfill(mailbox, since):
+        async for msg in source.backfill(mailbox, since, window=window):
             stats.read += 1
             inserted = await _upsert(session, msg)
             if inserted:
@@ -122,8 +191,28 @@ async def ingest_backfill(
             else:
                 stats.skipped += 1
             stats.last_history_id = msg.history_id
-        if stats.last_history_id:
-            await _update_cursor(session, mailbox, stats.last_history_id, datetime.now(UTC))
+            try:
+                hid_i = int(msg.history_id or 0)
+            except (TypeError, ValueError):
+                hid_i = 0
+            max_hid = max(max_hid, hid_i)
+            uncommitted += 1
+            if uncommitted >= BACKFILL_COMMIT_BATCH:
+                await _update_cursor(
+                    session, mailbox, str(max_hid) if max_hid else "0",
+                    _window_through(window),
+                )
+                await session.commit()
+                log.info(
+                    "mail/ingest: backfill batch committed",
+                    extra={"mailbox": mailbox, "committed": uncommitted},
+                )
+                uncommitted = 0
+        # Tail commit.
+        await _update_cursor(
+            session, mailbox, str(max_hid) if max_hid else "0",
+            _window_through(window) or datetime.now(UTC),
+        )
         await session.commit()
     except Exception as exc:
         await session.rollback()
@@ -131,6 +220,18 @@ async def ingest_backfill(
         stats.error = str(exc)
         log.exception("mail/ingest: backfill failed")
     return stats
+
+
+def _window_through(window: tuple[datetime, datetime] | None) -> datetime | None:
+    """When the caller supplied an explicit window, write its OLDER edge
+    as ``backfilled_through_at`` — the gradual-import step marches this
+    pointer backwards every invocation."""
+    if window is None:
+        return None
+    older_than, _newer_than = window
+    return older_than
+
+
 
 
 async def ingest_incremental(session: AsyncSession, source: MailboxSource, mailbox: str) -> IngestStats:

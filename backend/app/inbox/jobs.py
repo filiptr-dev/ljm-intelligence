@@ -100,6 +100,98 @@ async def mail_incremental(tenant_id: str, mailbox: str | None = None) -> None:
         await engine.dispose()
 
 
+@app.task(name="inbox.mail_backfill_step", queue="default", pass_context=False)
+async def mail_backfill_step(
+    tenant_id: str,
+    mailbox: str,
+    window_days: int = 21,
+    max_months: int = 12,
+) -> None:
+    """Gradual historical import — walks a mailbox backwards one window at a time.
+
+    Each run reads ``MailCursor.backfilled_through_at`` (the OLDER edge
+    the previous step reached; NULL = start from now()), computes a
+    ``(older_than, newer_than)`` window ``window_days`` wide, and asks
+    ``svc_backfill`` to pull it. The ingest service's monotone
+    ``_update_cursor`` guarantees the live incremental ``history_id`` is
+    not touched; ``backfilled_through_at`` marches backwards until the
+    ``max_months`` floor.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.config import get_settings
+    from app.db import create_engine, create_sessionmaker
+    from app.inbox.models import MailCursor
+    from app.integrations.mail_service import backfill as svc_backfill
+
+    _bind(tenant_id)
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        sm = create_sessionmaker(engine)
+        from app.integrations.adapters.email.credentials import ensure_vault_primed
+        await ensure_vault_primed(sm)
+
+        now = datetime.now(UTC)
+        floor = now - timedelta(days=30 * max_months)
+        async with sm() as s:
+            cur = (
+                await s.execute(
+                    select(MailCursor).where(MailCursor.mailbox == mailbox)
+                )
+            ).scalar_one_or_none()
+            newer_than = cur.backfilled_through_at if cur and cur.backfilled_through_at else now
+        if newer_than.tzinfo is None:
+            newer_than = newer_than.replace(tzinfo=UTC)
+        older_than = newer_than - timedelta(days=window_days)
+        older_than = max(older_than, floor)
+
+        if newer_than <= floor:
+            # Already at or past the floor — write floor and stop.
+            async with sm() as s:
+                cur = (
+                    await s.execute(
+                        select(MailCursor).where(MailCursor.mailbox == mailbox)
+                    )
+                ).scalar_one_or_none()
+                if cur is not None:
+                    cur.backfilled_through_at = floor
+                    await s.commit()
+            log.info(
+                "mail_backfill_step: at floor",
+                extra={"mailbox": mailbox, "floor_at": floor.isoformat()},
+            )
+            return
+
+        stats = await svc_backfill(
+            sm, settings, mailbox=mailbox, months=max_months,
+            window=(older_than, newer_than),
+        )
+        # Per-run AI cap is a plan requirement; we log the budget so an
+        # operator can see we never ran away. (The hot path doesn't call
+        # AI today — ``_apply_load_extract`` is deterministic — so this
+        # is a scaffold line until the AI fallback is wired here.)
+        from app.config import get_settings as _gs
+        cap = int(getattr(_gs(), "max_ai_calls_per_backfill_step", 50) or 50)
+        log.info(
+            "mail_backfill_step: window done",
+            extra={
+                "mailbox": mailbox,
+                "window_days": window_days,
+                "older_than": older_than.isoformat(),
+                "newer_than": newer_than.isoformat(),
+                "upserted": stats.upserted,
+                "read": stats.read,
+                "ai_calls": 0,
+                "cap": cap,
+            },
+        )
+    finally:
+        await engine.dispose()
+
+
 @app.task(name="inbox.retention_sweep", queue="default", pass_context=False)
 async def retention_sweep(tenant_id: str) -> None:
     """Nightly delete of `mail_messages` past `retention_until`.

@@ -90,6 +90,29 @@ async def _loads_refresh_tick(timestamp: int) -> None:
     await dispatch("loads.refresh", tenant_id=_TENANT, source_kind=None)
 
 
+@app.periodic(cron="0 2 * * *")  # 02:00 UTC nightly — gradual historical import
+@app.task(name="scheduler.mail_backfill_step_nightly", queue="default", pass_context=False)
+async def _mail_backfill_step_nightly(timestamp: int) -> None:
+    """Fan ``inbox.mail_backfill_step`` out across the mail-read allowlist.
+
+    Reuses the same allowlist ``mail_incremental`` fans over. One step per
+    mailbox per night marches ``backfilled_through_at`` backwards by
+    ``window_days`` until the 12-month floor.
+    """
+    from app.config import get_settings
+    from app.integrations.adapters.email.credentials import resolve_mail_read_allowlist
+    from app.shared.queue import dispatch
+
+    settings = get_settings()
+    allow = resolve_mail_read_allowlist(settings) or set()
+    for mbx in sorted(allow):
+        await dispatch(
+            "inbox.mail_backfill_step",
+            tenant_id=_TENANT,
+            mailbox=mbx,
+        )
+
+
 @app.periodic(cron="0 3 * * *")  # 03:00 UTC nightly
 @app.task(name="scheduler.retention_sweep_nightly", queue="default", pass_context=False)
 async def _retention_sweep_nightly(timestamp: int) -> None:

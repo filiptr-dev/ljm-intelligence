@@ -85,7 +85,13 @@ class MailboxSource(Protocol):
 
     async def list_mailboxes(self) -> list[str]: ...
 
-    async def backfill(self, mailbox: str, since: datetime) -> AsyncIterator[RawMessage]: ...
+    async def backfill(
+        self,
+        mailbox: str,
+        since: datetime,
+        *,
+        window: tuple[datetime, datetime] | None = None,
+    ) -> AsyncIterator[RawMessage]: ...
 
     async def incremental(
         self, mailbox: str, start_history_id: str
@@ -131,7 +137,17 @@ class SimulatedMailbox:
     async def list_mailboxes(self) -> list[str]:
         return list(self.messages.keys())
 
-    async def backfill(self, mailbox: str, since: datetime) -> AsyncIterator[RawMessage]:
+    async def backfill(
+        self,
+        mailbox: str,
+        since: datetime,
+        *,
+        window: tuple[datetime, datetime] | None = None,
+    ) -> AsyncIterator[RawMessage]:
+        # ``window`` is accepted so the real Gmail backfill's narrowing
+        # kwarg stays uniform across sources; the simulator uses ``since``
+        # (the older edge) as its only cut.
+        _ = window
         for m in self.messages.get(mailbox, []):
             if m.sent_at >= since:
                 yield m
@@ -273,12 +289,20 @@ class GmailMailbox:
             return None
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-    async def backfill(self, mailbox: str, since: datetime) -> AsyncIterator[RawMessage]:
+    async def backfill(
+        self,
+        mailbox: str,
+        since: datetime,
+        *,
+        window: tuple[datetime, datetime] | None = None,
+    ) -> AsyncIterator[RawMessage]:
         """Paged, resumable, rate-limited backfill.
 
-        Walks ``messages.list`` with ``q=after:YYYY/MM/DD``, hydrates each id
-        via ``messages.get``. Each message is yielded as a RawMessage; the
-        ingest layer owns the cursor so a queue-slice resume is cheap.
+        Walks ``messages.list`` with ``q=after:YYYY/MM/DD`` (and
+        ``before:`` when ``window`` is supplied — the gradual-import
+        step's narrow slice), hydrates each id via ``messages.get``.
+        Each message is yielded as a RawMessage; the ingest layer owns
+        the cursor so a queue-slice resume is cheap.
         """
         import anyio
 
@@ -287,10 +311,20 @@ class GmailMailbox:
             log.warning("mail/gmail: backfill cannot build service for %s", mailbox)
             return
         after = since.strftime("%Y/%m/%d")
+        before: str | None = None
+        if window is not None:
+            _older, newer = window
+            before = newer.strftime("%Y/%m/%d")
+
+        def _query() -> str:
+            q = f"after:{after}"
+            if before:
+                q = f"{q} before:{before}"
+            return q
 
         def _list_page(token: str | None) -> dict[str, Any]:
             req = svc.users().messages().list(  # type: ignore[union-attr]
-                userId="me", q=f"after:{after}", maxResults=BATCH_PAGE_SIZE,
+                userId="me", q=_query(), maxResults=BATCH_PAGE_SIZE,
                 pageToken=token, includeSpamTrash=False,
             )
             return req.execute()
