@@ -310,11 +310,15 @@ class GmailMailbox:
         if svc is None:
             log.warning("mail/gmail: backfill cannot build service for %s", mailbox)
             return
-        after = since.strftime("%Y/%m/%d")
+        # Windowed queries use epoch seconds: Gmail's ``after:/before:`` with
+        # YYYY/MM/DD is day-granular, so a 2h window collapses to an empty
+        # (same-day ``before:`` excludes the day) or whole-day result and the
+        # cursor would then claim coverage that was never fetched.
+        after = str(int(since.timestamp())) if window is not None else since.strftime("%Y/%m/%d")
         before: str | None = None
         if window is not None:
             _older, newer = window
-            before = newer.strftime("%Y/%m/%d")
+            before = str(int(newer.timestamp()))
 
         def _query() -> str:
             q = f"after:{after}"
@@ -342,8 +346,11 @@ class GmailMailbox:
             try:
                 page = await anyio.to_thread.run_sync(_list_page, page_token)
             except Exception as exc:  # noqa: BLE001
+                # Raise (do not `return`): a swallowed list failure looks like
+                # an empty window and lets the caller advance the cursor over
+                # mail that was never fetched.
                 log.warning("mail/gmail: list page failed for %s: %s", mailbox, exc)
-                return
+                raise
             ids = [m["id"] for m in (page.get("messages") or [])]
             for mid in ids:
                 await self._limiter.acquire(mailbox)
@@ -351,7 +358,13 @@ class GmailMailbox:
                     raw = await anyio.to_thread.run_sync(_get_message, mid)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("mail/gmail: get %s failed: %s", mid, exc)
-                    continue
+                    # 404 = deleted between list and get: safe to skip.
+                    # Anything else (429/5xx) must fail the window so the
+                    # cursor does not advance over a hole.
+                    status = getattr(getattr(exc, "resp", None), "status", None)
+                    if status == 404:
+                        continue
+                    raise
                 parsed = _parse_gmail_message(raw, mailbox)
                 if parsed is not None:
                     yield parsed

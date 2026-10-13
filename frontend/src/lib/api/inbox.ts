@@ -31,7 +31,7 @@ function unwrap<T>(res: { data?: T; error?: unknown; response: Response }, path:
 }
 
 export async function listEmails(
-  opts: { intent?: string; q?: string; page?: number; page_size?: number; mailbox?: string } = {},
+  opts: { intent?: string; q?: string; page?: number; page_size?: number; mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<EmailsPage> {
   const res = await api.GET("/inbox/emails", { params: { query: opts }, signal })
@@ -39,7 +39,7 @@ export async function listEmails(
 }
 
 export async function listTriage(
-  opts: { urgent_only?: boolean; limit?: number; mailbox?: string } = {},
+  opts: { urgent_only?: boolean; limit?: number; mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<TriageRow[]> {
   const res = await api.GET("/inbox/triage", { params: { query: opts }, signal })
@@ -55,7 +55,7 @@ export type SuggestedQuestions = components["schemas"]["SuggestionsOut"]
  * lanes, dates, counts) and never 500s — empty mailbox returns `[]`.
  */
 export async function suggestQuestions(
-  opts: { mailbox?: string } = {},
+  opts: { mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<SuggestedQuestion[]> {
   const res = await api.GET("/inbox/ask/suggestions", {
@@ -130,7 +130,7 @@ export async function getAiDraft(
 export type NeedsReplyRow = components["schemas"]["NeedsReplyRowOut"]
 
 export async function needsReply(
-  opts: { mailbox?: string; limit?: number } = {},
+  opts: { mailbox?: string[]; limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<NeedsReplyRow[]> {
   const res = await api.GET("/inbox/needs-reply", {
@@ -284,7 +284,7 @@ export type ChipFilter = NonNullable<components["schemas"]["ChipFilterIn"]>
 
 export async function ask(
   question: string,
-  opts: { mailbox?: string; chip?: ChipFilter | null } = {},
+  opts: { mailbox?: string[]; chip?: ChipFilter | null } = {},
   signal?: AbortSignal,
 ): Promise<AskOut> {
   const res = await api.POST("/inbox/ask", {
@@ -297,7 +297,7 @@ export async function ask(
 
 export async function statusBoard(
   limit = 200,
-  opts: { mailbox?: string } = {},
+  opts: { mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<StatusBoardRow[]> {
   const res = await api.GET("/inbox/status-board", {
@@ -309,7 +309,7 @@ export async function statusBoard(
 
 export async function noReply(
   limit = 50,
-  opts: { mailbox?: string } = {},
+  opts: { mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<NoReplyRow[]> {
   const res = await api.GET("/inbox/no-reply", {
@@ -331,7 +331,7 @@ export async function responseTime(
 }
 
 export async function overviewKpis(
-  opts: { mailbox?: string } = {},
+  opts: { mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<OverviewKPIs> {
   const res = await api.GET("/inbox/overview-kpis", {
@@ -353,7 +353,7 @@ export async function relationship(
 }
 
 export async function staff(
-  opts: { mailbox?: string } = {},
+  opts: { mailbox?: string[] } = {},
   signal?: AbortSignal,
 ): Promise<StaffRow[]> {
   const res = await api.GET("/inbox/staff", {

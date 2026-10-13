@@ -203,9 +203,12 @@ async def ingest_backfill(
             max_hid = max(max_hid, hid_i)
             uncommitted += 1
             if uncommitted >= BACKFILL_COMMIT_BATCH:
+                # Mid-window commit: do NOT move backfilled_through_at yet.
+                # Only the tail commit (window fully walked) may claim the
+                # older edge, otherwise a later failure leaves a hole the
+                # cursor says is covered.
                 await _update_cursor(
-                    session, mailbox, str(max_hid) if max_hid else "0",
-                    _window_through(window),
+                    session, mailbox, str(max_hid) if max_hid else "0", None,
                 )
                 await session.commit()
                 log.info(

@@ -14,6 +14,8 @@ from typing import Any
 
 from app.inbox.models import MailMessage, NoReplyTracker
 from app.inbox.repository import (
+    Mailboxes,
+    _mb_where,
     count_all_messages,
     count_emails,
     count_negative_insights,
@@ -166,7 +168,7 @@ async def list_emails(
     text_query: str | None = None,
     limit: int = 40,
     offset: int = 0,
-    mailbox: str | None = None,
+    mailbox: Mailboxes = None,
 ) -> tuple[list[EmailRow], int]:
     """Paginated list for the /emails page. Joins mail_messages+message_insights.
 
@@ -194,12 +196,12 @@ async def list_emails(
     return out, total
 
 
-async def intent_counts(session: AsyncSession, *, mailbox: str | None = None) -> list[IntentCount]:
+async def intent_counts(session: AsyncSession, *, mailbox: Mailboxes = None) -> list[IntentCount]:
     rows = await fetch_intent_counts(session, mailbox=mailbox)
     return [IntentCount(intent=i, count=int(c)) for i, c in rows]
 
 
-async def sentiment_buckets(session: AsyncSession, *, mailbox: str | None = None) -> SentimentBuckets:
+async def sentiment_buckets(session: AsyncSession, *, mailbox: Mailboxes = None) -> SentimentBuckets:
     """Sentiment distribution over inbound-only messages (same rule the demo UI used)."""
     values = [float(v or 0.0) for (v,) in await fetch_inbound_sentiments(session, mailbox=mailbox)]
     pos = sum(1 for v in values if v > 0.2)
@@ -211,7 +213,7 @@ async def sentiment_buckets(session: AsyncSession, *, mailbox: str | None = None
 
 async def triage_list(
     session: AsyncSession, *, urgent_only: bool = False, limit: int = 50,
-    mailbox: str | None = None,
+    mailbox: Mailboxes = None,
 ) -> list[TriageItem]:
     """Urgent-first list for the triage surface. Waiting-minutes derived live."""
     # SQL order is newest-first; the Python pass below re-sorts by urgency to
@@ -237,7 +239,7 @@ async def triage_list(
 
 
 async def no_reply_list(
-    session: AsyncSession, *, limit: int = 50, mailbox: str | None = None,
+    session: AsyncSession, *, limit: int = 50, mailbox: Mailboxes = None,
 ) -> list[NoReplyRow]:
     now = datetime.now(UTC)
     rows = await fetch_no_reply_rows(session, limit=limit, mailbox=mailbox)
@@ -304,7 +306,7 @@ async def response_time_stats(session: AsyncSession, *, broker_domain: str | Non
     )
 
 
-async def staff_performance(session: AsyncSession, *, mailbox: str | None = None) -> list[StaffRow]:
+async def staff_performance(session: AsyncSession, *, mailbox: Mailboxes = None) -> list[StaffRow]:
     """Per-mailbox counts + a rough reply-speed median."""
     rows = await fetch_staff_rows(session, mailbox=mailbox)
     bucket: dict[str, dict] = defaultdict(lambda: {"inbound": 0, "outbound": 0, "gaps": [], "dropped": 0})
@@ -343,7 +345,7 @@ async def staff_performance(session: AsyncSession, *, mailbox: str | None = None
     return out
 
 
-async def overview_kpis(session: AsyncSession, *, mailbox: str | None = None) -> OverviewKPIs:
+async def overview_kpis(session: AsyncSession, *, mailbox: Mailboxes = None) -> OverviewKPIs:
     now = datetime.now(UTC)
     volume = await count_all_messages(session, mailbox=mailbox)
     open_threads = await count_no_reply_rows(session, mailbox=mailbox)
@@ -629,7 +631,7 @@ class StatusBoardRow:
 
 
 async def status_board(
-    session: AsyncSession, *, limit: int = 200, mailbox: str | None = None,
+    session: AsyncSession, *, limit: int = 200, mailbox: Mailboxes = None,
 ) -> list[StatusBoardRow]:
     """One row per OPEN conversation.
 
@@ -1341,7 +1343,7 @@ def _sanitise_chip_filter(cf: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 async def _fetch_ask_context(
-    session: AsyncSession, *, keywords: list[str], mailbox: str | None = None,
+    session: AsyncSession, *, keywords: list[str], mailbox: Mailboxes = None,
     chip_filter: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Pull a bounded slice of recent mail+insights for the AI prompt.
@@ -1443,7 +1445,7 @@ async def _fetch_ask_context(
         .limit(_ASK_CTX_ROWS * 3)  # over-fetch, then filter in Python
     )
     if mailbox:
-        stmt = stmt.where(m.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(m.mailbox, mailbox))
 
     # Inbound only — pending_only chips are already handled above by the
     # tracker-rows short-circuit, so from here on we always want the
@@ -1527,7 +1529,7 @@ async def _fetch_ask_context(
             .limit(_ASK_CTX_ROWS)
         )
         if mailbox:
-            fallback = fallback.where(m.mailbox == mailbox)
+            fallback = fallback.where(_mb_where(m.mailbox, mailbox))
         rows = list((await session.execute(fallback)).all())
 
     out: list[dict[str, Any]] = []
@@ -1582,7 +1584,7 @@ async def ask_question(
     question: str,
     session: AsyncSession | None = None,
     provider: Any | None = None,
-    mailbox: str | None = None,
+    mailbox: Mailboxes = None,
     chip_filter: dict[str, Any] | None = None,
 ) -> AskOut:
     """Answer a natural-language inbox question with real AI over real mail.
@@ -1992,7 +1994,7 @@ def _fmt_date_short(dt: datetime | None) -> str:
     return dt.strftime("%b %-d") if hasattr(datetime, "strftime") else dt.isoformat()[:10]
 
 
-async def _mine_unanswered(session: AsyncSession, *, mailbox: str | None) -> list[Suggestion]:
+async def _mine_unanswered(session: AsyncSession, *, mailbox: Mailboxes) -> list[Suggestion]:
     """Top brokers we owe a reply to — reuse the no_reply_tracker view."""
     try:
         rows = await fetch_no_reply_rows(session, limit=200, mailbox=mailbox)
@@ -2030,7 +2032,7 @@ async def _mine_unanswered(session: AsyncSession, *, mailbox: str | None) -> lis
 async def _mine_insights_by_broker(
     session: AsyncSession,
     *,
-    mailbox: str | None,
+    mailbox: Mailboxes,
     intent: str | None,
     sentiment_below: float | None,
     days: int,
@@ -2074,7 +2076,7 @@ async def _mine_insights_by_broker(
         .limit(limit * 10)  # over-fetch so we can dedup by domain
     )
     if mailbox:
-        stmt = stmt.where(m.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(m.mailbox, mailbox))
     if intent:
         stmt = stmt.where(j.intent == intent)
     if sentiment_below is not None:
@@ -2130,7 +2132,7 @@ async def _mine_insights_by_broker(
     return out
 
 
-async def _mine_rate_hotspot(session: AsyncSession, *, mailbox: str | None) -> list[Suggestion]:
+async def _mine_rate_hotspot(session: AsyncSession, *, mailbox: Mailboxes) -> list[Suggestion]:
     """Top origin→dest lane for recent rate requests."""
     from datetime import timedelta
 
@@ -2164,7 +2166,7 @@ async def _mine_rate_hotspot(session: AsyncSession, *, mailbox: str | None) -> l
         .limit(1)
     )
     if mailbox:
-        stmt = stmt.where(m.mailbox == mailbox)
+        stmt = stmt.where(_mb_where(m.mailbox, mailbox))
 
     try:
         row = (await session.execute(stmt)).first()
@@ -2185,7 +2187,7 @@ async def _mine_rate_hotspot(session: AsyncSession, *, mailbox: str | None) -> l
 
 
 async def suggest_questions(
-    session: AsyncSession | None, *, mailbox: str | None = None,
+    session: AsyncSession | None, *, mailbox: Mailboxes = None,
 ) -> list[Suggestion]:
     """Return 0-6 concrete chip suggestions grounded in the real mailbox.
 
@@ -2559,7 +2561,7 @@ _AUTO_SUBJECT_PREFIXES = (
 async def fetch_needs_reply(
     session: AsyncSession,
     *,
-    mailbox: str | None = None,
+    mailbox: Mailboxes = None,
     limit: int = 50,
 ) -> list[NeedsReplyRow]:
     """Threads whose newest message is INBOUND from a counterpart and that
@@ -2582,7 +2584,9 @@ async def fetch_needs_reply(
         .group_by(_MM.mailbox, _MM.thread_id)
     )
     if mailbox:
-        latest_sq = latest_sq.where(_func.lower(_MM.mailbox) == mailbox.lower())
+        mb_cond = _mb_where(_func.lower(_MM.mailbox), [m.lower() for m in ([mailbox] if isinstance(mailbox, str) else mailbox)])
+        if mb_cond is not None:
+            latest_sq = latest_sq.where(mb_cond)
     latest_sq = latest_sq.subquery()
 
     # Join back to MailMessage for the latest row of each (mb, tid).
