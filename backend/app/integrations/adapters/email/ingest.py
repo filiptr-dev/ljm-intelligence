@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.inbox.models import MailCursor, MailMessage
 from app.integrations.adapters.email.mailbox import MailboxSource, RawMessage
+from app.integrations.adapters.email.sanitize import compact_bodies
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ def _row_from(msg: RawMessage) -> dict:
     # retention sweeper has a column to compare now() against. Both columns
     # exist from migration 0016; ingest fills them for new rows.
     retention_until = datetime.now(UTC) + timedelta(days=30 * RETENTION_MONTHS)
+    # Sanitize + compact at ingest so stored bytes are reader-safe (no
+    # <script>/tracking-pixel), QP-decoded, and html-only messages still
+    # have a non-empty ``body_text`` for triage reads downstream.
+    body_text_clean, body_html_clean = compact_bodies(msg.body_text, msg.body_html)
     return {
         "mailbox": msg.mailbox,
         "message_id": msg.message_id,
@@ -53,8 +58,8 @@ def _row_from(msg: RawMessage) -> dict:
         "received_at": msg.received_at,
         "in_reply_to": msg.in_reply_to,
         "references_hdr": msg.references,
-        "body_text": msg.body_text,
-        "body_html": msg.body_html,
+        "body_text": body_text_clean,
+        "body_html": body_html_clean,
         "labels": msg.labels,
         "retention_until": retention_until,
         "raw": msg.raw,

@@ -8,6 +8,7 @@ import * as inbox from "@/lib/api/inbox"
 import { dateTime } from "@/lib/format"
 import { ApiRequestError } from "@/lib/api/client"
 import { ThreadReply } from "./thread-reply"
+import { MessageBody } from "./message-body"
 
 const INTENT_MAP: Record<string, Intent> = {
   load_offer: "load_offer",
@@ -82,9 +83,9 @@ export default async function ThreadPage({
                   </TableCell>
                   <TableCell className="align-top">
                     <div className="font-semibold text-sm">{m.subject}</div>
-                    <pre className="mt-1 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
-                      {m.body_text}
-                    </pre>
+                    <div className="mt-1 max-h-96 overflow-auto">
+                      <MessageBody text={m.body_text} />
+                    </div>
                     {m.lane_from && m.lane_to ? (
                       <div className="mt-2 text-xs text-muted-foreground">
                         Lane: <span className="font-mono">{m.lane_from} → {m.lane_to}</span>
