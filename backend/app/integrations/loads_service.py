@@ -250,8 +250,23 @@ async def list_loads_deduped(session: AsyncSession, *, limit: int = 100) -> list
         pickup = next((r.pickup_date for r in bucket if r.pickup_date), None)
         rpm = (min_rate / miles) if (min_rate is not None and miles) else None
         src_counts: dict[str, int] = {}
+        # Per-source first origin URL (LinkedIn post, broker-page URL …).
+        # LinkedIn source_ref IS the post URL; other agent-driven sources
+        # may store it in ``raw.linkedin_url`` or ``raw.url``.
+        src_urls: dict[str, str] = {}
         for r in bucket:
             src_counts[r.source] = src_counts.get(r.source, 0) + 1
+            if r.source not in src_urls:
+                url: str | None = None
+                raw = r.raw if isinstance(r.raw, dict) else None
+                if raw and isinstance(raw.get("linkedin_url"), str):
+                    url = raw["linkedin_url"]
+                elif raw and isinstance(raw.get("url"), str):
+                    url = raw["url"]
+                elif (r.source_ref or "").startswith(("http://", "https://")):
+                    url = r.source_ref
+                if url:
+                    src_urls[r.source] = url
         anchor = bucket[0]
         contact = _pick_contact(bucket)
         is_demo = any((r.source or "") == "demo" for r in bucket) or any(
@@ -299,7 +314,10 @@ async def list_loads_deduped(session: AsyncSession, *, limit: int = 100) -> list
             miles=miles,
             rate_per_mile=rpm,
             posted_at=posted,
-            sources=[{"kind": k, "count": c} for k, c in sorted(src_counts.items())],
+            sources=[
+                {"kind": k, "count": c, "url": src_urls.get(k)}
+                for k, c in sorted(src_counts.items())
+            ],
             status=anchor.status,
             status_at=anchor.status_at,
             is_demo=is_demo,

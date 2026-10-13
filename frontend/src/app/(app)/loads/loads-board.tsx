@@ -33,6 +33,8 @@ import {
 
 const SOURCE_LABEL: Record<string, string> = {
   ai_page: "AI pages",
+  broker_page: "Broker page",
+  linkedin: "LinkedIn",
   paste: "Paste",
   dat: "DAT",
   chr: "CHR",
@@ -44,6 +46,11 @@ const SOURCE_LABEL: Record<string, string> = {
   demo: "Demo",
   demo2: "Demo",
 }
+
+// Crawled sources get the user-standard red badge so a web-sourced row
+// jumps out from the inbox/loadstop rows. Everything else keeps the softer
+// green chip the UI used before.
+const CRAWLED_SOURCES = new Set<string>(["linkedin", "ai_page", "broker_page"])
 
 type StatusValue = StatusIn["status"]
 type FilterMode = "active" | "all"
@@ -341,14 +348,34 @@ export function LoadsBoard() {
                       <td className="py-2 pr-3">
                         <div className="flex flex-wrap gap-1">
                           {(g.sources ?? []).map((src, i) => {
-                            const s = src as { kind?: string; count?: number }
+                            const s = src as { kind?: string; count?: number; url?: string }
+                            const kind = s.kind ?? ""
+                            const label = SOURCE_LABEL[kind] ?? kind
+                            const count = (s.count ?? 1) > 1 ? ` ×${s.count}` : ""
+                            const crawled = CRAWLED_SOURCES.has(kind)
+                            const chipClass = crawled
+                              ? "rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-semibold text-white"
+                              : "rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700"
+                            const key = `${g.group_hash}-${kind}-${i}`
+                            if (s.url) {
+                              return (
+                                <a
+                                  key={key}
+                                  href={s.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`${chipClass} hover:underline`}
+                                  title={`Open ${label} source`}
+                                >
+                                  {label}
+                                  {count}
+                                </a>
+                              )
+                            }
                             return (
-                              <span
-                                key={`${g.group_hash}-${s.kind}-${i}`}
-                                className="rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700"
-                              >
-                                {SOURCE_LABEL[s.kind ?? ""] ?? s.kind}
-                                {(s.count ?? 1) > 1 ? ` ×${s.count}` : ""}
+                              <span key={key} className={chipClass}>
+                                {label}
+                                {count}
                               </span>
                             )
                           })}

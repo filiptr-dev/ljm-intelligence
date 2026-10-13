@@ -30,7 +30,15 @@ class AiPageSource:
         self._sessionmaker = sessionmaker
 
     def _urls(self, settings) -> list[dict]:
-        raw = getattr(settings, "load_source_urls", None) or []
+        # ``load_source_urls`` is stored on the DB settings row (migration
+        # 0025), not on the pydantic ``Settings`` env object — so the env
+        # read is almost always empty. Fall back to the DB overlay primed
+        # at lifespan start and refreshed by the settings PUT. Without this
+        # the owner's Settings-UI entries never reach the ai_page source.
+        raw = getattr(settings, "load_source_urls", None)
+        if not isinstance(raw, list) or not raw:
+            from app.integrations.adapters.loadboard.registry import db_overlay_load_source_urls
+            raw = db_overlay_load_source_urls()
         if not isinstance(raw, list):
             return []
         return [u for u in raw if isinstance(u, dict) and u.get("enabled") and u.get("url")]

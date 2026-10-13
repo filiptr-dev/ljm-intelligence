@@ -561,6 +561,10 @@ async def set_broker_page_urls(payload: BrokerPageUrlsIn, request: Request) -> L
             s.add(row)
         row.load_source_urls = cleaned
         await s.commit()
+    # Refresh the in-process overlay so the next refresh/test call sees the
+    # new URLs without an app restart (same pattern as drivers/kill below).
+    from app.integrations.adapters.loadboard.registry import set_db_overlay_load_source_urls
+    set_db_overlay_load_source_urls(cleaned)
     # Re-use the GET projection so the client gets a consistent payload.
     return await list_loadboard_creds(request)
 

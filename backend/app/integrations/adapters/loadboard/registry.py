@@ -14,6 +14,7 @@ from app.integrations.adapters.loadboard.ai_page import AiPageSource, BrokerPage
 from app.integrations.adapters.loadboard.base import ConnectionTest, LoadSource, RawLoad
 from app.integrations.adapters.loadboard.chr import ChrSource
 from app.integrations.adapters.loadboard.dat import DatSource
+from app.integrations.adapters.loadboard.linkedin_source import LinkedInLoadsSource
 from app.integrations.adapters.loadboard.loadboard123 import LoadBoard123Source
 from app.integrations.adapters.loadboard.paste import PasteSource
 from app.integrations.adapters.loadboard.truckstop import TruckstopSource
@@ -51,6 +52,24 @@ def db_overlay_agent_browser_url() -> str:
     return str(_DB_OVERLAY.get("agent_browser_url", "") or "")
 
 
+def db_overlay_load_source_urls() -> list[dict]:
+    """Sync accessor — ``AiPageSource._urls`` falls back to this when the
+    pydantic ``Settings`` object has no ``load_source_urls`` field (the
+    column lives only on the DB ``SettingsRow`` row, so without this
+    fallback ai_page could never be enabled from the owner's Settings UI).
+    """
+    raw = _DB_OVERLAY.get("load_source_urls")
+    if isinstance(raw, list):
+        return [u for u in raw if isinstance(u, dict)]
+    return []
+
+
+def set_db_overlay_load_source_urls(urls: list[dict] | None) -> None:
+    """Caller-side setter for the settings PUT. Kept separate from
+    :func:`set_db_overlay` because urls are a list, not a string enum."""
+    _DB_OVERLAY["load_source_urls"] = list(urls or [])
+
+
 async def prime_overlay_from_db(sessionmaker) -> None:
     """Load driver + kill values from the singleton settings row.
 
@@ -77,6 +96,7 @@ async def prime_overlay_from_db(sessionmaker) -> None:
                 kill=getattr(row, "loads_agent_kill", "off") or "off",
                 agent_browser_url=getattr(row, "agent_browser_url", "") or "",
             )
+            set_db_overlay_load_source_urls(getattr(row, "load_source_urls", None) or [])
     except Exception:  # noqa: BLE001  pragma: no cover
         # Boot must not fail — the overlay stays empty and env/default win.
         return
@@ -150,6 +170,7 @@ def all_sources(settings, sessionmaker=None) -> list[LoadSource]:
     return [
         AiPageSource(settings, sessionmaker=sessionmaker),
         BrokerPageSource(settings, sessionmaker=sessionmaker),
+        LinkedInLoadsSource(settings, sessionmaker=sessionmaker),
         PasteSource(),
         _DriverSwitch("dat", DatSource(settings), settings, sessionmaker=sessionmaker),
         _DriverSwitch("chr", ChrSource(settings), settings, sessionmaker=sessionmaker),
@@ -173,7 +194,9 @@ __all__ = [
     "all_sources",
     "by_kind",
     "db_overlay_agent_browser_url",
+    "db_overlay_load_source_urls",
     "enabled_sources",
     "prime_overlay_from_db",
     "set_db_overlay",
+    "set_db_overlay_load_source_urls",
 ]
