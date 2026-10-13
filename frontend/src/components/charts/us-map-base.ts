@@ -180,6 +180,19 @@ export const stateLabelPx = (zoom: number) => Math.round(Math.min(13, Math.max(1
 export function stateLabelFont(): string {
   if (typeof document === "undefined") return "system-ui, sans-serif"
   const family = getComputedStyle(document.body).fontFamily || "system-ui, sans-serif"
-  void document.fonts?.load(`600 12px ${family}`)
+  // Only ask the browser to load the first non-generic family. next/font exposes a
+  // comma-separated stack where some entries (e.g. the hashed Fallback alias, or the
+  // "sans-serif" generic) have no matching FontFace / backing URL; passing the whole
+  // stack can make document.fonts.load() reject with a DOMException "NetworkError"
+  // that bubbles up as an unhandledRejection. Catch it either way — a missed preload
+  // just means deck.gl rasterises what the canvas has, which is fine.
+  const generics = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded", "math", "emoji", "fangsong"])
+  const first = family
+    .split(",")
+    .map((f) => f.trim().replace(/^["']|["']$/g, ""))
+    .find((f) => f && !generics.has(f.toLowerCase()))
+  if (first) {
+    document.fonts?.load(`600 12px "${first}"`).catch(() => {})
+  }
   return family
 }
