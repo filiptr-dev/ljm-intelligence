@@ -953,6 +953,47 @@ async def _fetch_ask_context(
     days = int(cf.get("days") or _ASK_CTX_DAYS)
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
+    # Pending-only (unanswered) chips are answered against the tracker rows
+    # directly — not the thread's message history. Pre-fix the AI was fed
+    # the broker's old rate-con / tracking-team / OOO messages inside the
+    # same thread and announced "the thread has already been answered".
+    # The tracker IS the source of truth for "we sent, no reply came" —
+    # feed it as-is and the AI just confirms what the chip already counted.
+    if cf.get("pending_only"):
+        bd = (cf.get("broker_domain") or "").lower().strip()
+        tracker_rows = await fetch_no_reply_rows(session, limit=_ASK_CTX_ROWS, mailbox=mailbox)
+        out: list[dict[str, Any]] = []
+        for tr in tracker_rows:
+            to_email = (tr.to_email_normalized or "").lower()
+            if bd and not to_email.endswith(f"@{bd}"):
+                continue
+            we_sent = tr.we_sent_at
+            days_waiting = 0
+            if we_sent is not None:
+                try:
+                    we_sent_utc = we_sent if we_sent.tzinfo else we_sent.replace(tzinfo=UTC)
+                    days_waiting = max(0, int((datetime.now(UTC) - we_sent_utc).total_seconds() // 86400))
+                except Exception:  # noqa: BLE001 — defensive, never let a bad row 500 Ask.
+                    days_waiting = 0
+            out.append({
+                "thread_id": tr.thread_id,
+                "subject": (tr.subject or "").strip()[:160],
+                "snippet": (
+                    f"we emailed {to_email or '(unknown)'} on "
+                    f"{we_sent.isoformat()[:10] if we_sent else '?'}; "
+                    f"{days_waiting} day(s) with no reply"
+                )[:_ASK_SNIPPET_CHARS],
+                "sent_at": we_sent.isoformat() if we_sent else "",
+                "from_addr": tr.mailbox or "",
+                "intent": "unanswered",
+                "sentiment": None,
+                "evidence": f"waiting_{days_waiting}d",
+                "lane_from": None,
+                "lane_to": None,
+                "rate_usd": None,
+            })
+        return out[:_ASK_CTX_ROWS]
+
     # When the chip pins an intent / sentiment / lane we need the insight row,
     # so switch to an inner join. Otherwise keep the legacy outer join so a
     # free-text question still sees messages that lack an insight row.
@@ -985,11 +1026,10 @@ async def _fetch_ask_context(
     if mailbox:
         stmt = stmt.where(m.mailbox == mailbox)
 
-    # Inbound only — unless the chip is specifically about unanswered threads,
-    # where the "last message" is ours and dropping outbound would hide the
-    # whole thread.
-    if not cf.get("pending_only"):
-        stmt = stmt.where(m.from_addr != m.mailbox)
+    # Inbound only — pending_only chips are already handled above by the
+    # tracker-rows short-circuit, so from here on we always want the
+    # broker's own mail.
+    stmt = stmt.where(m.from_addr != m.mailbox)
 
     # Chip-driven exact filters. Keep them additive on top of the base shape.
     broker_domain = cf.get("broker_domain")
@@ -1383,6 +1423,9 @@ _AUTOMATED_LOCAL_PREFIXES: frozenset[str] = frozenset({
     "mailer-daemon", "mailerdaemon", "mailer",
     "bounce", "bounces", "postmaster", "auto-reply", "autoreply", "automated",
     "system", "support-noreply", "updates", "digest", "newsletter",
+    # Case / ticketing systems that mint per-case reply addresses like
+    # "cases+<token>@replies.<vendor>" — never a human broker.
+    "cases", "case", "tickets", "ticket",
 })
 
 # Known notification / monitoring / vendor-automation domains whose mail is
@@ -1393,6 +1436,13 @@ _AUTOMATED_DOMAINS: frozenset[str] = frozenset({
     "highway.com",
     "dat.com",
     "truckstop.com",
+    # SaaS vendor marketing / platform notifications — never a human broker.
+    "google.com",
+    "googlemail.com",
+    "atlassian.net",
+    "slack.com",
+    "notion.so",
+    "linkedin.com",
 })
 
 # Bulk-mail / ESP relay suffixes — any address whose domain ends in one of
@@ -1411,6 +1461,8 @@ _AUTOMATED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".campaignmonitor.com",
     ".cmail19.com",
     ".cmail20.com",
+    # Decisiv fleet-service case replies (replies.decisivapps.com).
+    ".decisivapps.com",
 )
 
 
@@ -1597,6 +1649,12 @@ async def _mine_insights_by_broker(
         stmt = stmt.where(j.intent == intent)
     if sentiment_below is not None:
         stmt = stmt.where(j.sentiment < sentiment_below)
+    # Require a confident label on every intent/sentiment chip. The heuristic
+    # fallback classifier stamps ≤0.5 on anything it couldn't match a strong
+    # phrase for; keeping those out of chip counts stops OOO autoreplies and
+    # rate-con noise from fuelling "complaints from <broker>" claims.
+    if intent is not None or sentiment_below is not None:
+        stmt = stmt.where(j.confidence >= 0.6)
 
     try:
         rows = list((await session.execute(stmt)).all())
