@@ -188,13 +188,17 @@ class RunRow(_Out):
     origin: str
     dest: str
     equipment: str | None = None
-    miles: int
-    revenue: float
-    cost_fuel: float
-    cost_driver: float
-    cost_load: float
-    cost_dispatch: float
-    margin: float
+    # Nullable from migration 0050 onward: a real-data run may land
+    # without miles / costs / revenue when the LoadStop grid or inbox
+    # rate-con doesn't carry them. The UI labels partial rows honestly
+    # instead of fabricating zeros.
+    miles: int | None = None
+    revenue: float | None = None
+    cost_fuel: float | None = None
+    cost_driver: float | None = None
+    cost_load: float | None = None
+    cost_dispatch: float | None = None
+    margin: float | None = None
     margin_pct: float | None = None
 
 

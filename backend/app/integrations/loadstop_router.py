@@ -37,7 +37,7 @@ LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/loadboards/loadstop", tags=["loadboards"])
 
 
-SERVICES: tuple[str, ...] = ("fleet", "customers", "loads", "rates", "all")
+SERVICES: tuple[str, ...] = ("fleet", "customers", "loads", "rates", "trips", "all")
 
 
 class LastSyncBlock(BaseModel):
@@ -45,6 +45,7 @@ class LastSyncBlock(BaseModel):
     customers: str | None = None
     loads: str | None = None
     rates: str | None = None
+    trips: str | None = None
 
 
 class StateOut(BaseModel):
@@ -127,7 +128,7 @@ async def get_state(request: Request) -> StateOut:
 
 
 @router.post("/sync/{service}", response_model=dict)
-async def kick_sync(service: Literal["fleet", "customers", "loads", "rates", "all"], request: Request) -> dict:
+async def kick_sync(service: Literal["fleet", "customers", "loads", "rates", "trips", "all"], request: Request) -> dict:
     """Operator-triggered one-shot refresh. Defers the real ingest job.
 
     Gates: kill switch off + env creds present. The hourly tick already
