@@ -1462,6 +1462,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inbox/threads/{thread_id}/related": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Related Threads Endpoint */
+        get: operations["related_threads_endpoint_inbox_threads__thread_id__related_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/backfill/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Backfill Progress Endpoint
+         * @description Per-mailbox gradual-import progress (newest-reached pointer + floor).
+         */
+        get: operations["backfill_progress_endpoint_inbox_backfill_progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/backfill/step": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill Step Endpoint
+         * @description Manual kick for the gradual historical import step for one mailbox.
+         *
+         *     Idempotent at the DB level: the step reads ``backfilled_through_at``
+         *     inside its own transaction, so two concurrent kicks can't
+         *     double-advance the pointer past the window they computed.
+         */
+        post: operations["backfill_step_endpoint_inbox_backfill_step_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Notifications List Endpoint */
+        get: operations["notifications_list_endpoint_inbox_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Notification Mark Read Endpoint */
+        post: operations["notification_mark_read_endpoint_inbox_notifications__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inbox/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Notifications Mark All Read Endpoint */
+        post: operations["notifications_mark_all_read_endpoint_inbox_notifications_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/analysis/predictions": {
         parameters: {
             query?: never;
@@ -2798,6 +2910,27 @@ export interface components {
             /** Hours */
             hours?: number | null;
         };
+        /** BackfillProgressRow */
+        BackfillProgressRow: {
+            /** Mailbox */
+            mailbox: string;
+            /** Backfilled Through At */
+            backfilled_through_at: string | null;
+            /**
+             * Floor At
+             * Format: date-time
+             */
+            floor_at: string;
+        };
+        /** BackfillStepOut */
+        BackfillStepOut: {
+            /** Ok */
+            ok: boolean;
+            /** Mailbox */
+            mailbox: string;
+            /** Job Id */
+            job_id?: number | null;
+        };
         /** BackfillSubjectRatesOut */
         BackfillSubjectRatesOut: {
             /** Insights Scanned */
@@ -3458,6 +3591,13 @@ export interface components {
             amount: number;
             /** Pct */
             pct: number;
+        };
+        /** CounterpartOut */
+        CounterpartOut: {
+            /** Address */
+            address: string;
+            /** Domain */
+            domain: string | null;
         };
         /** CrawlRunOut */
         CrawlRunOut: {
@@ -5249,6 +5389,47 @@ export interface components {
             /** Suggested Nudge */
             suggested_nudge: string;
         };
+        /** NotificationItemOut */
+        NotificationItemOut: {
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body: string | null;
+            /** Thread Id */
+            thread_id: string | null;
+            /** Message Id */
+            message_id: string | null;
+            /** Load Id */
+            load_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Read At */
+            read_at: string | null;
+        };
+        /** NotificationsListOut */
+        NotificationsListOut: {
+            /** Unread */
+            unread: number;
+            /** Items */
+            items: components["schemas"]["NotificationItemOut"][];
+        };
+        /** NotificationsOkOut */
+        NotificationsOkOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Updated
+             * @default 0
+             */
+            updated: number;
+        };
         /**
          * ObjectionItemOut
          * @description One entry on the "Why they said no" card.
@@ -5770,6 +5951,28 @@ export interface components {
             status: "ok" | "disabled" | "error";
             /** Error */
             error?: string | null;
+        };
+        /** RelatedThreadOut */
+        RelatedThreadOut: {
+            /** Thread Id */
+            thread_id: string;
+            /** Latest Subject */
+            latest_subject: string;
+            /**
+             * Latest Received At
+             * Format: date-time
+             */
+            latest_received_at: string;
+            /** Latest Intent */
+            latest_intent: string | null;
+            /** Message Count */
+            message_count: number;
+        };
+        /** RelatedThreadsOut */
+        RelatedThreadsOut: {
+            counterpart: components["schemas"]["CounterpartOut"];
+            /** Items */
+            items: components["schemas"]["RelatedThreadOut"][];
         };
         /** RelationshipOut */
         RelationshipOut: {
@@ -9782,6 +9985,200 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForgetContactOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    related_threads_endpoint_inbox_threads__thread_id__related_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelatedThreadsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_progress_endpoint_inbox_backfill_progress_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillProgressRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    backfill_step_endpoint_inbox_backfill_step_post: {
+        parameters: {
+            query: {
+                mailbox: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillStepOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notifications_list_endpoint_inbox_notifications_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationsListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notification_mark_read_endpoint_inbox_notifications__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                notification_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationsOkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notifications_mark_all_read_endpoint_inbox_notifications_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationsOkOut"];
                 };
             };
             /** @description Validation Error */

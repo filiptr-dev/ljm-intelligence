@@ -7,6 +7,7 @@ import { useSession } from "@/lib/auth/session"
 import { num, timeAgo } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useTodayCounters, type MonitoringStatus } from "./use-today-counters"
+import { NotificationsBell } from "./notifications-bell"
 
 /**
  * Top-bar pill — derived from the real crawler state.
@@ -53,6 +54,7 @@ export function Topbar() {
       </dl>
       {status === "authenticated" && user && (
         <div className="ml-4 flex items-center gap-3 text-sm">
+          <NotificationsBell />
           <span className="hidden text-muted-foreground md:inline">{user.email}</span>
           <button
             type="button"

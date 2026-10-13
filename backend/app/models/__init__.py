@@ -32,7 +32,7 @@ from app.identity.models import (
     TenantSettings,
     User,
 )
-from app.inbox.models import MailCursor, MailMessage, MessageInsight, NoReplyTracker
+from app.inbox.models import MailCursor, MailMessage, MessageInsight, NoReplyTracker, Notification
 from app.outreach.models import (
     CallOutcome,
     CapacityPost,
@@ -82,6 +82,7 @@ __all__ = [
     "MailMessage",
     "MessageInsight",
     "NoReplyTracker",
+    "Notification",
     "ObjectionCluster",
     "Organization",
     "OrganizationMember",

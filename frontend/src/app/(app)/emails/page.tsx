@@ -3,6 +3,7 @@ import Link from "next/link"
 import { AlertCircle, Search, Sparkles } from "lucide-react"
 import { INTENT_META, IntentBadge, SentimentDot } from "@/components/app/intent"
 import { MailboxSelector } from "@/components/app/mailbox-selector"
+import { MailBackfillProgress } from "@/components/app/mail-backfill-progress"
 import { BarList, PageHeader, Panel, StackBar } from "@/components/app/ui"
 import { buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -134,6 +135,8 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
       />
 
       <MailboxSelector options={mailboxes} />
+
+      <div className="mb-3"><MailBackfillProgress /></div>
 
       <Form action="/emails" className="mb-3 flex flex-col gap-2 rounded-sm border-2 border-asphalt bg-card p-3 sm:flex-row sm:items-center">
         {mailbox ? <input type="hidden" name="mailbox" value={mailbox} /> : null}

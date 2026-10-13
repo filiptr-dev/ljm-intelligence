@@ -587,3 +587,181 @@ async def forget_contact_endpoint(session: Session, payload: ForgetContactIn) ->
     result = await svc.forget_contact(session, email=str(payload.email))
     await session.commit()
     return ForgetContactOut(**result)
+
+
+# ---- related threads for a counterpart (plan Task 2) -----------------------
+
+
+class CounterpartOut(BaseModel):
+    address: str
+    domain: str | None
+
+
+class RelatedThreadOut(BaseModel):
+    thread_id: str
+    latest_subject: str
+    latest_received_at: datetime
+    latest_intent: str | None
+    message_count: int
+
+
+class RelatedThreadsOut(BaseModel):
+    counterpart: CounterpartOut
+    items: list[RelatedThreadOut]
+
+
+@router.get("/threads/{thread_id}/related", response_model=RelatedThreadsOut)
+async def related_threads_endpoint(session: Session, thread_id: str) -> RelatedThreadsOut:
+    result = await svc.list_counterpart_threads(session, thread_id)
+    if result is None:
+        # Thread exists but has no non-owner side (edge case); or no match.
+        return RelatedThreadsOut(
+            counterpart=CounterpartOut(address="", domain=None), items=[],
+        )
+    return RelatedThreadsOut(
+        counterpart=CounterpartOut(
+            address=result.counterpart.address,
+            domain=result.counterpart.domain,
+        ),
+        items=[
+            RelatedThreadOut(
+                thread_id=r.thread_id,
+                latest_subject=r.latest_subject,
+                latest_received_at=r.latest_received_at,
+                latest_intent=r.latest_intent,
+                message_count=r.message_count,
+            )
+            for r in result.items
+        ],
+    )
+
+
+# ---- gradual Gmail history import (plan Task 3) ----------------------------
+
+
+class BackfillProgressRow(BaseModel):
+    mailbox: str
+    backfilled_through_at: datetime | None
+    floor_at: datetime
+
+
+@router.get("/backfill/progress", response_model=list[BackfillProgressRow])
+async def backfill_progress_endpoint(session: Session, request: Request) -> list[BackfillProgressRow]:
+    """Per-mailbox gradual-import progress (newest-reached pointer + floor)."""
+    from datetime import UTC as _UTC, datetime as _dt, timedelta as _td
+
+    from sqlalchemy import select as _select
+
+    from app.inbox.models import MailCursor as _MC
+
+    rows = (await session.execute(_select(_MC.mailbox, _MC.backfilled_through_at))).all()
+    now = _dt.now(_UTC)
+    floor = now - _td(days=365)
+    return [
+        BackfillProgressRow(
+            mailbox=r[0],
+            backfilled_through_at=r[1],
+            floor_at=floor,
+        )
+        for r in rows
+    ]
+
+
+class BackfillStepOut(BaseModel):
+    ok: bool
+    mailbox: str
+    job_id: int | None = None
+
+
+@router.post("/backfill/step", response_model=BackfillStepOut)
+async def backfill_step_endpoint(request: Request, mailbox: str = Query(..., max_length=320)) -> BackfillStepOut:
+    """Manual kick for the gradual historical import step for one mailbox.
+
+    Idempotent at the DB level: the step reads ``backfilled_through_at``
+    inside its own transaction, so two concurrent kicks can't
+    double-advance the pointer past the window they computed.
+    """
+    normalized = _validate_mailbox(request, mailbox)
+    if normalized is None:
+        raise HTTPException(status_code=400, detail="mailbox required")
+    from app.shared.orm import LJM_TENANT_ID
+    from app.shared.queue_dispatch import maybe_dispatch
+
+    job_id = await maybe_dispatch(
+        request.app.state.sessionmaker,
+        "inbox.mail_backfill_step",
+        tenant_id=LJM_TENANT_ID,
+        mailbox=normalized,
+    )
+    if job_id is None:
+        # No queue (sqlite tests): run inline.
+        from app.inbox.jobs import mail_backfill_step as _step
+        await _step(LJM_TENANT_ID, normalized)
+    return BackfillStepOut(ok=True, mailbox=normalized, job_id=job_id)
+
+
+# ---- notifications (plan Task 1) -------------------------------------------
+
+
+class NotificationItemOut(BaseModel):
+    id: int
+    kind: str
+    title: str
+    body: str | None
+    thread_id: str | None
+    message_id: str | None
+    load_id: int | None
+    created_at: datetime
+    read_at: datetime | None
+
+
+class NotificationsListOut(BaseModel):
+    unread: int
+    items: list[NotificationItemOut]
+
+
+class NotificationsOkOut(BaseModel):
+    ok: bool
+    updated: int = 0
+
+
+@router.get("/notifications", response_model=NotificationsListOut, tags=["notifications"])
+async def notifications_list_endpoint(
+    session: Session, limit: int = Query(default=50, ge=1, le=200),
+) -> NotificationsListOut:
+    from app.inbox import notifications_service as nsvc
+
+    items_raw = await nsvc.list_items(session, limit=limit)
+    unread = await nsvc.count_unread(session)
+    return NotificationsListOut(
+        unread=unread,
+        items=[NotificationItemOut(**row) for row in items_raw],
+    )
+
+
+@router.post(
+    "/notifications/{notification_id}/read",
+    response_model=NotificationsOkOut,
+    tags=["notifications"],
+)
+async def notification_mark_read_endpoint(
+    session: Session, notification_id: int,
+) -> NotificationsOkOut:
+    from app.inbox import notifications_service as nsvc
+
+    changed = await nsvc.mark_read(session, notification_id)
+    await session.commit()
+    return NotificationsOkOut(ok=True, updated=1 if changed else 0)
+
+
+@router.post(
+    "/notifications/read-all",
+    response_model=NotificationsOkOut,
+    tags=["notifications"],
+)
+async def notifications_mark_all_read_endpoint(session: Session) -> NotificationsOkOut:
+    from app.inbox import notifications_service as nsvc
+
+    updated = await nsvc.mark_all_read(session)
+    await session.commit()
+    return NotificationsOkOut(ok=True, updated=updated)

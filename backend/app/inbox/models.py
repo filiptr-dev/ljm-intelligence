@@ -137,6 +137,49 @@ class MessageInsight(TenantMixin, Base):
     )
 
 
+class Notification(TenantMixin, Base):
+    """Bell-feed row (migration 0049).
+
+    One row per owner-visible event — a broker reply landing on a thread
+    we previously sent on, a load_offer coming in from the inbox path, or
+    an urgent email. ``read_at`` is per-event state that re-triage must
+    not reset, which is why this lives in its own table rather than being
+    derived from ``message_insights``.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    thread_id: Mapped[str | None] = mapped_column(String(255))
+    message_id: Mapped[str | None] = mapped_column(String(255))
+    load_id: Mapped[int | None] = mapped_column(BigInteger)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_notifications_tenant_unread",
+            "tenant_id",
+            "read_at",
+            "created_at",
+        ),
+        Index(
+            "ix_notifications_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+    )
+
+
 class NoReplyTracker(TenantMixin, Base):
     """One row per outbound-last thread still waiting on a reply.
 
