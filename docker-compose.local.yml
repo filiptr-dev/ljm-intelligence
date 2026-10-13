@@ -49,7 +49,17 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: .env.local-docker
+    env_file:
+      - .env.local-docker
+      # backend/.env carries CRON_SECRET (same source the `api` service reads
+      # from above). The frontend's "Start now" POST signs itself with
+      # CRON_SECRET and the api compares them — they MUST come from the same
+      # file. The previous `CRON_SECRET: "${CRON_SECRET:-}"` override under
+      # `environment:` silently blanked the value whenever compose ran without
+      # that shell var exported, which is why Start now returned
+      # "invalid cron secret". Dropping the override + reading backend/.env
+      # keeps the two services in lockstep by construction.
+      - backend/.env
     environment:
       # API_URL is the server-side base URL read by client.ts and the proxy/login
       # BFF routes (process.env.API_URL || process.env.NEXT_PUBLIC_API_URL).
@@ -58,7 +68,6 @@ services:
       # not the api service — causing 502s on every server-rendered page.
       API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: http://localhost:8001
-      CRON_SECRET: "${CRON_SECRET:-}"
       # CI=true prevents pnpm from asking for TTY confirmation when
       # it detects a mismatch between container node_modules and lockfile.
       CI: "true"
