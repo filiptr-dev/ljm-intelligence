@@ -22,8 +22,10 @@ import { Panel, StatTile } from "@/components/app/ui"
 import { cn } from "@/lib/utils"
 import { pct, timeAgo } from "@/lib/format"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import type { OverviewMetrics } from "@/lib/api/brokers"
 import * as analysis from "@/lib/api/analysis"
+import * as inbox from "@/lib/api/inbox"
 
 const COMPONENT_LABEL: Record<string, string> = {
   recency: "Recency",
@@ -369,13 +371,18 @@ export function AiSummaryCard({
           )}
         </div>
         {email ? (
-          <button
-            type="button"
-            onClick={() => onDraft(email)}
-            className="inline-flex h-9 items-center rounded-sm border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
-          >
-            Draft email
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onDraft(email)}
+              className="inline-flex h-9 items-center rounded-sm border border-border bg-background px-3 text-sm font-medium hover:bg-muted"
+            >
+              Draft email
+            </button>
+            {step ? (
+              <DraftThisButton brokerId={brokerId} email={email} hint={step.label} />
+            ) : null}
+          </div>
         ) : (
           <form
             className="flex flex-wrap items-center gap-2"
@@ -402,6 +409,49 @@ export function AiSummaryCard({
         )}
       </div>
     </Panel>
+  )
+}
+
+/**
+ * One-click "Draft this" button.
+ *
+ * Looks up the broker's most recent inbox thread (via listEmails q=email).
+ * If one exists, it navigates to `/emails/{thread_id}?draft_hint=<step>` so
+ * the thread reply box prefills an AI draft that honours the operator's
+ * recommended next step. With no thread yet, falls through to
+ * `/emails/compose?broker=<id>&hint=<step>` where the compose page server-
+ * side-prefills an AI draft keyed off the hint.
+ */
+function DraftThisButton({ brokerId, email, hint }: { brokerId: string; email: string; hint: string }) {
+  const router = useRouter()
+  const [pending, startTransition] = React.useTransition()
+  const go = () => {
+    startTransition(async () => {
+      try {
+        // Narrow by the broker's email — the fastest way we have today to
+        // find a prior thread without a dedicated endpoint.
+        const page = await inbox.listEmails({ q: email, page_size: 1 })
+        const tid = page.items[0]?.thread_id
+        if (tid) {
+          router.push(`/emails/${encodeURIComponent(tid)}?draft_hint=${encodeURIComponent(hint)}`)
+          return
+        }
+      } catch {
+        // Fall through — compose path is the honest fallback.
+      }
+      router.push(`/emails/compose?broker=${encodeURIComponent(brokerId)}&hint=${encodeURIComponent(hint)}`)
+    })
+  }
+  return (
+    <button
+      type="button"
+      onClick={go}
+      disabled={pending}
+      className="inline-flex h-9 items-center rounded-sm border border-chart-2/40 bg-chart-2/10 px-3 text-sm font-semibold text-chart-2 hover:bg-chart-2/20 disabled:opacity-60"
+      title="Open the inbox with an AI draft primed by this next step"
+    >
+      {pending ? "Opening…" : "Draft this"}
+    </button>
   )
 }
 

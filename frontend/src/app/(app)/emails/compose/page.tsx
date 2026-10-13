@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/app/ui"
 import type { ContactOption } from "@/components/app/email-composer"
 import { getBroker } from "@/lib/api/brokers"
+import { aiDraftCompose } from "@/lib/api/inbox"
 import { ComposeClient } from "./compose-client"
 
 /**
@@ -18,6 +19,7 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
   const subject = typeof sp.subject === "string" ? sp.subject : ""
   const body = typeof sp.body === "string" ? sp.body : ""
   const brokerId = typeof sp.broker === "string" ? sp.broker : ""
+  const hint = typeof sp.hint === "string" ? sp.hint : ""
 
   // Resolve broker/lead by id into a prefilled recipient when `?broker=<id>`
   // is passed (Follow-ups "Draft email" deep-link). Reuses the typed
@@ -76,6 +78,28 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
       }
     : undefined
 
+  // "Draft this" deep-link from the broker overview: when the broker has
+  // no prior inbox thread we land here with ?broker=<id>&hint=<step>. Pre-
+  // flight the compose AI draft on the server so the builder opens with
+  // the AI body already prefilled. Any failure falls through to the empty
+  // body — the UI never crashes on a cold provider.
+  let initialBody = body
+  if (!initialBody && hint && brokerRecipient?.email) {
+    try {
+      const draft = await aiDraftCompose({
+        to: brokerRecipient.email,
+        purpose: "capacity_offer",
+        tone: "professional",
+        recipient_name: brokerRecipient.contactName ?? "",
+        lane: brokerRecipient.lane ?? "",
+        hint,
+      })
+      if (draft?.body_text) initialBody = draft.body_text
+    } catch {
+      // Keep empty body; operator writes or clicks Rewrite.
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -86,7 +110,7 @@ export default async function ComposePage({ searchParams }: { searchParams: Prom
       <ComposeClient
         initialRecipient={initialRecipient}
         initialSubject={subject}
-        initialBody={body}
+        initialBody={initialBody}
       />
     </>
   )

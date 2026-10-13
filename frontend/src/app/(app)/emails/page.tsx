@@ -85,6 +85,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
   const effectiveQ: string | undefined = q || undefined
 
   const data = await inbox.listEmails({ intent: effectiveIntent, q: effectiveQ, page, page_size: PAGE, mailbox })
+  const needsReplyRows = await inbox.needsReply({ mailbox, limit: 10 }).catch(() => [])
   const rows = data.items
   const total = data.total
   const pages = Math.ceil(total / PAGE)
@@ -166,6 +167,36 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
         <AskButton />
       </Form>
 
+      <Panel
+        title="Needs reply"
+        description="Threads where a broker is waiting on you right now. Routine-low + auto-replies are hidden."
+      >
+        {needsReplyRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No threads waiting on a reply.</p>
+        ) : (
+          <ul className="divide-y divide-border text-sm">
+            {needsReplyRows.map((r) => {
+              const mapped = mapIntent(r.intent)
+              return (
+                <li key={`${r.mailbox}:${r.thread_id}`} className="py-2">
+                  <Link
+                    href={`/emails/${encodeURIComponent(r.thread_id)}`}
+                    className="block hover:underline"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{r.broker_name || r.from_addr}</span>
+                      <IntentBadge intent={mapped} />
+                      <span className="ml-auto text-xs text-muted-foreground">{dateTime(r.sent_at as unknown as string)}</span>
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">{r.subject || "(no subject)"}</div>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Panel>
+
       {q ? (
         <Suspense
           key={`${q}:${mailbox ?? ""}:${sp.chip ?? ""}`}
@@ -174,7 +205,7 @@ export default async function EmailsPage({ searchParams }: { searchParams: Promi
               <Sparkles className="size-4 animate-pulse text-chart-2" />
               <span className="font-semibold text-chart-2">Answering…</span>
               <span className="text-muted-foreground">
-                reading the inbox for "{q}" — this takes 10-25 seconds.
+                reading the inbox for &ldquo;{q}&rdquo; — this takes 10-25 seconds.
               </span>
             </div>
           }

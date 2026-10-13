@@ -28,8 +28,15 @@ const INTENT_MAP: Record<string, Intent> = {
  * (both server-side, cookie-authed). The composer client island receives
  * the draft shape and calls `/inbox/threads/{id}/reply`.
  */
-export default async function ThreadPage({ params }: { params: Promise<{ threadId: string }> }) {
+export default async function ThreadPage({
+  params, searchParams,
+}: {
+  params: Promise<{ threadId: string }>
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}) {
   const { threadId: raw } = await params
+  const sp = (await searchParams) ?? {}
+  const draftHint = typeof sp.draft_hint === "string" ? sp.draft_hint : undefined
   const threadId = decodeURIComponent(raw)
   let thread: inbox.ThreadOut
   try {
@@ -38,7 +45,7 @@ export default async function ThreadPage({ params }: { params: Promise<{ threadI
     if (e instanceof ApiRequestError && e.status === 404) notFound()
     throw e
   }
-  const draft = await inbox.getAiDraft(threadId).catch(() => null)
+  const draft = await inbox.getAiDraft(threadId, { hint: draftHint }).catch(() => null)
   const related = await inbox.getRelatedThreads(threadId).catch(() => null)
   const subjectForReply = draft?.subject ?? (thread.subject.toLowerCase().startsWith("re:") ? thread.subject : `Re: ${thread.subject}`)
   const bodyForReply = draft?.body_text ?? ""

@@ -391,11 +391,12 @@ async def status_board_endpoint(
 async def ai_draft_endpoint(
     session: Session, thread_id: str,
     tone: str = Query(default="professional", max_length=24),
+    hint: str | None = Query(default=None, max_length=400),
 ):
-    # Tone is forwarded to the prompt only; the default preserves pre-plan
-    # behaviour. The underlying service accepts the extra kwarg via **kwargs
-    # back-compat (ignored today, picked up when the prompt is templatised).
-    draft = await svc.ai_draft_reply(session, thread_id)
+    # ``hint`` is the broker-overview "next step" phrase — appended to the
+    # prompt as the operator's instruction. Empty / absent hint returns the
+    # same body today's clients see.
+    draft = await svc.ai_draft_reply(session, thread_id, hint=hint or None)
     if draft is None:
         return None
     return AiDraftOutModel(**draft.__dict__)
@@ -438,6 +439,7 @@ class AiDraftComposeIn(BaseModel):
     recipient_name: constr(max_length=200) = ""
     lane: constr(max_length=120) = ""
     equipment: constr(max_length=120) = ""
+    hint: constr(max_length=400) = ""
 
 
 class RewriteIn(BaseModel):
@@ -447,12 +449,15 @@ class RewriteIn(BaseModel):
 
 
 @router.post("/ai-draft", response_model=AiDraftOutModel)
-async def ai_draft_compose_endpoint(payload: AiDraftComposeIn) -> AiDraftOutModel:
+async def ai_draft_compose_endpoint(
+    payload: AiDraftComposeIn, session: Session,
+) -> AiDraftOutModel:
     """Compose-time AI draft. Reuses the ``inbox_draft_reply`` AI feature."""
     draft = await svc.ai_draft_compose(
         to=str(payload.to), purpose=payload.purpose, tone=payload.tone,
         brief=payload.brief or None, recipient_name=payload.recipient_name or None,
         lane=payload.lane or None, equipment=payload.equipment or None,
+        hint=payload.hint or None, session=session,
     )
     return AiDraftOutModel(**draft.__dict__)
 
@@ -573,11 +578,12 @@ async def ask_endpoint(
 
 
 @router.post("/rewrite", response_model=AiDraftOutModel)
-async def ai_rewrite_endpoint(payload: RewriteIn) -> AiDraftOutModel:
+async def ai_rewrite_endpoint(payload: RewriteIn, session: Session) -> AiDraftOutModel:
     """Rewrite the body in the given tone. Falls back to the original body
     on any provider error — never leaves the user with an empty editor."""
     out = await svc.ai_rewrite(
         body_text=payload.body_text, tone=payload.tone, brief=payload.brief or None,
+        session=session,
     )
     return AiDraftOutModel(**out.__dict__)
 
@@ -634,6 +640,40 @@ async def related_threads_endpoint(session: Session, thread_id: str) -> RelatedT
             for r in result.items
         ],
     )
+
+
+# ---- needs-reply list (plan Part C) ---------------------------------------
+
+
+class NeedsReplyRowOut(BaseModel):
+    thread_id: str
+    mailbox: str
+    subject: str
+    from_addr: str
+    broker_name: str | None
+    intent: str
+    urgency: str
+    sent_at: datetime
+
+
+class NeedsReplyOut(BaseModel):
+    items: list[NeedsReplyRowOut]
+
+
+@router.get("/needs-reply", response_model=NeedsReplyOut)
+async def needs_reply_endpoint(
+    session: Session,
+    request: Request,
+    mailbox: str | None = Query(default=None, max_length=320),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> NeedsReplyOut:
+    """Threads whose newest message is inbound and that we owe a reply on.
+
+    Routine-low and auto-reply / OOO threads are excluded in the service.
+    """
+    mb = _validate_mailbox(request, mailbox)
+    rows = await svc.fetch_needs_reply(session, mailbox=mb, limit=limit)
+    return NeedsReplyOut(items=[NeedsReplyRowOut(**r.__dict__) for r in rows])
 
 
 # ---- gradual Gmail history import (plan Task 3) ----------------------------

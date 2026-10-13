@@ -287,6 +287,31 @@ async def revoke_gmail(request: Request) -> GmailConnectorOut:
     return GmailConnectorOut(ok=True)
 
 
+class AiStyleOut(BaseModel):
+    enabled: bool
+
+
+class AiStyleIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/ai-style", response_model=AiStyleOut)
+async def ai_style_get(request: Request) -> AiStyleOut:
+    """Read ``ai.match_style`` — the "drafts imitate LJM's past sent emails"
+    switch. Default ON when the row is absent."""
+    async with request.app.state.sessionmaker() as s:
+        enabled = await _get_flag_bool(s, "ai.match_style", default=True)
+    return AiStyleOut(enabled=enabled)
+
+
+@router.put("/ai-style", response_model=AiStyleOut)
+async def ai_style_put(payload: AiStyleIn, request: Request) -> AiStyleOut:
+    async with request.app.state.sessionmaker() as s:
+        await _set_flag(s, "ai.match_style", {"enabled": bool(payload.enabled)})
+        await s.commit()
+    return AiStyleOut(enabled=bool(payload.enabled))
+
+
 @router.post("/connectors/gmail/send-switch", response_model=OwnerSwitchOut)
 async def send_switch(payload: OwnerSwitchIn, request: Request) -> OwnerSwitchOut:
     """Flip ``inbox.send_via_gmail`` ON/OFF. ON requires ``confirm='CONFIRM'``.

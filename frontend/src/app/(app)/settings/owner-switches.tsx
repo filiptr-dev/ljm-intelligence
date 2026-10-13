@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api/client"
@@ -25,7 +25,40 @@ export function OwnerSwitches({ sections = ["gmail", "switches", "forget"] }: { 
   const [confirm, setConfirm] = useState("")
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [matchStyle, setMatchStyle] = useState<boolean>(true)
   const [pending, startTransition] = useTransition()
+
+  // These endpoints ship on the same patch — regenerate schema.d.ts after
+  // the merge and the casts can go.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyApi = api as any
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await anyApi.GET("/settings/ai-style", {})
+        if (res.data && typeof res.data.enabled === "boolean") setMatchStyle(res.data.enabled)
+      } catch {
+        /* keep default ON */
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function toggleMatchStyle(next: boolean) {
+    setMatchStyle(next)
+    startTransition(async () => {
+      try {
+        const res = await anyApi.PUT("/settings/ai-style", { body: { enabled: next } })
+        if (res.data && typeof res.data.enabled === "boolean") {
+          setMatchStyle(res.data.enabled)
+          flashOk(`Match our writing style: ${res.data.enabled ? "ON" : "OFF"}.`)
+        }
+      } catch (e) {
+        flashErr(e instanceof Error ? e.message : "Save failed")
+      }
+    })
+  }
 
   function flashOk(s: string) { setMsg(s); setErr(null) }
   function flashErr(s: string) { setErr(s); setMsg(null) }
@@ -101,6 +134,21 @@ export function OwnerSwitches({ sections = ["gmail", "switches", "forget"] }: { 
         <div className="mt-3 flex items-center gap-2">
           <Input placeholder="Type CONFIRM to enable sending" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="max-w-xs" />
           <Button onClick={() => sendSwitch(true)} disabled={pending || confirm !== "CONFIRM"}>Send via Gmail: ON</Button>
+        </div>
+        <div className="mt-4 flex items-center gap-3 border-t border-border pt-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={matchStyle}
+              onChange={(e) => toggleMatchStyle(e.target.checked)}
+              disabled={pending}
+              className="size-4"
+            />
+            <span className="font-medium">Match our writing style</span>
+          </label>
+          <span className="text-xs text-muted-foreground">
+            Drafts imitate LJM&rsquo;s past sent emails (greeting, length, sign-off). Style only — never copies facts.
+          </span>
         </div>
       </div>
       )}

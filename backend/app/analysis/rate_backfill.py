@@ -263,7 +263,7 @@ async def backfill_subject_rates(
                 await asyncio.sleep(wait)
             try:
                 ai_ex = await ai_extract_from_message(provider, m.subject, m.body_text)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 msg = str(exc).lower()
                 if "429" in msg or "rate" in msg or "quota" in msg:
                     log.warning("rate-backfill: AI 429/quota — stopping AI loop for the rest of this run")

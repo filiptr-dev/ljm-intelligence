@@ -718,19 +718,187 @@ def _template_body(intent: str, broker: str, lane_from: str, lane_to: str, rate:
     )
 
 
-def _ai_draft_prompt(broker: str, intent: str, lane_from: str, lane_to: str, rate: float | None, last_body: str) -> str:
-    """One prompt string — the operator always edits before sending."""
+def _ai_draft_prompt(
+    broker: str,
+    intent: str,
+    lane_from: str,
+    lane_to: str,
+    rate: float | None,
+    last_body: str,
+    *,
+    hint: str | None = None,
+    truck_context: str | None = None,
+    style: str = "",
+) -> str:
+    """One prompt string — the operator always edits before sending.
+
+    When ``style`` carries house-style examples, we relax the "2-4 sentence /
+    stock sign-off" instruction and ask the model to imitate example length +
+    sign-off instead; otherwise today's prompt is unchanged.
+    """
     rate_str = f"${rate:,.0f}" if rate else "unspecified"
-    return (
+    opener = (
+        "You are LJM, a trucking carrier. Draft a reply to the broker email below "
+        "that matches the length and sign-off of the example emails in the style "
+        "block. No preamble, no explanations — just the reply body."
+        if style else
         "You are LJM, a trucking carrier. Draft a short, professional reply (2-4 "
         "sentences) to the broker email below. Keep the signature '— LJM' on its own line. "
-        "No preamble, no explanations — just the reply body.\n\n"
+        "No preamble, no explanations — just the reply body."
+    )
+    header = (
+        f"{opener}\n\n"
         f"Broker: {broker}\n"
         f"Intent: {intent}\n"
         f"Lane: {lane_from or '?'} → {lane_to or '?'}\n"
         f"Rate: {rate_str}\n"
-        f"Last message:\n{last_body[:1500]}\n"
     )
+    extras = ""
+    if truck_context == "ASK_FOR_LOAD_NUMBER":
+        extras += (
+            "Truck context: we do not know which load the broker is asking about. "
+            "Politely ask for the load / order number. "
+            "Do not invent a city, state, truck number or ETA.\n"
+        )
+    elif truck_context:
+        extras += f"Truck context (the ONLY authorised fact source for the location): {truck_context}\n"
+    if hint:
+        extras += f"Operator's next step: {hint}\n"
+    return (
+        header
+        + extras
+        + f"Last message:\n{last_body[:1500]}\n"
+        + (style or "")
+    )
+
+
+async def _latest_insight_derived(
+    session: AsyncSession, *, thread_id: str, message_id: str, mailbox: str
+) -> tuple[str | None, str | None, str | None, list[str]]:
+    """Pull ``(derived_order_no, derived_lane_from, derived_lane_to, order_nos_in_thread)``.
+
+    First tuple-slot is the last-inbound's derived order; last slot is every
+    non-null ``derived_order_no`` across the thread (latest first) — the
+    truck-context flow walks that list.
+    """
+    from sqlalchemy import desc as _desc, select as _select
+
+    from app.inbox.models import MessageInsight as _MI
+
+    try:
+        row = (
+            await session.execute(
+                _select(
+                    _MI.derived_order_no,
+                    _MI.derived_lane_from,
+                    _MI.derived_lane_to,
+                )
+                .where(
+                    _MI.mailbox == mailbox,
+                    _MI.message_id == message_id,
+                )
+                .order_by(_desc(_MI.created_at))
+                .limit(1)
+            )
+        ).first()
+        order_no = row[0] if row else None
+        d_lf = row[1] if row else None
+        d_lt = row[2] if row else None
+
+        thread_rows = (
+            await session.execute(
+                _select(_MI.derived_order_no, _MI.created_at)
+                .where(_MI.thread_id == thread_id)
+                .order_by(_desc(_MI.created_at))
+            )
+        ).all()
+        order_nos = [r[0] for r in thread_rows if r[0]]
+        return order_no, d_lf, d_lt, order_nos
+    except Exception:  # noqa: BLE001
+        return None, None, None, []
+
+
+async def _build_truck_context(
+    session: AsyncSession, *, order_nos: list[str]
+) -> str | None:
+    """Pin a load → truck for an ``urgent_truck`` draft. Returns a short
+    natural-language fact line, the ``ASK_FOR_LOAD_NUMBER`` sentinel if no
+    confident pin, or None on error (caller treats None like the sentinel)."""
+    import logging as _log
+
+    from sqlalchemy import or_ as _or, select as _select
+
+    _l = _log.getLogger(__name__)
+    try:
+        from app.fleet.models import Truck as _Truck
+        from app.prospecting.models import Load as _Load
+    except Exception as exc:  # noqa: BLE001
+        _l.info("_build_truck_context: model import failed: %s", type(exc).__name__)
+        return None
+
+    for order_no in order_nos:
+        if not order_no:
+            continue
+        # Narrow candidate loads by source + source_ref, then also fall back
+        # to Python-side raw JSON matching across common vendor keys.
+        candidates = (
+            await session.execute(
+                _select(_Load).where(
+                    _or(_Load.source_ref == order_no, _Load.source == "loadstop")
+                ).limit(200)
+            )
+        ).scalars().all()
+        pinned_load = None
+        for ld in candidates:
+            if ld.source_ref == order_no:
+                pinned_load = ld
+                break
+            raw = ld.raw or {}
+            if not isinstance(raw, dict):
+                continue
+            for key in ("orderNumber", "orderNo", "loadNumber", "order_no"):
+                if str(raw.get(key) or "").strip() == str(order_no).strip():
+                    pinned_load = ld
+                    break
+            if pinned_load is not None:
+                break
+        if pinned_load is None:
+            continue
+        raw = pinned_load.raw or {}
+        unit_ref = None
+        if isinstance(raw, dict):
+            at = raw.get("assignedTruck")
+            if isinstance(at, dict):
+                unit_ref = at.get("number") or at.get("unitNumber")
+            unit_ref = unit_ref or raw.get("truckNumber") or raw.get("unitNumber")
+        unit_ref = str(unit_ref).strip() if unit_ref else ""
+        if not unit_ref:
+            continue
+        truck = (
+            await session.execute(
+                _select(_Truck).where(_Truck.unit_number == unit_ref).limit(1)
+            )
+        ).scalar_one_or_none()
+        if truck is None:
+            continue
+        traw = truck.raw if isinstance(truck.raw, dict) else {}
+        loc = str(traw.get("locationDescription") or "").strip()
+        if not loc:
+            continue
+        last_seen = truck.last_seen_at or truck.updated_at
+        if last_seen is not None:
+            try:
+                ts = f" (last seen {last_seen:%Y-%m-%d %H:%M} UTC)"
+            except Exception:  # noqa: BLE001
+                ts = ""
+        else:
+            ts = ""
+        return (
+            f"We have truck {truck.unit_number} at {loc}{ts}. "
+            f"Use this if the broker is asking about the load."
+        )
+    # Nothing confidently pinned.
+    return "ASK_FOR_LOAD_NUMBER"
 
 
 async def ai_draft_reply(
@@ -738,6 +906,7 @@ async def ai_draft_reply(
     thread_id: str,
     *,
     provider: Any | None = None,
+    hint: str | None = None,
 ) -> AiDraftOut | None:
     """Pre-fill a reply draft using the shared email builder shape.
 
@@ -765,6 +934,35 @@ async def ai_draft_reply(
     lane_from = last_in.lane_from or ""
     lane_to = last_in.lane_to or ""
 
+    # Derived-* fallback (migration 0048) + thread-wide order numbers for the
+    # urgent_truck path. One extra query; cheap and tenant-scoped by RLS.
+    truck_context: str | None = None
+    try:
+        _, d_lf, d_lt, order_nos = await _latest_insight_derived(
+            session,
+            thread_id=thread_id,
+            message_id=last_in.message_id,
+            mailbox=last_in.mailbox,
+        )
+        if not lane_from and d_lf:
+            lane_from = d_lf
+        if not lane_to and d_lt:
+            lane_to = d_lt
+        if intent == "urgent_truck":
+            truck_context = await _build_truck_context(session, order_nos=order_nos)
+    except Exception as _exc:  # noqa: BLE001 — defensive: never break drafting.
+        _l.info("ai_draft_reply: derived/truck lookup failed: %s", type(_exc).__name__)
+
+    # House-style few-shot examples (gated by ai.match_style, default ON).
+    style = ""
+    try:
+        from app.inbox.style_examples import build_style_block
+        style = await build_style_block(
+            session, to_email=last_in.from_addr, mailbox=last_in.mailbox,
+        )
+    except Exception as _exc:  # noqa: BLE001
+        _l.info("ai_draft_reply: style helper failed: %s", type(_exc).__name__)
+
     # ---- AI path first; template is the fallback.
     if provider is None:
         try:
@@ -781,7 +979,10 @@ async def ai_draft_reply(
     if provider is None or getattr(provider, "kind", None) == "null":
         ai_error = "provider_null"
     else:
-        prompt = _ai_draft_prompt(broker, intent, lane_from, lane_to, rate, last_in.body_text or "")
+        prompt = _ai_draft_prompt(
+            broker, intent, lane_from, lane_to, rate, last_in.body_text or "",
+            hint=hint, truck_context=truck_context, style=style,
+        )
         try:
             call = await asyncio.wait_for(
                 provider.generate_text(prompt), timeout=AI_DRAFT_TIMEOUT_S
@@ -818,6 +1019,8 @@ async def ai_draft_compose(
     lane: str | None = None,
     equipment: str | None = None,
     provider: Any | None = None,
+    hint: str | None = None,
+    session: AsyncSession | None = None,
 ) -> AiDraftOut:
     """Compose-time AI draft. Reuses the ``inbox_draft_reply`` feature slot;
     the prompt switches on ``purpose`` + ``tone`` + the optional user brief.
@@ -862,16 +1065,31 @@ async def ai_draft_compose(
             "ai_draft_compose: provider kind=null (no API key configured) → template fallback"
         )
     else:
-        prompt = (
+        style = ""
+        try:
+            from app.inbox.style_examples import build_style_block
+            style = await build_style_block(session, to_email=to)
+        except Exception as _exc:  # noqa: BLE001
+            _l.info("ai_draft_compose: style helper failed: %s", type(_exc).__name__)
+        intro = (
+            f"You are LJM, a trucking carrier. Draft a {tone} outreach email to a "
+            f"company that matches the length and sign-off of the style examples "
+            f"below. No preamble, no explanations — just subject + body."
+            if style else
             f"You are LJM, a trucking carrier. Draft a short, {tone} outreach email (3-5 "
             f"sentences) to a company. Keep the signature on its own line as '— LJM'. "
-            f"No preamble, no explanations — just subject + body.\n\n"
+            f"No preamble, no explanations — just subject + body."
+        )
+        prompt = (
+            f"{intro}\n\n"
             f"Recipient: {broker}\n"
             f"Purpose: {purpose}\n"
             f"Lane: {lane or '?'}\n"
             f"Equipment: {equipment or '?'}\n"
             f"User brief: {brief or '-'}\n"
+            f"{('Operator hint: ' + hint) if hint else ''}\n"
             f"Return exactly two lines, the first starting with 'Subject:'.\n"
+            f"{style}"
         )
         try:
             call = await asyncio.wait_for(
@@ -928,6 +1146,7 @@ async def ai_rewrite(
     tone: str,
     brief: str | None = None,
     provider: Any | None = None,
+    session: AsyncSession | None = None,
 ) -> AiDraftOut:
     """Rewrite the body in the given tone, keeping facts + ~length.
 
@@ -954,12 +1173,24 @@ async def ai_rewrite(
     if provider is None or getattr(provider, "kind", None) == "null":
         ai_error = "provider_null"
     else:
+        style = ""
+        try:
+            from app.inbox.style_examples import build_style_block
+            style = await build_style_block(session, to_email=None)
+        except Exception as _exc:  # noqa: BLE001
+            _l.info("ai_rewrite: style helper failed: %s", type(_exc).__name__)
+        voice = (
+            "Rewrite the following email in LJM's voice (match the examples' "
+            f"greeting, length and sign-off) and in a {tone} tone."
+            if style else
+            f"Rewrite the following email in a {tone} tone."
+        )
         prompt = (
-            f"Rewrite the following email in a {tone} tone. Keep every fact, "
-            f"keep the length roughly the same. No preamble, no explanations — "
-            f"return only the rewritten body.\n"
+            f"{voice} Keep every fact, keep the length roughly the same. "
+            "No preamble, no explanations — return only the rewritten body.\n"
             f"{('User brief: ' + brief) if brief else ''}\n\n"
             f"--- original ---\n{body_text[:4000]}\n"
+            f"{style}"
         )
         try:
             call = await asyncio.wait_for(
@@ -2260,3 +2491,133 @@ async def retention_sweep(session: AsyncSession) -> dict:
     now = datetime.now(UTC)
     deleted = await delete_messages_past_retention(session, now=now)
     return {"deleted": deleted}
+
+
+# ---- Needs-reply list (plan Part C) ---------------------------------------
+
+
+@dataclass
+class NeedsReplyRow:
+    thread_id: str
+    mailbox: str
+    subject: str
+    from_addr: str
+    broker_name: str | None
+    intent: str
+    urgency: str
+    sent_at: datetime
+
+
+_AUTO_SUBJECT_PREFIXES = (
+    "auto-reply",
+    "auto reply",
+    "automatic reply",
+    "out of office",
+    "out-of-office",
+    "ooo:",
+)
+
+
+async def fetch_needs_reply(
+    session: AsyncSession,
+    *,
+    mailbox: str | None = None,
+    limit: int = 50,
+) -> list[NeedsReplyRow]:
+    """Threads whose newest message is INBOUND from a counterpart and that
+    we haven't replied to yet. Routine-low + auto-reply / OOO are excluded.
+
+    SQLAlchemy ORM only. The latest-message-per-thread is picked via a
+    correlated subquery (same shape as fetch_related_threads) so sqlite +
+    postgres both work."""
+    from sqlalchemy import and_, desc as _desc, func as _func, select as _select
+
+    from app.inbox.models import MailMessage as _MM, MessageInsight as _MI
+
+    # Per (mailbox, thread_id) → the latest sent_at.
+    latest_sq = (
+        _select(
+            _MM.mailbox.label("mb"),
+            _MM.thread_id.label("tid"),
+            _func.max(_MM.sent_at).label("latest_at"),
+        )
+        .group_by(_MM.mailbox, _MM.thread_id)
+    )
+    if mailbox:
+        latest_sq = latest_sq.where(_func.lower(_MM.mailbox) == mailbox.lower())
+    latest_sq = latest_sq.subquery()
+
+    # Join back to MailMessage for the latest row of each (mb, tid).
+    j = (
+        _select(
+            _MM.thread_id,
+            _MM.mailbox,
+            _MM.subject,
+            _MM.from_addr,
+            _MM.sent_at,
+            _MM.message_id,
+        )
+        .join(
+            latest_sq,
+            and_(
+                _MM.mailbox == latest_sq.c.mb,
+                _MM.thread_id == latest_sq.c.tid,
+                _MM.sent_at == latest_sq.c.latest_at,
+            ),
+        )
+        .order_by(_desc(_MM.sent_at))
+        .limit(max(1, limit) * 3)  # over-fetch; Python filters trim noise.
+    )
+    rows = (await session.execute(j)).all()
+
+    out: list[NeedsReplyRow] = []
+    seen: set[tuple[str, str]] = set()
+    for r in rows:
+        if len(out) >= limit:
+            break
+        thread_id, mb, subject, from_addr, sent_at, message_id = r
+        key = (mb, thread_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        # Must be inbound: counterpart ≠ our mailbox.
+        if (from_addr or "").strip().lower() == (mb or "").strip().lower():
+            continue
+        # Exclude our own domain (forwards within LJM shouldn't surface).
+        if (from_addr or "").strip().lower().endswith("@ljminternational.com"):
+            continue
+        # Exclude auto-reply / OOO by subject.
+        sub_lower = (subject or "").strip().lower()
+        if any(sub_lower.startswith(p) for p in _AUTO_SUBJECT_PREFIXES):
+            continue
+        if sub_lower.startswith("re: ") and any(
+            sub_lower[4:].startswith(p) for p in _AUTO_SUBJECT_PREFIXES
+        ):
+            continue
+        # Look up the matching insight (if any) for this message.
+        ins = (
+            await session.execute(
+                _select(_MI).where(
+                    _MI.mailbox == mb, _MI.message_id == message_id
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        intent = (ins.intent if ins else "routine") or "routine"
+        urgency = (ins.urgency if ins else "normal") or "normal"
+        broker_name = ins.broker_name if ins else None
+        # Routine-low = noise.
+        if intent == "routine" and urgency == "low":
+            continue
+        out.append(
+            NeedsReplyRow(
+                thread_id=thread_id,
+                mailbox=mb,
+                subject=subject or "",
+                from_addr=from_addr or "",
+                broker_name=broker_name,
+                intent=intent,
+                urgency=urgency,
+                sent_at=sent_at,
+            )
+        )
+    return out
