@@ -16,6 +16,18 @@ import * as inbox from "./inbox"
 
 export type SendResult = { ok: boolean; mode?: string; messageId?: string; threadId?: string; reason?: string }
 
+/** Plain-words explanation for the `reason` codes the send endpoints return with `ok:false`. */
+const SEND_FAILURE_TEXT: Record<string, string> = {
+  no_footer: "Missing company postal address (OUTREACH_POSTAL_ADDRESS) — required for sending",
+  invalid_email: "That recipient email address isn't valid",
+  thread_not_found: "This conversation no longer exists",
+}
+
+export function describeSendFailure(reason?: string | null): string {
+  if (!reason) return "Send failed (no reason given)"
+  return SEND_FAILURE_TEXT[reason] ?? reason
+}
+
 export type SendSingleIn = {
   to: string
   subject: string
@@ -60,7 +72,8 @@ export const singleSendAdapter: EmailSendAdapter = {
       tone: p.tone,
       purpose: p.purpose,
     })
-    return { ok: res.ok, mode: res.mode ?? undefined, messageId: res.message_id ?? undefined, threadId: res.thread_id ?? undefined }
+    return { ok: res.ok, mode: res.mode ?? undefined, messageId: res.message_id ?? undefined, threadId: res.thread_id ?? undefined,
+      reason: res.ok ? undefined : describeSendFailure(res.reason) }
   },
 }
 
@@ -78,7 +91,7 @@ export function replySendAdapter(threadId: string): EmailSendAdapter {
         ok: res.ok,
         mode: res.mode ?? undefined,
         messageId: res.message_id ?? undefined,
-        reason: res.reason ?? undefined,
+        reason: res.ok ? undefined : describeSendFailure(res.reason),
       }
     },
   }
