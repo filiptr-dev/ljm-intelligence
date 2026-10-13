@@ -22,7 +22,7 @@ import argparse
 import asyncio
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 
 from app.config import get_settings
 from app.db import create_engine, create_sessionmaker
@@ -44,19 +44,22 @@ async def _compact_once(*, dry_run: bool, batch_size: int) -> dict[str, int]:
     rows_changed = 0
     try:
         sm = create_sessionmaker(engine)
-        last_id: int | None = None
+        # MailMessage has a composite PK (mailbox, message_id) — keyset
+        # paginate on the tuple, there is no ``id`` column.
+        last_key: tuple[str, str] | None = None
         while True:
             async with uow(sm, TenantId(LJM_TENANT_ID)) as session:
-                q = select(MailMessage).order_by(MailMessage.id)
-                if last_id is not None:
-                    q = q.where(MailMessage.id > last_id)
+                pk = tuple_(MailMessage.mailbox, MailMessage.message_id)
+                q = select(MailMessage).order_by(MailMessage.mailbox, MailMessage.message_id)
+                if last_key is not None:
+                    q = q.where(pk > tuple_(*last_key))
                 q = q.limit(batch_size)
                 rows = (await session.execute(q)).scalars().all()
                 if not rows:
                     break
                 for row in rows:
                     rows_seen += 1
-                    last_id = row.id
+                    last_key = (row.mailbox, row.message_id)
                     before_text = row.body_text or ""
                     before_html = row.body_html or ""
                     text_clean, html_clean = compact_bodies(before_text, before_html)
