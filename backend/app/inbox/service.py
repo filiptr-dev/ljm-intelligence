@@ -2016,7 +2016,7 @@ async def send_new_email(
 ) -> dict:
     """Compose + send a brand-new outbound message (no thread parent).
 
-    New thread id = new UUID. The sender adapter resolves per the owner
+    New thread id = Gmail's threadId on a real send, else a synthetic UUID. The sender adapter resolves per the owner
     switch, same as reply.
     """
     from app.integrations.adapters.email.sender import get_mail_sender
@@ -2033,10 +2033,17 @@ async def send_new_email(
     mode = await effective_mode(session, settings)
     sender = get_mail_sender(settings, mode_override=mode)
     mailbox = settings.outreach_from_email
-    thread_id = f"t-{uuid4().hex[:16]}"
     result = await sender.send(
         to=to, subject=subject, body=final_text, body_html=final_html,
         thread_id=None, from_addr=mailbox, headers=send_headers,
+    )
+    # A real Gmail send returns Gmail's own threadId. Store the mail under it so
+    # the recipient's reply (imported by the sync under that same id) lands in
+    # this conversation. The synthetic id is only for simulated/failed sends.
+    thread_id = (
+        result.thread_id
+        if result.mode == "real" and result.thread_id
+        else f"t-{uuid4().hex[:16]}"
     )
     new_msg_id = result.message_id or f"local-{uuid4().hex[:16]}"
     now = datetime.now(UTC)
