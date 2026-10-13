@@ -20,6 +20,8 @@ import app.models  # register all tables with Base.metadata
 from app.db import Base
 from app.inbox import notifications_service as nsvc, service as inbox_svc
 from app.inbox.models import MailCursor, MailMessage, Notification
+from app.shared.orm import LJM_TENANT_ID
+from app.shared.tenant import TenantId, reset_tenant, set_tenant
 
 _ = app.models  # keep import for side-effect
 from app.integrations.adapters.email.ingest import (
@@ -163,15 +165,64 @@ async def test_notification_failure_does_not_break_upsert(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_mark_read_and_all() -> None:
-    async with await _fresh_session() as s:
-        s.add(Notification(kind="urgent_email", title="x"))
-        s.add(Notification(kind="broker_reply", title="y"))
-        await s.commit()
-        assert await nsvc.count_unread(s) == 2
-        changed = await nsvc.mark_all_read(s)
-        assert changed == 2
-        await s.commit()
-        assert await nsvc.count_unread(s) == 0
+    # notifications_service reads/writes are tenant-scoped — bind the LJM
+    # tenant so the server_default-stamped rows match the service's filter.
+    set_tenant(TenantId(LJM_TENANT_ID))
+    try:
+        async with await _fresh_session() as s:
+            s.add(Notification(kind="urgent_email", title="x"))
+            s.add(Notification(kind="broker_reply", title="y"))
+            await s.commit()
+            assert await nsvc.count_unread(s) == 2
+            changed = await nsvc.mark_all_read(s)
+            assert changed == 2
+            await s.commit()
+            assert await nsvc.count_unread(s) == 0
+    finally:
+        reset_tenant()
+
+
+@pytest.mark.asyncio
+async def test_notifications_scoped_by_tenant() -> None:
+    """A notification owned by tenant A must be invisible to tenant B."""
+    tenant_a = TenantId("01AAAAAAAAAAAAAAAAAAAAAAAA")
+    tenant_b = TenantId("01BBBBBBBBBBBBBBBBBBBBBBBB")
+    try:
+        async with await _fresh_session() as s:
+            # Explicit tenant_id (bypasses the before_insert stamp).
+            s.add(Notification(tenant_id=tenant_a, kind="urgent_email", title="A1"))
+            s.add(Notification(tenant_id=tenant_a, kind="broker_reply", title="A2"))
+            s.add(Notification(tenant_id=tenant_b, kind="urgent_email", title="B1"))
+            await s.commit()
+
+            set_tenant(tenant_a)
+            assert await nsvc.count_unread(s) == 2
+            items_a = await nsvc.list_items(s)
+            assert {row["title"] for row in items_a} == {"A1", "A2"}
+
+            set_tenant(tenant_b)
+            assert await nsvc.count_unread(s) == 1
+            items_b = await nsvc.list_items(s)
+            assert {row["title"] for row in items_b} == {"B1"}
+            # mark_all_read must only touch B's row.
+            changed = await nsvc.mark_all_read(s)
+            await s.commit()
+            assert changed == 1
+
+            set_tenant(tenant_a)
+            # A's two rows are still unread.
+            assert await nsvc.count_unread(s) == 2
+
+            # mark_read on an A id while scoped to B must be a no-op.
+            a_id = (
+                await s.execute(
+                    select(Notification.id).where(Notification.tenant_id == tenant_a).limit(1)
+                )
+            ).scalar_one()
+            set_tenant(tenant_b)
+            assert await nsvc.mark_read(s, int(a_id)) is False
+    finally:
+        reset_tenant()
 
 
 # ---- Task 2: counterpart threads ------------------------------------------
