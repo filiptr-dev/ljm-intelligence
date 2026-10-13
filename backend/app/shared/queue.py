@@ -77,7 +77,24 @@ def _connector_from_settings(settings: Settings | None = None) -> PsycopgConnect
 
 # Build the App lazily so test-time imports of this module don't open a DB
 # connection. The connector attaches on first open.
-app: App = App(connector=_connector_from_settings(), import_paths=IMPORT_PATHS)
+#
+# ``periodic_defaults.max_delay`` extends the "backfill if previous slot
+# was overdue by less than this" window from procrastinate's 10-minute
+# default to 24 hours. Why: our fixed-hour periodics (03:00/03:30/06:00/
+# 19:00/19:05/20:00 UTC) must *always* fire once per day, even when the
+# worker is restarted after their slot. The default 10-minute window
+# silently skips any daily cron whose slot was more than 10 min before
+# the deferrer wakes — exactly the "crons not firing after restart" bug.
+# With 86400 s, a daily slot still inside the past 24 h is backfilled on
+# the next wake; sub-hourly crons (``*/15`` mail, ``0 *`` loads) are
+# unaffected because their prev slot is always well inside the window.
+# Weekly ``diesel_refresh_weekly`` (Mondays 10:00) intentionally stays
+# bounded by 24 h — a Monday missed by > 1 day waits for next Monday.
+app: App = App(
+    connector=_connector_from_settings(),
+    import_paths=IMPORT_PATHS,
+    periodic_defaults={"max_delay": 86400.0},
+)
 
 
 def _is_postgres() -> bool:
