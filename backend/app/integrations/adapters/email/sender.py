@@ -192,7 +192,18 @@ def get_mail_sender(settings: Settings, mode_override: str | None = None) -> Mai
         )
         return SimulatedSender()
     scopes = list(settings.gmail.scopes_send)
-    impersonate = resolve_impersonate(settings) or settings.gmail.impersonate
+    # ONE env var — OUTREACH_FROM_EMAIL — is the sending mailbox: the Gmail
+    # service-account impersonates it for the SMTP call AND it is the From
+    # header. Having two different mailboxes (impersonate=contact@, From=safety@)
+    # makes Gmail silently rewrite From unless an alias exists; brokers then see
+    # a mismatch between the person they emailed and the person emailing them.
+    # Reading mail is intentionally untouched — GMAIL_IMPERSONATE / vault still
+    # drive the directory list / mailbox discovery (see mailbox.py).
+    impersonate = (
+        (getattr(settings, "outreach_from_email", "") or "").strip()
+        or resolve_impersonate(settings)
+        or settings.gmail.impersonate
+    )
     creds = build_delegated_credentials(sa, impersonate, scopes)
     ok, reason = test_refresh(creds)
     if not ok:

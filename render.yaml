@@ -126,6 +126,12 @@ services:
       # Demo safety net — flip to false only when real send is deliberately enabled.
       - key: SIMULATED_DELIVERY
         value: "true"
+      # The mailbox brokers see emails from. Also the identity the Gmail
+      # service-account impersonates when sending — so it MUST be a real
+      # Workspace user covered by domain-wide delegation (DWD). If this
+      # doesn't match a DWD-authorised subject, Gmail silently rewrites
+      # From to the DWD subject and the broker sees a mismatch.
+      # (Reading mail is a separate concern — see GMAIL_IMPERSONATE below.)
       - key: OUTREACH_FROM_EMAIL
         value: safety@ljminternational.com
       - key: OUTREACH_FROM_NAME
@@ -170,6 +176,9 @@ services:
         value: "false"
       - key: GMAIL_SA_JSON
         sync: false
+      # The mailbox the ingest worker READS from (and the fallback target
+      # for admin directory listing). Sending is driven by
+      # OUTREACH_FROM_EMAIL above — do not conflate the two.
       - key: GMAIL_IMPERSONATE
         value: contact@ljminternational.com
       - key: GMAIL_ADMIN_IMPERSONATE
