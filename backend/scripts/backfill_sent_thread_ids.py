@@ -98,8 +98,20 @@ async def _main(dry_run: bool) -> None:
                         )
                     )
                 ).scalars().first()
+                # A reply may already be imported under Gmail's thread: then the
+                # thread is answered and the stale tracker must go, not move.
+                replied = (
+                    await session.execute(
+                        select(MailMessage.message_id).where(
+                            MailMessage.mailbox == m.mailbox,
+                            MailMessage.thread_id == new,
+                            MailMessage.from_addr != m.mailbox,
+                            MailMessage.sent_at > m.sent_at,
+                        ).limit(1)
+                    )
+                ).first()
                 for t in trackers:
-                    if clash is not None:
+                    if clash is not None or replied is not None:
                         await session.delete(t)  # unique (mailbox, thread_id)
                     else:
                         t.thread_id = new
