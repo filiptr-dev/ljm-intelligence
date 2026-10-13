@@ -164,14 +164,21 @@ def _build_prompt(msgs: list[MailMessage], insights: dict[tuple[str, str], Messa
     )
 
 
-async def get_lead_summary(
-    session: AsyncSession,
-    lead_id: str,
-    *,
-    provider: Any | None,
-    resolve_error: str | None = None,
-    refresh: bool = False,
-) -> LeadSummaryResult:
+async def resolve_lead_match_identity(
+    session: AsyncSession, lead_id: str,
+) -> tuple[set[str], set[str]]:
+    """Return the (emails, domains) set used to match a lead's mail.
+
+    Shared helper so sibling features that need "find mail belonging to
+    this broker" (lead summary, "Draft this" latest-thread lookup) use the
+    exact same identity rules — primary + contact emails, non-free-mail
+    domains, and the ambiguity filter that drops addresses/domains claimed
+    by another lead.
+
+    Raises :class:`LeadNotFound` when ``lead_id`` is unknown. Returns two
+    empty sets when the lead exists but has no non-ambiguous identifiers;
+    callers should treat that as "no mail attributable to this broker".
+    """
     lead = (await session.execute(select(Lead).where(Lead.id == lead_id))).scalar_one_or_none()
     if lead is None:
         raise LeadNotFound(lead_id)
@@ -187,7 +194,7 @@ async def get_lead_summary(
     # ``alice@acme.com`` still matches ``ops@acme.com`` even if we never
     # recorded that contact. ``lead.domain`` seeds the set so a lead with
     # only a gmail primary but a stamped company domain still matches real
-    # threads. See the plan § "Honest `/analysis/lead/{id}` empty states".
+    # threads.
     domains: set[str] = set()
     for e in emails:
         d = _domain_of(e)
@@ -197,12 +204,11 @@ async def get_lead_summary(
     if ld and ld not in FREE_MAIL_DOMAINS:
         domains.add(ld)
     if not emails and not domains:
-        return LeadSummaryResult(status="empty")
+        return (set(), set())
 
     # An address shared with another lead (primary or contact) is ambiguous:
     # its mail can't be attributed to one broker, so exclude it rather than
-    # leak one lead's correspondence into another's summary.
-    shared: set[str] = set()
+    # leak one lead's correspondence into another's summary / draft lookup.
     other_primary = (
         await session.execute(
             select(Lead.primary_email).where(Lead.id != lead_id, func.lower(Lead.primary_email).in_(sorted(emails)))
@@ -218,9 +224,7 @@ async def get_lead_summary(
     shared = {e.strip().lower() for e in [*other_primary, *other_contact] if e}
     emails -= shared
     # Same for domains: a corporate domain pointed at by another lead can't
-    # be exclusively attributed, so drop it from the match set. This keeps
-    # the "never leak thread content across brokers" guard honest when we
-    # widen matching from address to domain.
+    # be exclusively attributed, so drop it from the match set.
     if domains:
         shared_domains_rows = (
             await session.execute(
@@ -231,6 +235,18 @@ async def get_lead_summary(
             )
         ).scalars().all()
         domains -= {(d or "").strip().lower() for d in shared_domains_rows if d}
+    return (emails, domains)
+
+
+async def get_lead_summary(
+    session: AsyncSession,
+    lead_id: str,
+    *,
+    provider: Any | None,
+    resolve_error: str | None = None,
+    refresh: bool = False,
+) -> LeadSummaryResult:
+    emails, domains = await resolve_lead_match_identity(session, lead_id)
     if not emails and not domains:
         return LeadSummaryResult(status="empty")
 
